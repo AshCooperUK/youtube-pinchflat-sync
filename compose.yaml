@@ -49,7 +49,7 @@ services:
       GOOGLE_CLIENT_SECRET: ""
       GOOGLE_REDIRECT_URI: ""
       YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube.readonly
-      PINCHFLAT_URL: http://pinchflat:8945
+      PINCHFLAT_URL: http://butane.grovefarm:8945
       PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
       PINCHFLAT_MEDIA_PROFILE_ID: "1"
       PINCHFLAT_BASIC_AUTH_USERNAME: ""
