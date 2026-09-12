@@ -1,0 +1,130 @@
+name: youtube-pinchflat-sync
+
+services:
+  pinchflat:
+    image: ghcr.io/kieraneglin/pinchflat:latest
+    container_name: pinchflat
+    restart: unless-stopped
+    environment:
+      TZ: Europe/London
+      LOG_LEVEL: info
+      UMASK: "022"
+    ports:
+      - target: 8945
+        published: "8945"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /media/NVME-Storage/AppData/pinchflat
+        target: /config
+      - type: bind
+        source: /media/Storage/Media/YouTube
+        target: /downloads
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
+    x-casaos:
+      ports:
+        - container: "8945"
+          description:
+            en_US: Pinchflat web interface
+      volumes:
+        - container: /config
+          description:
+            en_US: Pinchflat configuration and database
+        - container: /downloads
+          description:
+            en_US: YouTube download library
+
+  youtube-sync:
+    image: ghcr.io/ashcooperuk/youtube-pinchflat-sync:latest
+    container_name: youtube-pinchflat-sync
+    restart: unless-stopped
+    depends_on:
+      - pinchflat
+    environment:
+      TZ: Europe/London
+      DATA_DIR: /data
+      APP_URL: ""
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      GOOGLE_REDIRECT_URI: ""
+      YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube.readonly
+      PINCHFLAT_URL: http://pinchflat:8945
+      PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
+      PINCHFLAT_MEDIA_PROFILE_ID: "1"
+      PINCHFLAT_BASIC_AUTH_USERNAME: ""
+      PINCHFLAT_BASIC_AUTH_PASSWORD: ""
+      SYNC_INTERVAL_MINUTES: "60"
+      INITIAL_IMPORT_CUTOFF: today
+      INITIAL_IMPORT_YEARS: "1"
+      INITIAL_IMPORT_CUSTOM_DATE: ""
+      MAX_NEW_SOURCES_PER_RUN: "0"
+      ADD_DELAY_SECONDS: "2"
+      DRY_RUN: "false"
+    ports:
+      - target: 8787
+        published: "8787"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /media/NVME-Storage/AppData/youtube-pinchflat-sync/data
+        target: /data
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
+    x-casaos:
+      ports:
+        - container: "8787"
+          description:
+            en_US: YouTube Pinchflat Sync dashboard
+      volumes:
+        - container: /data
+          description:
+            en_US: OAuth token, settings and subscription database
+      envs:
+        - container: TZ
+          description:
+            en_US: Time zone
+        - container: PINCHFLAT_URL
+          description:
+            en_US: Internal Pinchflat URL
+        - container: PINCHFLAT_PUBLIC_URL
+          description:
+            en_US: Browser URL used by the Open Pinchflat button
+        - container: SYNC_INTERVAL_MINUTES
+          description:
+            en_US: Automatic subscription sync interval in minutes
+        - container: MAX_NEW_SOURCES_PER_RUN
+          description:
+            en_US: Maximum new Pinchflat sources per run. 0 means unlimited
+        - container: DRY_RUN
+          description:
+            en_US: Set true to preview without creating Pinchflat sources
+
+x-casaos:
+  id: uk.ashjohn.youtube-pinchflat-sync
+  store_app_id: youtube-pinchflat-sync
+  main: youtube-sync
+  index: /
+  port_map: "8787"
+  scheme: http
+  icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
+  title:
+    en_US: YouTube Pinchflat Sync
+  tagline:
+    en_US: Sync your YouTube subscriptions into Pinchflat automatically.
+  description:
+    en_US: Reads your YouTube subscriptions with Google OAuth, creates Pinchflat sources and lets you choose how far back Pinchflat should download videos.
+  author: AshCooperUK
+  developer: AshCooperUK
+  category: Media
+  architectures:
+    - amd64
+    - arm64
+  version: "1.1.0"
+  update_at: "2026-09-13"
+  release_notes:
+    en_US: Adds ZimaOS tile metadata, GitHub container publishing and dashboard-based download history selection.
+  website: https://github.com/AshCooperUK/youtube-pinchflat-sync
+  repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
+  support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
+  docs: https://github.com/AshCooperUK/youtube-pinchflat-sync#readme

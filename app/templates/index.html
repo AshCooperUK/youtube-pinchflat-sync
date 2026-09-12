@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>YouTube → Pinchflat Sync</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0b1220; color: #e5e7eb; }
+    .wrap { max-width: 1250px; margin: 0 auto; padding: 28px 20px 50px; }
+    .header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+    h1 { margin: 0 0 6px; font-size: 29px; }
+    h2 { margin: 0 0 14px; font-size: 19px; }
+    .muted { color: #94a3b8; }
+    .small { font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 14px; margin: 22px 0; }
+    .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; margin: 14px 0; }
+    .card { background: #111827; border: 1px solid #263244; border-radius: 14px; padding: 17px; }
+    .ok { color: #86efac; }
+    .bad { color: #fca5a5; }
+    .warn { color: #fde68a; }
+    .btn {
+      display: inline-block;
+      background: #2563eb;
+      border: 0;
+      padding: 10px 14px;
+      border-radius: 9px;
+      text-decoration: none;
+      cursor: pointer;
+      color: #fff;
+      font-weight: 600;
+    }
+    .btn.secondary { background: #334155; }
+    .btn.danger { background: #991b1b; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input, select {
+      width: 100%;
+      background: #0b1220;
+      color: #e5e7eb;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 5px;
+    }
+    label { display: block; margin: 10px 0; font-size: 14px; }
+    code {
+      display: inline-block;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      background: #0b1220;
+      padding: 3px 6px;
+      border-radius: 5px;
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #263244; vertical-align: top; }
+    th { color: #94a3b8; font-size: 13px; }
+    .flash { padding: 12px 14px; border-radius: 9px; margin: 13px 0; background: #334155; }
+    .flash.error { background: #7f1d1d; }
+    .flash.success { background: #14532d; }
+    .cutoff { font-size: 28px; font-weight: 700; margin: 6px 0; }
+    .hidden { display: none; }
+    details summary { cursor: pointer; font-weight: 700; }
+    @media (max-width: 650px) {
+      .header { display: block; }
+      table { font-size: 13px; }
+      th, td { padding: 8px 5px; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1>YouTube → Pinchflat Sync</h1>
+      <div class="muted">Automatic YouTube subscription importer</div>
+    </div>
+    <div class="muted small">v{{ version }}</div>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="grid">
+    <div class="card">
+      <strong>Google</strong><br>
+      {% if google_connected %}
+        <span class="ok">Connected</span>
+      {% elif google_configured %}
+        <span class="warn">Configured, not connected</span><br><br>
+        <a class="btn" href="/oauth/google/login">Connect Google</a>
+      {% else %}
+        <span class="bad">Not configured</span>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <strong>Pinchflat</strong><br>
+      {% if pinchflat_online %}
+        <span class="ok">Online</span>
+      {% else %}
+        <span class="bad">Offline</span>
+      {% endif %}
+      <br><br>
+      <a class="btn secondary" href="{{ pinchflat_public_url }}" target="_blank">Open Pinchflat</a>
+    </div>
+
+    <div class="card">
+      <strong>Download history</strong>
+      <div class="cutoff">{{ history_label }}</div>
+      <div class="muted small">Pinchflat cutoff: {{ history_cutoff }}</div>
+    </div>
+
+    <div class="card">
+      <strong>Schedule</strong><br>
+      Every {{ interval }} minutes
+      {% if dry_run %}<br><span class="warn">DRY RUN enabled</span>{% endif %}
+      <br><br>
+      {% if last_run %}
+        <span class="muted small">Last: {{ last_run["status"] }} · {{ last_run["message"] }}</span>
+      {% else %}
+        <span class="muted small">No sync has run yet.</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card">
+      <h2>Download history</h2>
+      <p class="muted small">
+        This maps directly to Pinchflat's download cutoff date for each new source.
+        The range runs from the selected cutoff up to today.
+      </p>
+
+      <form method="post" action="/settings/history">
+        <label>
+          Download videos from
+          <select name="history_mode" id="history_mode" onchange="toggleHistoryFields()">
+            <option value="today" {% if history_mode == "today" %}selected{% endif %}>Today</option>
+            <option value="this_week" {% if history_mode == "this_week" %}selected{% endif %}>This week</option>
+            <option value="this_month" {% if history_mode == "this_month" %}selected{% endif %}>This month</option>
+            <option value="six_months" {% if history_mode == "six_months" %}selected{% endif %}>Last 6 months</option>
+            <option value="last_year" {% if history_mode == "last_year" %}selected{% endif %}>Last year</option>
+            <option value="years_back" {% if history_mode == "years_back" %}selected{% endif %}>Choose a year range</option>
+            <option value="custom_date" {% if history_mode == "custom_date" %}selected{% endif %}>Custom date</option>
+            <option value="subscription_date" {% if history_mode == "subscription_date" %}selected{% endif %}>Original subscription date</option>
+          </select>
+        </label>
+
+        <div id="years_field">
+          <label>
+            Years back
+            <select name="history_years">
+              {% for y in range(1, 11) %}
+                <option value="{{ y }}" {% if history_years == y %}selected{% endif %}>
+                  {{ y }} year{% if y != 1 %}s{% endif %} ago → today
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+
+        <div id="custom_date_field">
+          <label>
+            Start date
+            <input type="date" name="history_custom_date" value="{{ history_custom_date }}">
+          </label>
+        </div>
+
+        <div class="actions">
+          <button class="btn" type="submit">Save download range</button>
+        </div>
+      </form>
+
+      <p class="muted small">
+        The selected cutoff is used when a new YouTube channel is created in Pinchflat.
+        Existing Pinchflat sources keep their current cutoff.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Configuration</h2>
+      <form method="post" action="/settings/configuration">
+        <label>
+          Public dashboard URL
+          <input type="url" name="app_url" value="{{ app_url }}" placeholder="https://youtube.example.com">
+        </label>
+
+        <label>
+          Google OAuth Client ID
+          <input type="text" name="google_client_id" placeholder="xxxxxxxx.apps.googleusercontent.com">
+        </label>
+
+        <label>
+          Google OAuth Client Secret
+          <input type="password" name="google_client_secret" placeholder="Leave blank to keep the saved secret">
+        </label>
+
+        <label>
+          Pinchflat Media Profile ID
+          <input type="number" min="1" name="pinchflat_media_profile_id" value="{{ media_profile_id }}">
+        </label>
+
+        <button class="btn" type="submit">Save configuration</button>
+      </form>
+
+      <p class="muted small">
+        Google authorised redirect URI:
+        <br><code>{{ callback_uri if callback_uri else "Set the public dashboard URL first" }}</code>
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="actions">
+      <form method="post" action="/sync">
+        <button class="btn" type="submit" {% if not google_connected %}disabled{% endif %}>Sync now</button>
+      </form>
+
+      {% if google_connected %}
+      <form method="post" action="/oauth/google/disconnect">
+        <button class="btn secondary" type="submit">Disconnect Google</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Subscriptions</h2>
+    {% if subs %}
+    <table>
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>Active</th>
+          <th>Pinchflat</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for sub in subs %}
+        <tr>
+          <td><a href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a></td>
+          <td>{{ "Yes" if sub["active"] else "No" }}</td>
+          <td>{{ "Added" if sub["pinchflat_added"] else "Pending" }}</td>
+          <td class="bad">{{ sub["last_error"] or "" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <span class="muted">Connect Google, choose your download history, then run the first sync.</span>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function toggleHistoryFields() {
+  const mode = document.getElementById("history_mode").value;
+  document.getElementById("years_field").classList.toggle("hidden", mode !== "years_back");
+  document.getElementById("custom_date_field").classList.toggle("hidden", mode !== "custom_date");
+}
+toggleHistoryFields();
+</script>
+</body>
+</html>

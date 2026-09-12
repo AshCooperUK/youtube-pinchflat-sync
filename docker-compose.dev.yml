@@ -1,0 +1,30 @@
+name: youtube-pinchflat-sync-dev
+
+services:
+  pinchflat:
+    image: ghcr.io/kieraneglin/pinchflat:latest
+    container_name: pinchflat
+    restart: unless-stopped
+    environment:
+      TZ: Europe/London
+    ports:
+      - "8945:8945"
+    volumes:
+      - /media/NVME-Storage/AppData/pinchflat:/config
+      - /media/Storage/Media/YouTube:/downloads
+
+  youtube-sync:
+    build:
+      context: ./app
+    container_name: youtube-pinchflat-sync
+    restart: unless-stopped
+    depends_on:
+      - pinchflat
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+    ports:
+      - "8787:8787"
+    volumes:
+      - /media/NVME-Storage/AppData/youtube-pinchflat-sync/data:/data
