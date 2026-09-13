@@ -253,6 +253,110 @@
       font-size:12px;
       margin-top:2px;
     }
+
+    .home-shorts-shelf {
+      grid-column:1 / -1;
+      margin:4px 0 8px;
+      padding:18px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:rgba(255,255,255,.018);
+    }
+    .home-shorts-head {
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:14px;
+    }
+    .home-shorts-head h3 {
+      margin:0;
+      font-size:20px;
+    }
+    .home-shorts-grid {
+      display:grid;
+      grid-template-columns:repeat(8,minmax(0,1fr));
+      gap:12px;
+    }
+    .home-short-card {
+      min-width:0;
+      cursor:pointer;
+    }
+    .home-short-thumb-wrap {
+      position:relative;
+      width:100%;
+      aspect-ratio:9/16;
+      overflow:hidden;
+      border-radius:12px;
+      background:#050a12;
+      border:1px solid var(--line);
+    }
+    .home-short-thumb {
+      width:100%;
+      height:100%;
+      display:block;
+      object-fit:cover;
+    }
+    .home-short-heart {
+      position:absolute;
+      top:8px;
+      right:8px;
+      z-index:2;
+      width:34px;
+      height:34px;
+      display:grid;
+      place-items:center;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.30);
+      background:rgba(4,10,18,.84);
+      color:#fff;
+      font-size:19px;
+      cursor:pointer;
+    }
+    .home-short-heart.active {
+      color:#ff4f81;
+      border-color:#ff4f81;
+      background:rgba(44,8,23,.92);
+    }
+    .home-short-duration {
+      position:absolute;
+      right:7px;
+      bottom:7px;
+      padding:3px 6px;
+      border-radius:5px;
+      background:rgba(0,0,0,.82);
+      color:#fff;
+      font-size:11px;
+      font-weight:800;
+    }
+    .home-short-title {
+      margin-top:8px;
+      color:var(--text);
+      font-weight:800;
+      font-size:13px;
+      line-height:1.3;
+      display:-webkit-box;
+      -webkit-box-orient:vertical;
+      -webkit-line-clamp:2;
+      overflow:hidden;
+    }
+    .home-short-channel {
+      margin-top:4px;
+      color:var(--muted);
+      font-size:12px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    @media (max-width:1300px) {
+      .home-shorts-grid { grid-template-columns:repeat(6,minmax(0,1fr)); }
+    }
+    @media (max-width:900px) {
+      .home-shorts-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    }
+    @media (max-width:600px) {
+      .home-shorts-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
     .latest-videos-status {
       min-height:22px;
       color:var(--muted);
@@ -296,6 +400,15 @@
       width:100%;
       height:100%;
       border:0;
+    }
+    .latest-popup-shell.short-mode {
+      grid-template-columns:minmax(280px,360px) minmax(300px,1fr);
+      justify-content:center;
+    }
+    .latest-popup-shell.short-mode .latest-popup-player {
+      aspect-ratio:9/16;
+      max-height:70vh;
+      justify-self:center;
     }
     .latest-popup-info {
       padding:18px;
@@ -604,7 +717,8 @@
         <h2>Latest from your subscriptions</h2>
         <div class="muted small">
           The latest 36 videos across all channels you currently subscribe to.
-          There is no date window. Click a video to play it here. The heart favourites the channel.
+          After the first two rows you will also see the latest Shorts from your subscriptions.
+          Click any video or Short to play it here. The heart favourites the channel.
         </div>
       </div>
       <div class="actions">
@@ -1644,6 +1758,7 @@ const listPickerDialog = document.getElementById("list-picker-dialog");
 const latestVideoDialog = document.getElementById("latest-video-dialog");
 let singleDownloadTimer = null;
 let latestSubscriptionVideos = [];
+let latestSubscriptionShorts = [];
 let latestPopupVideo = null;
 let discoverMode = "videos";
 let discoverResults = {videos: [], shorts: [], top100: []};
@@ -1724,6 +1839,9 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
     discoverResults.shorts.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     discoverResults.top100.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     latestSubscriptionVideos.forEach(item => {
+      if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
+    });
+    latestSubscriptionShorts.forEach(item => {
       if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     });
     if (latestPopupVideo?.channel_id === channelId) {
@@ -1868,6 +1986,7 @@ function openLatestVideo(item) {
   latestPopupVideo = item;
 
   const player = document.getElementById("latest-video-player");
+  const popupShell = document.querySelector("#latest-video-dialog .latest-popup-shell");
   const headerChannel = document.getElementById("latest-popup-header-channel");
   const headerVideo = document.getElementById("latest-popup-header-video");
   const channel = document.getElementById("latest-popup-channel");
@@ -1876,6 +1995,13 @@ function openLatestVideo(item) {
   const stats = document.getElementById("latest-popup-stats");
   const description = document.getElementById("latest-popup-description");
   const youtubeLink = document.getElementById("latest-popup-youtube-link");
+
+  if (popupShell) {
+    popupShell.classList.toggle(
+      "short-mode",
+      !!item.is_short
+    );
+  }
 
   const origin = encodeURIComponent(window.location.origin);
   const widgetReferrer = encodeURIComponent(window.location.href);
@@ -1910,7 +2036,10 @@ function openLatestVideo(item) {
   description.textContent =
     item.description || "No description provided for this video.";
 
-  youtubeLink.href = item.video_url || "https://www.youtube.com";
+  youtubeLink.href =
+    (item.is_short ? item.shorts_url : item.video_url)
+    || item.video_url
+    || "https://www.youtube.com";
 
   updateLatestPopupButtons();
 
@@ -1957,8 +2086,131 @@ function likeLatestPopupOnYouTube() {
 }
 
 
-function renderLatestSubscriptionVideos(items) {
+function latestVideoColumnsForViewport() {
+  if (window.innerWidth <= 520) return 1;
+  if (window.innerWidth <= 820) return 2;
+  if (window.innerWidth <= 1180) return 3;
+  return 4;
+}
+
+function latestVideosBeforeShortsShelf() {
+  return latestVideoColumnsForViewport() * 2;
+}
+
+function homeShortChannelHeart(item) {
+  const heart = document.createElement("button");
+  heart.type = "button";
+  heart.className =
+    `home-short-heart ${item.is_favourite_channel ? "active" : ""}`;
+  heart.dataset.channelId = item.channel_id || "";
+  heart.textContent = item.is_favourite_channel ? "♥" : "♡";
+  heart.title = item.is_favourite_channel
+    ? `Remove ${item.channel_title} from favourite channels`
+    : `Add ${item.channel_title} to favourite channels`;
+
+  heart.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    toggleChannelFavourite(
+      heart,
+      item.channel_id || "",
+      item.channel_title || "YouTube channel",
+      item.channel_url || "",
+      item.channel_thumbnail_url || ""
+    );
+  });
+
+  return heart;
+}
+
+function buildHomeShortsShelf(items) {
+  if (!items?.length) return null;
+
+  const shelf = document.createElement("section");
+  shelf.className = "home-shorts-shelf";
+
+  const head = document.createElement("div");
+  head.className = "home-shorts-head";
+
+  const heading = document.createElement("div");
+  const title = document.createElement("h3");
+  title.textContent = "Shorts from your subscriptions";
+
+  const sub = document.createElement("div");
+  sub.className = "muted small";
+  sub.textContent =
+    "The newest short-form uploads found from channels you subscribe to.";
+
+  heading.append(title, sub);
+  head.appendChild(heading);
+
+  const shortsGrid = document.createElement("div");
+  shortsGrid.className = "home-shorts-grid";
+
+  items.forEach(item => {
+    const card = document.createElement("article");
+    card.className = "home-short-card";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.title = item.title || "Play Short";
+
+    const thumbWrap = document.createElement("div");
+    thumbWrap.className = "home-short-thumb-wrap";
+
+    const thumb = document.createElement("img");
+    thumb.className = "home-short-thumb";
+    thumb.src =
+      item.thumbnail_url ||
+      "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    thumb.alt = item.title || "YouTube Short";
+    thumb.loading = "lazy";
+    thumb.referrerPolicy = "no-referrer";
+
+    thumbWrap.appendChild(thumb);
+    thumbWrap.appendChild(homeShortChannelHeart(item));
+
+    if (item.duration) {
+      const duration = document.createElement("span");
+      duration.className = "home-short-duration";
+      duration.textContent = item.duration;
+      thumbWrap.appendChild(duration);
+    }
+
+    const shortTitle = document.createElement("div");
+    shortTitle.className = "home-short-title";
+    shortTitle.textContent = item.title || "YouTube Short";
+
+    const channel = document.createElement("div");
+    channel.className = "home-short-channel";
+    channel.textContent = item.channel_title || "YouTube channel";
+
+    card.append(thumbWrap, shortTitle, channel);
+
+    card.addEventListener("click", event => {
+      if (event.target.closest(".home-short-heart")) return;
+      openLatestVideo(item);
+    });
+
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openLatestVideo(item);
+      }
+    });
+
+    shortsGrid.appendChild(card);
+  });
+
+  shelf.append(head, shortsGrid);
+  return shelf;
+}
+
+
+function renderLatestSubscriptionVideos(items, shorts=latestSubscriptionShorts) {
   latestSubscriptionVideos = items || [];
+  latestSubscriptionShorts = shorts || [];
+
   const grid = document.getElementById("latest-videos-grid");
   const status = document.getElementById("latest-videos-status");
 
@@ -1966,7 +2218,7 @@ function renderLatestSubscriptionVideos(items) {
 
   grid.replaceChildren();
 
-  if (!items.length) {
+  if (!items.length && !latestSubscriptionShorts.length) {
     status.textContent =
       "No subscription videos were returned by YouTube.";
     return;
@@ -1974,7 +2226,12 @@ function renderLatestSubscriptionVideos(items) {
 
   status.textContent = "";
 
-  items.forEach(item => {
+  const shelfAfter = Math.min(
+    latestVideosBeforeShortsShelf(),
+    items.length
+  );
+
+  items.forEach((item, index) => {
     const card = document.createElement("article");
     card.className = "latest-video-card";
 
@@ -2064,7 +2321,24 @@ function renderLatestSubscriptionVideos(items) {
     meta.append(avatarLink, text);
     card.append(thumbLink, meta);
     grid.appendChild(card);
+
+    if (
+      index + 1 === shelfAfter
+      && latestSubscriptionShorts.length
+    ) {
+      const shelf = buildHomeShortsShelf(
+        latestSubscriptionShorts
+      );
+      if (shelf) grid.appendChild(shelf);
+    }
   });
+
+  if (!items.length && latestSubscriptionShorts.length) {
+    const shelf = buildHomeShortsShelf(
+      latestSubscriptionShorts
+    );
+    if (shelf) grid.appendChild(shelf);
+  }
 }
 
 async function loadLatestSubscriptionVideos(force=false) {
@@ -2091,7 +2365,11 @@ async function loadLatestSubscriptionVideos(force=false) {
       );
     }
 
-    renderLatestSubscriptionVideos(data.results || []);
+    latestSubscriptionShorts = data.shorts || [];
+    renderLatestSubscriptionVideos(
+      data.results || [],
+      latestSubscriptionShorts
+    );
   } catch (err) {
     grid.replaceChildren();
     status.textContent =
@@ -2100,6 +2378,23 @@ async function loadLatestSubscriptionVideos(force=false) {
     if (refresh) refresh.disabled = false;
   }
 }
+
+
+let latestShelfResizeTimer = null;
+window.addEventListener("resize", () => {
+  window.clearTimeout(latestShelfResizeTimer);
+  latestShelfResizeTimer = window.setTimeout(() => {
+    if (
+      latestSubscriptionVideos.length
+      || latestSubscriptionShorts.length
+    ) {
+      renderLatestSubscriptionVideos(
+        latestSubscriptionVideos,
+        latestSubscriptionShorts
+      );
+    }
+  }, 150);
+});
 
 
 async function openFavourites(tab="channels") {

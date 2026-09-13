@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.3.4"
+VERSION = "2.4.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -172,6 +172,7 @@ LATEST_SUBSCRIPTIONS_CACHE_SECONDS = 300
 LATEST_SUBSCRIPTIONS_CACHE = {
     "expires_at": 0.0,
     "results": [],
+    "shorts": [],
     "retrieved_at": "",
 }
 
@@ -1242,6 +1243,56 @@ def youtube_duration_label(value):
     return f"{minutes}:{seconds:02d}"
 
 
+def youtube_duration_seconds(value):
+    value = str(value or "").strip()
+    if not value:
+        return 0
+
+    match = re.fullmatch(
+        r"P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?",
+        value,
+    )
+    if not match:
+        return 0
+
+    days, hours, minutes, seconds = [
+        int(part or 0)
+        for part in match.groups()
+    ]
+
+    return (
+        (days * 86400)
+        + (hours * 3600)
+        + (minutes * 60)
+        + seconds
+    )
+
+
+def youtube_video_is_short(title, description, duration_seconds):
+    """
+    YouTube does not expose a dedicated isShort field through videos.list.
+
+    Treat videos up to 60 seconds as Shorts. Also accept videos up to three
+    minutes when the creator explicitly tags the title or description #shorts.
+    This follows YouTube's current three-minute Shorts maximum while avoiding
+    classifying every ordinary two-minute video as a Short.
+    """
+    duration_seconds = int(duration_seconds or 0)
+
+    if duration_seconds <= 0:
+        return False
+
+    if duration_seconds <= 60:
+        return True
+
+    text = f"{title or ''} {description or ''}".casefold()
+
+    return (
+        duration_seconds <= 180
+        and "#shorts" in text
+    )
+
+
 def youtube_channel_feed(channel_id, force=False):
     """
     Return recent uploads from one subscribed channel's public YouTube Atom
@@ -1359,6 +1410,7 @@ def youtube_latest_subscription_videos(limit=36, force=False):
     ):
         return {
             "results": LATEST_SUBSCRIPTIONS_CACHE["results"][:limit],
+            "shorts": LATEST_SUBSCRIPTIONS_CACHE["shorts"][:8],
             "retrieved_at": LATEST_SUBSCRIPTIONS_CACHE["retrieved_at"],
             "source": "YouTube channel feeds",
         }
@@ -1391,6 +1443,7 @@ def youtube_latest_subscription_videos(limit=36, force=False):
     if not subscriptions:
         return {
             "results": [],
+            "shorts": [],
             "retrieved_at": now_iso(),
             "source": "YouTube channel feeds",
         }
@@ -1455,16 +1508,21 @@ def youtube_latest_subscription_videos(limit=36, force=False):
         reverse=True,
     )
 
-    # Take a little more than needed before the API enrichment step in case
-    # YouTube has removed or made one of the feed entries unavailable.
+    # Enrich a larger candidate set so the home page can show both the
+    # newest normal videos and a separate Shorts shelf. videos.list accepts
+    # 50 IDs per request, so 150 candidates use three low-cost requests.
     candidate_ids = [
         item["video_id"]
-        for item in candidates[:50]
+        for item in candidates[:150]
     ]
 
     details_by_id = {}
 
-    if candidate_ids:
+    for start in range(0, len(candidate_ids), 50):
+        chunk = candidate_ids[start:start + 50]
+        if not chunk:
+            continue
+
         response = youtube_api_request(
             creds,
             "GET",
@@ -1473,7 +1531,7 @@ def youtube_latest_subscription_videos(limit=36, force=False):
             1,
             params={
                 "part": "snippet,statistics,contentDetails",
-                "id": ",".join(candidate_ids[:50]),
+                "id": ",".join(chunk),
                 "maxResults": 50,
             },
         )
@@ -1493,6 +1551,9 @@ def youtube_latest_subscription_videos(limit=36, force=False):
                 or {}
             )
 
+            raw_duration = content_details.get("duration") or ""
+            duration_seconds = youtube_duration_seconds(raw_duration)
+
             details_by_id[video_id] = {
                 "title": snippet.get("title") or "",
                 "description": snippet.get("description") or "",
@@ -1501,15 +1562,20 @@ def youtube_latest_subscription_videos(limit=36, force=False):
                 "published_at": snippet.get("publishedAt") or "",
                 "thumbnail_url": thumbnail.get("url") or "",
                 "view_count": int(statistics.get("viewCount") or 0),
-                "duration": youtube_duration_label(
-                    content_details.get("duration")
+                "duration": youtube_duration_label(raw_duration),
+                "duration_seconds": duration_seconds,
+                "is_short": youtube_video_is_short(
+                    snippet.get("title") or "",
+                    snippet.get("description") or "",
+                    duration_seconds,
                 ),
             }
 
     videos = []
+    shorts = []
 
     for candidate in candidates:
-        if len(videos) >= limit:
+        if len(videos) >= limit and len(shorts) >= 8:
             break
 
         video_id = candidate.get("video_id") or ""
@@ -1531,64 +1597,82 @@ def youtube_latest_subscription_videos(limit=36, force=False):
 
         channel = subscriptions[channel_id]
 
-        videos.append(
-            {
-                "video_id": video_id,
-                "title": (
-                    details.get("title")
-                    or candidate.get("title")
-                    or "YouTube video"
-                ),
-                "description": details.get("description") or "",
-                "video_url": (
-                    f"https://www.youtube.com/watch?v={video_id}"
-                ),
-                "channel_id": channel_id,
-                "channel_title": (
-                    details.get("channel_title")
-                    or channel["channel_title"]
-                    or "YouTube channel"
-                ),
-                "channel_url": channel["channel_url"],
-                "channel_thumbnail_url": (
-                    channel["channel_thumbnail_url"]
-                ),
-                "thumbnail_url": (
-                    details.get("thumbnail_url")
-                    or candidate.get("thumbnail_url")
-                    or ""
-                ),
-                "published_at": (
-                    details.get("published_at")
-                    or candidate.get("published_at")
-                    or ""
-                ),
-                "view_count": int(
-                    details.get("view_count") or 0
-                ),
-                "duration": details.get("duration") or "",
-            }
-        )
+        item = {
+            "video_id": video_id,
+            "title": (
+                details.get("title")
+                or candidate.get("title")
+                or "YouTube video"
+            ),
+            "description": details.get("description") or "",
+            "video_url": (
+                f"https://www.youtube.com/watch?v={video_id}"
+            ),
+            "shorts_url": (
+                f"https://www.youtube.com/shorts/{video_id}"
+            ),
+            "channel_id": channel_id,
+            "channel_title": (
+                details.get("channel_title")
+                or channel["channel_title"]
+                or "YouTube channel"
+            ),
+            "channel_url": channel["channel_url"],
+            "channel_thumbnail_url": (
+                channel["channel_thumbnail_url"]
+            ),
+            "thumbnail_url": (
+                details.get("thumbnail_url")
+                or candidate.get("thumbnail_url")
+                or ""
+            ),
+            "published_at": (
+                details.get("published_at")
+                or candidate.get("published_at")
+                or ""
+            ),
+            "view_count": int(
+                details.get("view_count") or 0
+            ),
+            "duration": details.get("duration") or "",
+            "duration_seconds": int(
+                details.get("duration_seconds") or 0
+            ),
+            "is_short": bool(details.get("is_short")),
+        }
+
+        if item["is_short"]:
+            if len(shorts) < 8:
+                shorts.append(item)
+        elif len(videos) < limit:
+            videos.append(item)
 
     # Sort once more using authoritative videos.list publication timestamps.
     videos.sort(
         key=lambda item: item.get("published_at") or "",
         reverse=True,
     )
-    videos = videos[:limit]
-    videos = annotate_favourites(videos)
+    shorts.sort(
+        key=lambda item: item.get("published_at") or "",
+        reverse=True,
+    )
+
+    videos = annotate_favourites(videos[:limit])
+    shorts = annotate_favourites(shorts[:8])
 
     retrieved_at = now_iso()
     LATEST_SUBSCRIPTIONS_CACHE.update(
         {
             "expires_at": now_ts + LATEST_SUBSCRIPTIONS_CACHE_SECONDS,
             "results": videos,
+            "shorts": shorts,
             "retrieved_at": retrieved_at,
         }
     )
 
     return {
         "results": videos,
+        "shorts": shorts,
         "retrieved_at": retrieved_at,
         "source": "YouTube channel feeds",
         "failed_channels": failed_channels,

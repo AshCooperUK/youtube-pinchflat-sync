@@ -2,6 +2,23 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.4.0
+
+Home-page Shorts shelf.
+
+- Adds a `Shorts from your subscriptions` shelf inside `Latest from your subscriptions`.
+- On a desktop four-column layout the Shorts shelf appears after the first eight normal videos, giving exactly two video rows before Shorts.
+- The insertion point adapts to the responsive layout, so Shorts still appear after two rows on three-column, two-column and one-column screens.
+- Shows up to eight of the newest detected Shorts from active subscribed channels.
+- Normal latest videos and Shorts are separated, so a detected Short is not duplicated in the standard video grid.
+- Shorts detection uses videos up to 60 seconds, plus videos up to three minutes when the creator explicitly uses `#shorts`.
+- The app enriches up to 150 recent subscription-feed candidates in batches of 50 to find enough normal videos and Shorts.
+- Clicking a home-page Short opens the existing in-app video popup.
+- The popup automatically changes to a portrait 9:16 player layout for Shorts.
+- The heart on each Short favourites the channel, matching the rest of the home page.
+- The popup keeps Favourite Video, Favourite Channel, Like on YouTube and Open on YouTube.
+- The Shorts shelf automatically moves to remain after two rows when the browser width changes.
+
 ## Version 2.3.4
 
 Random Shorts empty-player regression fix.
