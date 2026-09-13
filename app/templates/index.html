@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>YouTube → Pinchflat Sync</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
   <style>
     :root {
       color-scheme: dark;
@@ -109,7 +110,9 @@
     .approve-state { min-width:116px; }
     .approve-state .btn { width:100%; }
     .source-save-actions { min-width:126px; display:flex; flex-direction:column; gap:7px; align-items:stretch; }
-    .source-save-actions .btn { width:100%; }
+    .source-save-actions .btn { width:100%; min-height:42px; }
+    .cutoff-cell { white-space:nowrap; }
+    .cutoff-cell code { white-space:nowrap; overflow-wrap:normal; }
     .storage-value { white-space:nowrap; font-weight:700; }
     code { background:#08111f; border-radius:5px; padding:3px 6px; overflow-wrap:anywhere; }
     .empty { padding:30px; text-align:center; color:var(--muted); }
@@ -118,11 +121,28 @@
     dialog {
       width:min(1020px,94vw); max-height:90vh; padding:0; border:1px solid var(--line);
       border-radius:16px; background:var(--panel2); color:var(--text); box-shadow:0 24px 80px rgba(0,0,0,.55);
+      overflow:hidden;
     }
     #single-download-dialog { width:min(720px,94vw); }
     dialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(2px); }
     .modal-head { display:flex; justify-content:space-between; align-items:center; padding:18px 20px; border-bottom:1px solid var(--line); }
     .modal-body { padding:18px 20px 24px; overflow:auto; max-height:calc(90vh - 72px); }
+    #settings-dialog { height:min(900px,90vh); }
+    #settings-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; overflow-x:hidden; }
+    #discover-dialog { width:min(1220px,96vw); height:min(900px,92vh); }
+    #discover-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
+    .discover-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
+    .discover-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; }
+    .discover-tile { display:flex; flex-direction:column; align-items:center; text-align:center; gap:8px; padding:16px 10px; border:1px solid var(--line); border-radius:14px; background:var(--panel); text-decoration:none; min-height:220px; }
+    .discover-tile:hover { border-color:#4f79ba; background:#132139; }
+    .discover-avatar { width:104px; height:104px; border-radius:50%; object-fit:cover; border:2px solid #415575; background:#08111f; }
+    .discover-video-title { color:var(--text); font-weight:700; line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+    .discover-channel { color:var(--muted); font-size:13px; }
+    .shorts-shell { display:grid; grid-template-columns:minmax(300px,430px) minmax(220px,1fr); gap:22px; align-items:start; }
+    .shorts-player-frame { width:100%; aspect-ratio:9/16; max-height:68vh; background:#000; border-radius:16px; overflow:hidden; }
+    .shorts-player-frame iframe { width:100%; height:100%; }
+    .shorts-info { padding:16px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    @media (max-width:760px) { .shorts-shell { grid-template-columns:1fr; } .shorts-player-frame { max-width:420px; margin:auto; } }
     .tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:18px; }
     .tab-btn { border:1px solid var(--line); background:#132139; color:var(--text); padding:8px 11px; border-radius:8px; cursor:pointer; }
     .tab-btn.active { background:var(--blue); border-color:var(--blue); }
@@ -196,6 +216,7 @@
       <button class="btn secondary" type="button" onclick="openActivity()">Activity</button>
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
       {% if is_admin %}<a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>{% endif %}
+      <button class="btn ghost" type="button" onclick="openDiscover()" {% if not google_connected %}disabled{% endif %}>Discover</button>
       <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out {{ current_user.username }}</button></form>
     </div>
   </div>
@@ -288,15 +309,12 @@
     <div class="header">
       <div>
         <h2>Subscriptions</h2>
-        <div class="muted small">New subscriptions auto-download by default. Filters and sorting are remembered in this browser.</div>
+        <div class="muted small">New subscriptions follow the policy in Settings. Filters and sorting are remembered in this browser.</div>
       </div>
       {% if is_admin %}
       <div class="actions">
         <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <button class="btn secondary smallbtn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
-        </form>
-        <form method="post" action="/add-pending"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-          <button class="btn smallbtn" {% if not google_connected or not pinchflat_online %}disabled{% endif %}>Add pending</button>
         </form>
       </div>
       {% endif %}
@@ -342,6 +360,7 @@
         <option value="enable">Enable downloads</option>
         <option value="disable">Disable downloads</option>
         <option value="approve">Approve review sources</option>
+        <option value="unapprove">Move approved sources back to review</option>
         <option value="range">Set download range</option>
         <option value="profile">Set Media Profile</option>
         <option value="retry">Retry errors</option>
@@ -519,7 +538,7 @@
               {% endif %}
             </td>
 
-            <td>
+            <td class="cutoff-cell">
               <code>{{ sub['cutoff'] }}</code>
               <div class="small muted">{{ sub['history_label'] }}</div>
             </td>
@@ -538,6 +557,12 @@
               {% if is_admin %}
                 <div class="source-save-actions">
                   <button class="btn source-save-btn" type="submit" form="{{ row_form_id }}">Save</button>
+                  {% if not sub['needs_review'] %}
+                    <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unapprove" onsubmit="return confirm('Move this channel back to Waiting for approval and remove its Pinchflat source? Existing downloaded files will be kept.')">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                      <button class="btn secondary smallbtn">Unapprove</button>
+                    </form>
+                  {% endif %}
                   {% if sub['active'] %}
                     <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" onsubmit="return confirm('Unsubscribe from this channel on YouTube? The configured unsubscribe policy will then be applied.')">
                       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
@@ -584,6 +609,41 @@
   </div>
 </dialog>
 
+<dialog id="discover-dialog">
+  <div class="modal-head">
+    <div><h2 style="margin:0">YouTube Discover</h2><div class="muted small">Random public videos from channels you are not currently subscribed to.</div></div>
+    <button class="modal-close" onclick="closeDiscover()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="discover-toolbar">
+      <button id="discover-videos-btn" class="btn" type="button" onclick="showDiscoverMode('videos')">Random Videos</button>
+      <button id="discover-shorts-btn" class="btn secondary" type="button" onclick="showDiscoverMode('shorts')">Random Shorts</button>
+      <button class="btn ghost" type="button" onclick="refreshDiscover()">Shuffle</button>
+      <span id="discover-quota" class="muted small"></span>
+    </div>
+    <div id="discover-loading" class="empty hidden">Finding something different…</div>
+    <div id="discover-error" class="flash error hidden"></div>
+    <div id="discover-videos-panel">
+      <div id="discover-grid" class="discover-grid"></div>
+    </div>
+    <div id="discover-shorts-panel" class="hidden">
+      <div class="shorts-shell">
+        <div class="shorts-player-frame"><div id="youtube-shorts-player"></div></div>
+        <div class="shorts-info">
+          <h3 id="shorts-title">Random Short</h3>
+          <p id="shorts-channel" class="muted"></p>
+          <div class="actions">
+            <button class="btn" type="button" onclick="nextRandomShort()">Next Short</button>
+            <a id="shorts-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank">Open on YouTube</a>
+          </div>
+          <label style="margin-top:16px"><input id="shorts-auto-next" type="checkbox" checked> Automatically play the next Short when the current video finishes</label>
+          <p class="muted small">The Shorts feed is refreshed in batches. Shuffle loads a new batch.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="settings-dialog">
   <div class="modal-head">
     <div><h2 style="margin:0">Settings</h2><div class="muted small">Application configuration and automation.</div></div>
@@ -611,7 +671,7 @@
             <label>When a new YouTube subscription appears
               <select name="new_subscription_policy">
                 <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable and download</option>
-                <option value="disabled" {% if new_subscription_policy == "disabled" %}selected{% endif %}>Add to Pinchflat, downloads disabled</option>
+                <option value="disabled" {% if new_subscription_policy == "disabled" %}selected{% endif %}>Add to dashboard, disabled</option>
                 <option value="review" {% if new_subscription_policy == "review" %}selected{% endif %}>Wait for approval before adding</option>
               </select>
             </label>
@@ -631,7 +691,7 @@
           <h3>Current behaviour</h3>
           <p>New subscriptions: <strong>{{ new_subscription_policy }}</strong></p>
           <p>Unsubscribed channels: <strong>{{ unsubscribe_policy }}</strong></p>
-          <p class="muted small">Automatic sync applies these rules every {{ interval }} minutes.</p>
+          <p class="muted small">YouTube is checked every {{ youtube_sync_interval }} minutes. Pinchflat is reconciled every {{ pinchflat_sync_interval }} minutes.</p>
         </div>
       </div>
     </section>
@@ -706,7 +766,7 @@
                 {% endfor %}
               </select>
             </label>
-            <label><input type="checkbox" name="auto_create_media_profile" value="1" {% if auto_create_media_profile %}checked{% endif %}> Automatically create “YouTube Sync” profile on a fresh Pinchflat install</label>
+            <label><input type="checkbox" name="auto_create_media_profile" value="1" {% if auto_create_media_profile %}checked{% endif %}> Automatically create “YouTube Sync” plus 1080p, 720p, Audio Only and 4K profiles</label>
             <button class="btn">Save Pinchflat</button>
           </form>
         </div>
@@ -891,63 +951,63 @@
     </section>
 
     <section class="tab-panel" data-panel="automation">
-      <div class="settings-grid">
-        <div class="setting-box" style="grid-column:1/-1">
-          <h3>Automatic schedules</h3>
-          <form method="post" action="/settings/automation"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <div class="settings-grid">
-              <div>
-                <label>YouTube subscription sync
-                  <select name="sync_interval_minutes">
-                    {% set schedule_options = [(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
-                    {% for value, label in schedule_options %}
-                      <option value="{{ value }}" {% if interval == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                    {% if interval not in [5,15,30,60,120,360,720,1440] %}
-                      <option value="{{ interval }}" selected>Every {{ interval }} minutes · current</option>
-                    {% endif %}
-                  </select>
-                </label>
-                <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Automatically retry failed Pinchflat source updates</label>
-              </div>
+      <form method="post" action="/settings/automation"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        {% set schedule_options = [(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
+        {% set emby_schedule_options = [(1,'Every minute'),(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
+        <div class="profile-settings-grid">
+          <div class="setting-box compact-setting">
+            <h3>YouTube subscription sync</h3>
+            <label>Check YouTube every
+              <select name="youtube_sync_interval_minutes">
+                {% for value, label in schedule_options %}
+                  <option value="{{ value }}" {% if youtube_sync_interval == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <p class="muted small">Refreshes your Google/YouTube subscription list only.</p>
+            <p class="muted small">Next run: {{ next_youtube_sync or "not available" }}</p>
+          </div>
 
-              <div>
-                <label>Emby Download playlist check
-                  <select name="emby_download_poll_minutes">
-                    {% set emby_schedule_options = [(1,'Every minute'),(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
-                    {% for value, label in emby_schedule_options %}
-                      <option value="{{ value }}" {% if emby_download_poll_minutes == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                    {% if emby_download_poll_minutes not in [1,5,15,30,60,120,360,720,1440] %}
-                      <option value="{{ emby_download_poll_minutes }}" selected>Every {{ emby_download_poll_minutes }} minutes · current</option>
-                    {% endif %}
-                  </select>
-                </label>
-                <label><input type="checkbox" name="emby_download_enabled" value="1" {% if emby_download_enabled %}checked{% endif %}> Monitor the private “Emby Download” playlist</label>
-                <label><input type="checkbox" name="emby_download_remove_after_success" value="1" {% if emby_download_remove_after_success %}checked{% endif %}> Remove playlist items after a successful download</label>
-              </div>
-            </div>
-            <button class="btn">Save Automation</button>
-          </form>
+          <div class="setting-box compact-setting">
+            <h3>Pinchflat source sync</h3>
+            <label>Reconcile Pinchflat every
+              <select name="pinchflat_sync_interval_minutes">
+                {% for value, label in schedule_options %}
+                  <option value="{{ value }}" {% if pinchflat_sync_interval == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Retry failed Pinchflat source updates</label>
+            <p class="muted small">Adds authorised sources, removes disabled sources and repairs mismatches.</p>
+            <p class="muted small">Next run: {{ next_pinchflat_sync or "not available" }}</p>
+          </div>
 
-          <div class="actions" style="margin-top:12px">
-            <form method="post" action="/emby-download/ensure"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-              <button class="btn secondary smallbtn" {% if not google_write_ready %}disabled{% endif %}>Ensure Emby Download playlist exists</button>
-            </form>
-            <span class="muted small">Playlist ID: {{ emby_download_playlist_id or "not created yet" }}</span>
+          <div class="setting-box compact-setting">
+            <h3>Emby Download playlist</h3>
+            <label>Check playlist every
+              <select name="emby_download_poll_minutes">
+                {% for value, label in emby_schedule_options %}
+                  <option value="{{ value }}" {% if emby_download_poll_minutes == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label><input type="checkbox" name="emby_download_enabled" value="1" {% if emby_download_enabled %}checked{% endif %}> Monitor the private “Emby Download” playlist</label>
+            <label><input type="checkbox" name="emby_download_remove_after_success" value="1" {% if emby_download_remove_after_success %}checked{% endif %}> Remove playlist items after a successful download</label>
+            <p class="muted small">Next check: {{ next_emby_sync or "not available" }}</p>
           </div>
         </div>
-
-        <div class="setting-box">
-          <h3>Subscription schedule</h3>
-          <div class="metric">{{ interval }} min</div>
-          <p class="muted small">Next run: {{ next_sync or "not available" }}</p>
+        <div class="actions" style="margin-top:16px">
+          <button class="btn">Save Automation</button>
         </div>
+      </form>
 
-        <div class="setting-box">
-          <h3>Emby Download schedule</h3>
-          <div class="metric">{{ emby_download_poll_minutes }} min</div>
-          <p class="muted small">Next check: {{ next_emby_sync or "not available" }}</p>
+      <div class="setting-box" style="margin-top:14px">
+        <h3>Emby Download playlist</h3>
+        <div class="actions">
+          <form method="post" action="/emby-download/ensure"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <button class="btn secondary smallbtn" {% if not google_write_ready %}disabled{% endif %}>Ensure Emby Download playlist exists</button>
+          </form>
+          <span class="muted small">Playlist ID: {{ emby_download_playlist_id or "not created yet" }}</span>
         </div>
       </div>
     </section>
@@ -959,6 +1019,7 @@
           <div class="metric">{{ api_stats.used }} / {{ api_stats.quota }}</div>
           <div class="quota-bar"><div class="quota-fill" style="width:{{ api_stats.percent }}%"></div></div>
           <p class="muted small">{{ api_stats.remaining }} estimated units remaining today · {{ api_stats.calls }} calls · {{ api_stats.failures }} failed calls</p>
+          <p class="muted small">Discovery searches: {{ api_stats.search_calls }} / {{ api_stats.search_limit }} today · {{ api_stats.search_remaining }} remaining</p>
           {% if api_stats.methods %}
           <table class="compact-table">
             <thead><tr><th>Method</th><th>Calls</th><th>Units</th></tr></thead>
@@ -1127,7 +1188,13 @@
 const settingsDialog = document.getElementById("settings-dialog");
 const activityDialog = document.getElementById("activity-dialog");
 const singleDownloadDialog = document.getElementById("single-download-dialog");
+const discoverDialog = document.getElementById("discover-dialog");
 let singleDownloadTimer = null;
+let discoverMode = "videos";
+let discoverResults = {videos: [], shorts: []};
+let shortsIndex = 0;
+let shortsPlayer = null;
+let youtubeIframeApiPromise = null;
 
 function openSettings(tab="{{ 'general' if is_admin else 'security' }}") {
   showTab(tab);
@@ -1140,6 +1207,167 @@ function openSingleDownload() { singleDownloadDialog.showModal(); }
 function closeSingleDownload() {
   singleDownloadDialog.close();
   if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+}
+
+function openDiscover() {
+  if (!discoverDialog.open) discoverDialog.showModal();
+  showDiscoverMode("videos");
+}
+
+function closeDiscover() {
+  discoverDialog.close();
+  try { shortsPlayer?.pauseVideo(); } catch (_) {}
+}
+
+function ensureYouTubeIframeApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (youtubeIframeApiPromise) return youtubeIframeApiPromise;
+
+  youtubeIframeApiPromise = new Promise((resolve) => {
+    const previous = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = function() {
+      if (typeof previous === "function") previous();
+      resolve();
+    };
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.async = true;
+    document.head.appendChild(script);
+  });
+  return youtubeIframeApiPromise;
+}
+
+async function showDiscoverMode(mode) {
+  discoverMode = mode === "shorts" ? "shorts" : "videos";
+  document.getElementById("discover-videos-panel").classList.toggle("hidden", discoverMode !== "videos");
+  document.getElementById("discover-shorts-panel").classList.toggle("hidden", discoverMode !== "shorts");
+  document.getElementById("discover-videos-btn").classList.toggle("secondary", discoverMode !== "videos");
+  document.getElementById("discover-shorts-btn").classList.toggle("secondary", discoverMode !== "shorts");
+
+  if (!discoverResults[discoverMode].length) {
+    await loadDiscover(discoverMode);
+  } else if (discoverMode === "shorts") {
+    await playRandomShort(shortsIndex);
+  }
+}
+
+async function refreshDiscover() {
+  await loadDiscover(discoverMode, true);
+}
+
+async function loadDiscover(mode, force=false) {
+  const loading = document.getElementById("discover-loading");
+  const error = document.getElementById("discover-error");
+  loading.classList.remove("hidden");
+  error.classList.add("hidden");
+  error.textContent = "";
+
+  try {
+    const response = await fetch(`/api/discover?kind=${encodeURIComponent(mode)}&refresh=${force ? 1 : 0}`);
+    const data = await response.json();
+    if (!data.ok) throw new Error(data.error || "YouTube discovery failed.");
+
+    discoverResults[mode] = data.results || [];
+    document.getElementById("discover-quota").textContent =
+      `YouTube discovery searches remaining today: ${data.search_remaining}`;
+
+    if (mode === "videos") {
+      renderDiscoverTiles(discoverResults.videos);
+    } else {
+      shortsIndex = 0;
+      await playRandomShort(0);
+    }
+  } catch (err) {
+    error.textContent = err.message || String(err);
+    error.classList.remove("hidden");
+  } finally {
+    loading.classList.add("hidden");
+  }
+}
+
+function renderDiscoverTiles(items) {
+  const grid = document.getElementById("discover-grid");
+  grid.replaceChildren();
+
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No discovery results were returned. Press Shuffle to try another search.";
+    grid.appendChild(empty);
+    return;
+  }
+
+  items.forEach(item => {
+    const link = document.createElement("a");
+    link.className = "discover-tile";
+    link.href = item.video_url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = `${item.channel_title}: ${item.title}`;
+
+    const img = document.createElement("img");
+    img.className = "discover-avatar";
+    img.src = item.channel_avatar_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    img.alt = `${item.channel_title} channel image`;
+    img.referrerPolicy = "no-referrer";
+    img.onerror = () => { img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
+
+    const channel = document.createElement("div");
+    channel.className = "discover-channel";
+    channel.textContent = item.channel_title;
+
+    const title = document.createElement("div");
+    title.className = "discover-video-title";
+    title.textContent = item.title;
+
+    link.append(img, channel, title);
+    grid.appendChild(link);
+  });
+}
+
+async function playRandomShort(index) {
+  const items = discoverResults.shorts || [];
+  if (!items.length) return;
+  shortsIndex = ((index % items.length) + items.length) % items.length;
+  const item = items[shortsIndex];
+
+  document.getElementById("shorts-title").textContent = item.title;
+  document.getElementById("shorts-channel").textContent = item.channel_title;
+  document.getElementById("shorts-youtube-link").href = item.shorts_url || item.video_url;
+
+  await ensureYouTubeIframeApi();
+
+  if (!shortsPlayer) {
+    shortsPlayer = new YT.Player("youtube-shorts-player", {
+      width: "100%",
+      height: "100%",
+      videoId: item.video_id,
+      playerVars: {
+        autoplay: 1,
+        playsinline: 1,
+        rel: 0,
+        modestbranding: 1
+      },
+      events: {
+        onStateChange: event => {
+          if (
+            event.data === YT.PlayerState.ENDED &&
+            document.getElementById("shorts-auto-next")?.checked
+          ) {
+            nextRandomShort();
+          }
+        }
+      }
+    });
+  } else {
+    shortsPlayer.loadVideoById(item.video_id);
+  }
+}
+
+function nextRandomShort() {
+  const items = discoverResults.shorts || [];
+  if (!items.length) return;
+  playRandomShort((shortsIndex + 1) % items.length);
 }
 
 function showTab(name) {
@@ -1344,7 +1572,7 @@ if (settingsHashTabs.has(requestedSettingsTab)) {
   openSettings(requestedSettingsTab);
 }
 
-[settingsDialog, activityDialog, singleDownloadDialog].forEach(d => {
+[settingsDialog, activityDialog, singleDownloadDialog, discoverDialog].forEach(d => {
   d?.addEventListener("click", event => {
     if (event.target === d) d.close();
   });

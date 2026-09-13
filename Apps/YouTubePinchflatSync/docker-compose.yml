@@ -128,7 +128,7 @@ services:
             en_US: Browser URL used by the Open Pinchflat button
         - container: SYNC_INTERVAL_MINUTES
           description:
-            en_US: Automatic subscription sync interval in minutes
+            en_US: Initial default interval for the separate YouTube and Pinchflat automation schedules
         - container: MAX_NEW_SOURCES_PER_RUN
           description:
             en_US: Maximum new Pinchflat sources per run. 0 means unlimited
@@ -156,10 +156,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.9.4"
+  version: "2.0.0"
   update_at: "2026-09-13"
   release_notes:
-    en_US: Adds native username and password authentication, optional authenticator 2FA, recovery codes, user roles, session security, login throttling and account management.
+    en_US: v2.0 adds YouTube Discover and auto-next Shorts, independent YouTube/Pinchflat/Emby schedules, Unapprove actions, standard quality profiles, Emby artwork/NFO metadata, favicon and interface refinements.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

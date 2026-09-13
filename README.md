@@ -2,6 +2,26 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.0.0
+
+Major discovery, automation and media-management release.
+
+- Adds a Discover button beside Log out. The popup has Random Videos and Random Shorts views.
+- Random Videos shows channel-avatar tiles from channels you are not currently subscribed to. Clicking a tile opens the selected video on YouTube.
+- Random Shorts uses an embedded YouTube player and automatically advances to the next result when a Short finishes.
+- Discovery excludes currently subscribed channel IDs and tracks the YouTube `search.list` daily search bucket separately.
+- Splits automation into three independent schedules: YouTube subscription refresh, Pinchflat source reconciliation and Emby Download playlist checks.
+- Adds Unapprove per channel and as a bulk action. Unapproving disables the channel, revokes source authorisation and removes the Pinchflat source while keeping downloaded media.
+- Direct Single Download and Emby Download folders now receive Emby-friendly `banner.jpg`, `fanart.jpg`, `poster.jpg` and `tvshow.nfo` metadata inside each channel folder.
+- Automatically creates standard Pinchflat Media Profiles for YouTube 1080p, YouTube 720p, YouTube Audio Only and YouTube 4K alongside YouTube Sync.
+- Standard profiles use SponsorBlock Remove Segments with the Sponsor category by default.
+- Existing Media Profile bulk selection now exposes the additional standard profiles automatically.
+- Adds a real `.ico` favicon to every web page.
+- Keeps cutoff dates on one line in the subscription table.
+- Fixes the Settings popup to use one internal scrollbar rather than nested scrollbars.
+- Removes the Add pending button from the main subscription toolbar. Authorised sources are handled by the normal Pinchflat sync.
+- Restores and formalises the Single Download JSON endpoints used by the progress-bar popup.
+
 ## Version 1.9.4
 
 Verification marker parsing fix.

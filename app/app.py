@@ -6,6 +6,7 @@ import io
 import json
 import os
 import queue
+import random
 import re
 import secrets
 import shutil
@@ -13,6 +14,7 @@ import socket
 import sqlite3
 import struct
 import threading
+import xml.etree.ElementTree as ET
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +23,7 @@ from urllib.parse import quote, urlparse
 import qrcode
 import requests
 import yt_dlp
+from PIL import Image, ImageOps
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -32,7 +35,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.9.4"
+VERSION = "2.0.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -134,6 +137,25 @@ SPONSORBLOCK_COMMON_CATEGORIES = [
     ("preview", "Preview/Recap"),
     ("intro", "Intro/Intermission"),
 ]
+
+STANDARD_MEDIA_PROFILES = [
+    {"name": "YouTube 1080p", "resolution": "1080p"},
+    {"name": "YouTube 720p", "resolution": "720p"},
+    {"name": "YouTube Audio Only", "resolution": "audio"},
+    {"name": "YouTube 4K", "resolution": "2160p"},
+]
+
+DISCOVERY_TERMS = [
+    "technology", "engineering", "history", "science", "photography",
+    "documentary", "computers", "networking", "cars", "motorcycles",
+    "aviation", "trains", "architecture", "restoration", "workshop",
+    "electronics", "retro computing", "space", "nature", "wildlife",
+    "travel", "cooking", "music", "art", "design", "manufacturing",
+    "infrastructure", "cybersecurity", "linux", "homelab", "radio",
+    "mechanical", "urban exploration", "maker", "woodworking", "tools",
+    "farming", "boats", "weather", "geography", "archaeology",
+]
+
 TOTP_ISSUER = "YouTube Pinchflat Sync"
 
 
@@ -396,6 +418,8 @@ def init_db():
             "unsubscribe_policy": "keep",
             "show_removed": "0",
             "sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
+            "youtube_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
+            "pinchflat_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "auto_retry": "1",
             "auto_create_media_profile": "1",
             "emby_download_enabled": "1",
@@ -403,6 +427,7 @@ def init_db():
             "emby_download_poll_minutes": "5",
             "emby_download_remove_after_success": "1",
             "youtube_daily_quota": "10000",
+            "youtube_search_daily_limit": "100",
             "single_download_folder": "Single Downloads",
             "emby_download_folder": "Emby Download",
             "auth_session_timeout_minutes": "720",
@@ -415,6 +440,21 @@ def init_db():
                     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                     (key, value),
                 )
+
+        legacy_sync = conn.execute(
+            "SELECT value FROM settings WHERE key = 'sync_interval_minutes'"
+        ).fetchone()
+        legacy_sync_value = (
+            legacy_sync["value"] if legacy_sync else str(SYNC_INTERVAL_MINUTES)
+        )
+        for schedule_key in (
+            "youtube_sync_interval_minutes",
+            "pinchflat_sync_interval_minutes",
+        ):
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                (schedule_key, legacy_sync_value),
+            )
 
         baseline = conn.execute(
             "SELECT value FROM settings WHERE key = 'youtube_baseline_complete'"
@@ -785,6 +825,18 @@ def api_usage_stats():
         ).fetchall()
 
     used = int(row["units"] or 0)
+    search_limit = setting_int(
+        "youtube_search_daily_limit",
+        100,
+        1,
+        100000,
+    )
+    search_calls = 0
+    for method_row in methods:
+        if method_row["method"] == "search.list":
+            search_calls = int(method_row["calls"] or 0)
+            break
+
     return {
         "date": today,
         "quota": quota,
@@ -794,6 +846,9 @@ def api_usage_stats():
         "failures": int(row["failures"] or 0),
         "percent": min(100.0, (used / quota * 100.0) if quota else 0.0),
         "methods": [dict(item) for item in methods],
+        "search_limit": search_limit,
+        "search_calls": search_calls,
+        "search_remaining": max(0, search_limit - search_calls),
     }
 
 
@@ -811,6 +866,136 @@ def youtube_api_request(creds, http_method, path, quota_method, quota_cost=1, **
     record_api_usage(quota_method, quota_cost, response.ok)
     response.raise_for_status()
     return response
+
+
+def youtube_discovery_results(kind="videos", limit=24):
+    creds = load_credentials()
+    if not creds:
+        raise RuntimeError("Google account is not connected.")
+
+    stats = api_usage_stats()
+    if stats["search_remaining"] <= 0:
+        raise RuntimeError(
+            "The YouTube discovery search limit has been reached for today."
+        )
+
+    kind = "shorts" if kind == "shorts" else "videos"
+    limit = min(max(int(limit or 24), 1), 40)
+
+    with db() as conn:
+        subscribed_ids = {
+            row["channel_id"]
+            for row in conn.execute(
+                "SELECT channel_id FROM subscriptions WHERE active = 1"
+            ).fetchall()
+        }
+
+    query = random.choice(DISCOVERY_TERMS)
+    if kind == "shorts":
+        query = f"{query} #shorts"
+
+    params = {
+        "part": "snippet",
+        "type": "video",
+        "maxResults": 50,
+        "q": query,
+        "safeSearch": "moderate",
+        "videoEmbeddable": "true",
+        "relevanceLanguage": "en",
+        "regionCode": "GB",
+        "order": random.choice(["relevance", "date", "viewCount"]),
+    }
+    if kind == "shorts":
+        params["videoDuration"] = "short"
+
+    response = youtube_api_request(
+        creds,
+        "GET",
+        "search",
+        "search.list",
+        1,
+        params=params,
+    )
+    payload = response.json()
+
+    candidates = []
+    channel_ids = []
+    for item in payload.get("items", []):
+        snippet = item.get("snippet") or {}
+        video_id = (item.get("id") or {}).get("videoId")
+        channel_id = snippet.get("channelId")
+        if not video_id or not channel_id:
+            continue
+        if channel_id in subscribed_ids:
+            continue
+        candidates.append(
+            {
+                "video_id": video_id,
+                "channel_id": channel_id,
+                "title": snippet.get("title") or "YouTube video",
+                "channel_title": snippet.get("channelTitle") or "YouTube",
+                "published_at": snippet.get("publishedAt") or "",
+                "video_url": f"https://www.youtube.com/watch?v={video_id}",
+                "shorts_url": f"https://www.youtube.com/shorts/{video_id}",
+                "thumbnail_url": (
+                    ((snippet.get("thumbnails") or {}).get("high") or {}).get("url")
+                    or ((snippet.get("thumbnails") or {}).get("medium") or {}).get("url")
+                    or ((snippet.get("thumbnails") or {}).get("default") or {}).get("url")
+                    or ""
+                ),
+            }
+        )
+        channel_ids.append(channel_id)
+
+    avatar_by_channel = {}
+    unique_channel_ids = list(dict.fromkeys(channel_ids))[:50]
+    if unique_channel_ids:
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "channels",
+            "channels.list",
+            1,
+            params={
+                "part": "snippet",
+                "id": ",".join(unique_channel_ids),
+                "maxResults": 50,
+            },
+        )
+        for item in response.json().get("items", []):
+            snippet = item.get("snippet") or {}
+            thumbnails = snippet.get("thumbnails") or {}
+            image = (
+                thumbnails.get("high")
+                or thumbnails.get("medium")
+                or thumbnails.get("default")
+                or {}
+            )
+            avatar_by_channel[item.get("id")] = image.get("url", "")
+
+    random.shuffle(candidates)
+    results = []
+    seen_channels = set()
+    for item in candidates:
+        # Video discovery is deliberately channel-diverse. Shorts are allowed
+        # to repeat a channel if the search result set is small.
+        if kind == "videos" and item["channel_id"] in seen_channels:
+            continue
+        seen_channels.add(item["channel_id"])
+        item["channel_avatar_url"] = avatar_by_channel.get(
+            item["channel_id"],
+            "",
+        )
+        results.append(item)
+        if len(results) >= limit:
+            break
+
+    return {
+        "kind": kind,
+        "query": query,
+        "results": results,
+        "search_remaining": max(0, stats["search_remaining"] - 1),
+    }
 
 
 def google_write_scope_ready(creds=None):
@@ -1924,6 +2109,88 @@ def _download_progress_hook(job_id):
     return hook
 
 
+def _best_thumbnail_url(info):
+    thumbnail = str(info.get("thumbnail") or "").strip()
+    if thumbnail:
+        return thumbnail
+
+    for item in reversed(info.get("thumbnails") or []):
+        url = str((item or {}).get("url") or "").strip()
+        if url:
+            return url
+    return ""
+
+
+def _write_jpeg_variant(image, path, size):
+    rendered = ImageOps.fit(
+        image.convert("RGB"),
+        size,
+        method=Image.Resampling.LANCZOS,
+    )
+    rendered.save(path, format="JPEG", quality=90, optimize=True)
+
+
+def write_direct_download_series_metadata(info, output_path):
+    """Write Emby-friendly series artwork/NFO beside direct downloads."""
+    if not output_path:
+        return
+
+    channel_dir = Path(output_path).parent
+    channel_dir.mkdir(parents=True, exist_ok=True)
+
+    channel_title = (
+        info.get("uploader")
+        or info.get("channel")
+        or "YouTube"
+    )
+    channel_id = str(info.get("channel_id") or "").strip()
+    description = str(info.get("channel_follower_count") or "")
+    video_description = str(info.get("description") or "").strip()
+    if video_description:
+        description = video_description[:2000]
+
+    root = ET.Element("tvshow")
+    ET.SubElement(root, "title").text = str(channel_title)
+    ET.SubElement(root, "sorttitle").text = str(channel_title)
+    ET.SubElement(root, "plot").text = description
+    ET.SubElement(root, "studio").text = "YouTube"
+    ET.SubElement(root, "genre").text = "YouTube"
+    if channel_id:
+        unique = ET.SubElement(
+            root,
+            "uniqueid",
+            {"type": "youtube", "default": "true"},
+        )
+        unique.text = channel_id
+
+    tree = ET.ElementTree(root)
+    try:
+        ET.indent(tree, space="  ")
+    except AttributeError:
+        pass
+    tree.write(
+        channel_dir / "tvshow.nfo",
+        encoding="utf-8",
+        xml_declaration=True,
+    )
+
+    thumbnail_url = _best_thumbnail_url(info)
+    if not thumbnail_url:
+        return
+
+    response = requests.get(
+        thumbnail_url,
+        timeout=30,
+        headers={"User-Agent": f"youtube-pinchflat-sync/{VERSION}"},
+    )
+    response.raise_for_status()
+
+    with Image.open(io.BytesIO(response.content)) as image:
+        _write_jpeg_variant(image, channel_dir / "fanart.jpg", (1920, 1080))
+        _write_jpeg_variant(image, channel_dir / "poster.jpg", (1000, 1500))
+        _write_jpeg_variant(image, channel_dir / "banner.jpg", (1920, 480))
+
+
 def run_download_job(job_id):
     job = download_job_row(job_id)
     if not job:
@@ -1997,6 +2264,17 @@ def run_download_job(job_id):
             finished_at=now_iso(),
             error=None,
         )
+
+        if job.get("source_type") in {"single", "emby_download"}:
+            try:
+                write_direct_download_series_metadata(info, output_path)
+            except Exception as exc:
+                log_activity(
+                    "download_metadata",
+                    "Direct download metadata warning",
+                    f"{info.get('title') or job['youtube_url']}: {exc}",
+                    "warning",
+                )
 
         if job.get("remove_playlist_item") and job.get("playlist_item_id"):
             try:
@@ -2271,8 +2549,27 @@ def youtube_unsubscribe(channel_id, youtube_subscription_id=None):
     return subscription_id
 
 
+def current_youtube_sync_interval():
+    return setting_int(
+        "youtube_sync_interval_minutes",
+        setting_int("sync_interval_minutes", SYNC_INTERVAL_MINUTES, 5, 1440),
+        5,
+        1440,
+    )
+
+
+def current_pinchflat_sync_interval():
+    return setting_int(
+        "pinchflat_sync_interval_minutes",
+        setting_int("sync_interval_minutes", SYNC_INTERVAL_MINUTES, 5, 1440),
+        5,
+        1440,
+    )
+
+
 def current_sync_interval():
-    return setting_int("sync_interval_minutes", SYNC_INTERVAL_MINUTES, 5, 1440)
+    # Backwards-compatible alias for older code and settings.
+    return current_youtube_sync_interval()
 
 
 def current_emby_poll_interval():
@@ -3798,8 +4095,8 @@ def media_profile_settings(profile_id):
         "redownload_delay_days": "",
         "download_nfo": True,
         "download_source_images": True,
-        "sponsorblock_behaviour": "disabled",
-        "sponsorblock_categories": [],
+        "sponsorblock_behaviour": "remove",
+        "sponsorblock_categories": ["sponsor"],
         "available": {},
         "error": "",
     }
@@ -3897,7 +4194,7 @@ def media_profile_settings(profile_id):
         settings["sponsorblock_behaviour"] = profile_form_value(
             form,
             field_map["sponsorblock_behaviour"],
-            "disabled",
+            "remove",
         )
         settings["sponsorblock_categories"] = profile_form_multi_values(
             form,
@@ -3963,7 +4260,7 @@ def update_media_profile_settings(profile_id, values):
     )
     set_if_supported(
         "media_profile[sponsorblock_behaviour]",
-        values.get("sponsorblock_behaviour", "disabled"),
+        values.get("sponsorblock_behaviour", "remove"),
     )
 
     category_field_names = {
@@ -4050,8 +4347,13 @@ def load_new_source_form(session_obj):
     return form, profiles
 
 
-def create_default_media_profile(session_obj=None):
-    """Create a simple Pinchflat media profile using Pinchflat's own form."""
+def create_media_profile(
+    name,
+    preferred_resolution="1080p",
+    session_obj=None,
+    set_as_default=False,
+):
+    """Create one Pinchflat Media Profile using Pinchflat's own form."""
     session_obj = session_obj or pinchflat_session()
 
     page = session_obj.get(
@@ -4074,27 +4376,46 @@ def create_default_media_profile(session_obj=None):
         )
 
     payload = scrape_form_payload(form)
-    payload["media_profile[name]"] = "YouTube Sync"
+    payload["media_profile[name]"] = name
     payload["media_profile[output_path_template]"] = EMBY_OUTPUT_PATH_TEMPLATE
+
+    if profile_form_has_field(form, "media_profile[preferred_resolution]"):
+        payload["media_profile[preferred_resolution]"] = preferred_resolution
     if profile_form_has_field(form, "media_profile[shorts_behaviour]"):
         payload["media_profile[shorts_behaviour]"] = "exclude"
     if profile_form_has_field(form, "media_profile[livestream_behaviour]"):
         payload["media_profile[livestream_behaviour]"] = "include"
-    _profile_set_bool(
-        payload,
-        form,
-        "media_profile[download_nfo]",
-        True,
-    )
-    _profile_set_bool(
-        payload,
-        form,
-        "media_profile[download_source_images]",
-        True,
-    )
+    if profile_form_has_field(form, "media_profile[sponsorblock_behaviour]"):
+        payload["media_profile[sponsorblock_behaviour]"] = "remove"
+
+    for field_name, enabled in [
+        ("media_profile[download_nfo]", True),
+        ("media_profile[download_source_images]", True),
+        ("media_profile[download_thumbnail]", True),
+        ("media_profile[embed_thumbnail]", True),
+        ("media_profile[download_metadata]", True),
+        ("media_profile[embed_metadata]", True),
+    ]:
+        _profile_set_bool(payload, form, field_name, enabled)
+
+    sponsor_fields = {
+        field.get("name")
+        for field in form.find_all(attrs={"name": True})
+        if "sponsorblock_categories" in (field.get("name") or "")
+    }
+    sponsor_fields.discard(None)
+    if sponsor_fields:
+        for key in list(payload):
+            if "sponsorblock_categories" in key:
+                payload.pop(key, None)
+        sponsor_name = next(
+            (name for name in sponsor_fields if name.endswith("[]")),
+            next(iter(sponsor_fields)),
+        )
+        payload[sponsor_name] = ["sponsor"]
 
     action = form.get("action") or "/media_profiles"
-    if action.startswith("http://") or action.startswith("https://"):
+    if action.startswith(("http://", "https://")):
         target = action
     else:
         target = (
@@ -4110,35 +4431,69 @@ def create_default_media_profile(session_obj=None):
     )
 
     if response.status_code not in (301, 302, 303):
-        text = " ".join(
+        body = " ".join(
             BeautifulSoup(response.text, "html.parser").stripped_strings
         )
         raise RuntimeError(
-            "Pinchflat could not create the automatic Media Profile. "
-            f"Response: {text[:350] or 'No error text returned.'}"
+            f"Pinchflat could not create Media Profile {name}. "
+            f"Response: {body[:350] or 'No error text returned.'}"
         )
 
-    # Reload the source form and identify the newly created profile by name.
     source_form, profiles = load_new_source_form(session_obj)
     created = next(
         (
             profile
             for profile in profiles
-            if profile["name"].strip().lower() == "youtube sync"
+            if profile["name"].strip().casefold() == name.strip().casefold()
         ),
         None,
     )
 
-    if created is None and len(profiles) == 1:
-        created = profiles[0]
-
     if created is None:
         raise RuntimeError(
-            "The Media Profile was created, but its ID could not be identified."
+            f"Media Profile {name} was created, but its ID could not be identified."
         )
 
-    set_setting("pinchflat_media_profile_id", created["id"])
+    if set_as_default:
+        set_setting("pinchflat_media_profile_id", created["id"])
+
     return created, source_form, profiles
+
+
+def create_default_media_profile(session_obj=None):
+    return create_media_profile(
+        "YouTube Sync",
+        "1080p",
+        session_obj=session_obj,
+        set_as_default=True,
+    )
+
+
+def ensure_standard_media_profiles(session_obj=None):
+    """Create the standard v2 quality profiles if they do not already exist."""
+    session_obj = session_obj or pinchflat_session()
+    _form, profiles = load_new_source_form(session_obj)
+    existing = {
+        profile["name"].strip().casefold()
+        for profile in profiles
+    }
+
+    created = []
+    for definition in STANDARD_MEDIA_PROFILES:
+        name = definition["name"]
+        if name.casefold() in existing:
+            continue
+        profile, _form, profiles = create_media_profile(
+            name,
+            definition["resolution"],
+            session_obj=session_obj,
+            set_as_default=False,
+        )
+        existing.add(name.casefold())
+        created.append(profile)
+
+    return created
+
 
 
 def get_new_source_form(session_obj=None, auto_create_profile=True):
@@ -4191,6 +4546,18 @@ def pinchflat_profile_status():
         _session, _form, profile_ids = get_new_source_form(
             auto_create_profile=setting_bool("auto_create_media_profile", True)
         )
+        if setting_bool("auto_create_media_profile", True):
+            try:
+                ensure_standard_media_profiles(_session)
+                _form, profiles = load_new_source_form(_session)
+                profile_ids = [profile["id"] for profile in profiles]
+            except Exception as exc:
+                log_activity(
+                    "pinchflat",
+                    "Standard Media Profile warning",
+                    str(exc),
+                    "warning",
+                )
         return {
             "ready": True,
             "message": f"Media Profile {effective_media_profile_id()} ready.",
@@ -4696,6 +5063,80 @@ def add_pending_sources():
         "added": added,
         "errors": errors,
     }
+
+
+def youtube_sync_once():
+    if not sync_lock.acquire(blocking=False):
+        return {"status": "busy", "message": "Another sync is running."}
+
+    try:
+        refresh = refresh_subscriptions()
+        message = (
+            f"YouTube refreshed {refresh['total']} subscriptions. "
+            f"New {refresh['new']}. Re-subscribed {refresh.get('reactivated', 0)}. "
+            f"Removed {refresh['removed']}. Policy errors {refresh['policy_errors']}."
+        )
+        log_activity(
+            "youtube_sync",
+            "YouTube subscription sync completed",
+            message,
+            "success" if refresh["policy_errors"] == 0 else "warning",
+        )
+        return {"status": "ok", "message": message, **refresh}
+    except Exception as exc:
+        log_activity(
+            "youtube_sync",
+            "YouTube subscription sync failed",
+            str(exc),
+            "error",
+        )
+        return {"status": "error", "message": str(exc)}
+    finally:
+        sync_lock.release()
+
+
+def pinchflat_sync_once():
+    if not sync_lock.acquire(blocking=False):
+        return {"status": "busy", "message": "Another sync is running."}
+
+    try:
+        if not pinchflat_health():
+            return {
+                "status": "offline",
+                "message": "Pinchflat is stopped or unreachable.",
+            }
+
+        removed = reconcile_removed_pinchflat_sources()
+        authority = reconcile_active_source_authority()
+        result = add_pending_sources()
+        retry = retry_failed_source_updates()
+        errors = authority["errors"] + result["errors"] + retry["errors"]
+        message = (
+            f"Pinchflat authority changes {authority['changed']}. "
+            f"Added {result['added']} source(s). Retry fixes {retry['fixed']}. "
+            f"Removed-source checks {removed.get('checked', 0)}. Errors {errors}."
+        )
+        log_activity(
+            "pinchflat_sync",
+            "Pinchflat sync completed",
+            message,
+            "success" if errors == 0 else "warning",
+        )
+        return {
+            "status": "ok" if errors == 0 else "completed_with_errors",
+            "message": message,
+            "errors": errors,
+        }
+    except Exception as exc:
+        log_activity(
+            "pinchflat_sync",
+            "Pinchflat sync failed",
+            str(exc),
+            "error",
+        )
+        return {"status": "error", "message": str(exc), "errors": 1}
+    finally:
+        sync_lock.release()
 
 
 def sync_once():
@@ -5504,21 +5945,25 @@ def index():
         "review": sum(1 for sub in subs if sub.get("needs_review")),
     }
 
-    next_sync = None
+    next_youtube_sync = None
+    next_pinchflat_sync = None
     next_emby_sync = None
-    try:
-        job = scheduler.get_job("subscription-sync")
-        if job and job.next_run_time:
-            next_sync = job.next_run_time.isoformat()
-    except Exception:
-        pass
-
-    try:
-        job = scheduler.get_job("emby-download-sync")
-        if job and job.next_run_time:
-            next_emby_sync = job.next_run_time.isoformat()
-    except Exception:
-        pass
+    for job_id, target_name in [
+        ("youtube-subscription-sync", "youtube"),
+        ("pinchflat-source-sync", "pinchflat"),
+        ("emby-download-sync", "emby"),
+    ]:
+        try:
+            job = scheduler.get_job(job_id)
+            value = job.next_run_time.isoformat() if job and job.next_run_time else None
+            if target_name == "youtube":
+                next_youtube_sync = value
+            elif target_name == "pinchflat":
+                next_pinchflat_sync = value
+            else:
+                next_emby_sync = value
+        except Exception:
+            pass
 
     return render_template(
         "index.html",
@@ -5552,8 +5997,11 @@ def index():
         recent_runs=recent_runs,
         activity_rows=activity_rows,
         dry_run=DRY_RUN,
-        interval=current_sync_interval(),
-        next_sync=next_sync,
+        youtube_sync_interval=current_youtube_sync_interval(),
+        pinchflat_sync_interval=current_pinchflat_sync_interval(),
+        emby_download_poll_minutes=current_emby_poll_interval(),
+        next_youtube_sync=next_youtube_sync,
+        next_pinchflat_sync=next_pinchflat_sync,
         next_emby_sync=next_emby_sync,
         default_history_mode=defaults["mode"],
         default_history_years=defaults["years"],
@@ -5571,7 +6019,6 @@ def index():
         recent_downloads=recent_downloads,
         emby_download_enabled=setting_bool("emby_download_enabled", True),
         emby_download_playlist_name=get_setting("emby_download_playlist_name", "Emby Download"),
-        emby_download_poll_minutes=current_emby_poll_interval(),
         emby_download_playlist_id=emby_playlist_id,
         emby_download_remove_after_success=setting_bool("emby_download_remove_after_success", True),
         emby_download_folder=get_setting("emby_download_folder", "Emby Download"),
@@ -5837,6 +6284,64 @@ def save_subscription_row(channel_id):
     return redirect(url_for("index") + "#subscriptions")
 
 
+@app.post("/subscriptions/<channel_id>/unapprove")
+def unapprove_subscription(channel_id):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ?",
+            (channel_id,),
+        ).fetchone()
+
+    if not row:
+        flash("The YouTube subscription was not found.", "error")
+        return redirect(url_for("index") + "#subscriptions")
+
+    row_dict = dict(row)
+    prospective = dict(row_dict)
+    prospective.update(
+        {
+            "needs_review": 1,
+            "download_enabled": 0,
+            "source_authorised": 0,
+        }
+    )
+
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET needs_review = 1,
+                download_enabled = 0,
+                source_authorised = 0,
+                last_error = NULL
+            WHERE channel_id = ?
+            """,
+            (channel_id,),
+        )
+
+    try:
+        apply_subscription_source_authority(
+            prospective,
+            apply_settings=True,
+        )
+        flash(
+            f"{row_dict['title']} moved back to review and removed from Pinchflat.",
+            "success",
+        )
+    except Exception as exc:
+        with db() as conn:
+            conn.execute(
+                "UPDATE subscriptions SET last_error = ? WHERE channel_id = ?",
+                (str(exc)[:1000], channel_id),
+            )
+        flash(
+            f"The channel was moved back to review, but Pinchflat removal failed: {exc}",
+            "error",
+        )
+
+    return redirect(url_for("index") + "#subscriptions")
+
+
 @app.post("/subscriptions/<channel_id>/history")
 def save_subscription_history(channel_id):
     mode = request.form.get(
@@ -6076,23 +6581,30 @@ def bulk_subscription_download():
 
 
 def reschedule_sync_job():
-    try:
-        scheduler.reschedule_job(
-            "subscription-sync",
-            trigger="interval",
-            minutes=current_sync_interval(),
-        )
-    except Exception:
-        pass
-
-    try:
-        scheduler.reschedule_job(
+    jobs = [
+        (
+            "youtube-subscription-sync",
+            current_youtube_sync_interval(),
+        ),
+        (
+            "pinchflat-source-sync",
+            current_pinchflat_sync_interval(),
+        ),
+        (
             "emby-download-sync",
-            trigger="interval",
-            minutes=current_emby_poll_interval(),
-        )
-    except Exception:
-        pass
+            current_emby_poll_interval(),
+        ),
+    ]
+
+    for job_id, minutes in jobs:
+        try:
+            scheduler.reschedule_job(
+                job_id,
+                trigger="interval",
+                minutes=minutes,
+            )
+        except Exception:
+            pass
 
 
 @app.post("/settings/general")
@@ -6123,22 +6635,32 @@ def save_general_settings():
 
 @app.post("/settings/automation")
 def save_automation_settings():
-    try:
-        interval = int(request.form.get("sync_interval_minutes", "60"))
-    except ValueError:
-        interval = 60
+    def parse_interval(name, default, minimum=5):
+        try:
+            value = int(request.form.get(name, str(default)))
+        except ValueError:
+            value = default
+        return min(max(value, minimum), 1440)
 
-    try:
-        emby_interval = int(
-            request.form.get("emby_download_poll_minutes", "5")
-        )
-    except ValueError:
-        emby_interval = 5
+    youtube_interval = parse_interval(
+        "youtube_sync_interval_minutes",
+        current_youtube_sync_interval(),
+        5,
+    )
+    pinchflat_interval = parse_interval(
+        "pinchflat_sync_interval_minutes",
+        current_pinchflat_sync_interval(),
+        5,
+    )
+    emby_interval = parse_interval(
+        "emby_download_poll_minutes",
+        current_emby_poll_interval(),
+        1,
+    )
 
-    interval = min(max(interval, 5), 1440)
-    emby_interval = min(max(emby_interval, 1), 1440)
-
-    set_setting("sync_interval_minutes", str(interval))
+    set_setting("youtube_sync_interval_minutes", str(youtube_interval))
+    set_setting("pinchflat_sync_interval_minutes", str(pinchflat_interval))
+    set_setting("sync_interval_minutes", str(youtube_interval))
     set_setting("emby_download_poll_minutes", str(emby_interval))
     set_setting(
         "auto_retry",
@@ -6171,7 +6693,8 @@ def save_automation_settings():
         "settings",
         "Automation settings updated",
         (
-            f"Subscription sync every {interval} minutes. "
+            f"YouTube every {youtube_interval} minutes. "
+            f"Pinchflat every {pinchflat_interval} minutes. "
             f"Emby Download every {emby_interval} minutes."
         ),
     )
@@ -6295,10 +6818,10 @@ def save_current_media_profile():
 
     behaviour = request.form.get(
         "sponsorblock_behaviour",
-        "disabled",
+        "remove",
     ).strip()
     if behaviour not in {"disabled", "mark", "remove"}:
-        behaviour = "disabled"
+        behaviour = "remove"
 
     values = {
         "output_path_template": (
@@ -6556,6 +7079,28 @@ def bulk_subscription_action():
                     apply_settings=True,
                 )
 
+            elif action == "unapprove":
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET needs_review = 1,
+                            download_enabled = 0,
+                            source_authorised = 0,
+                            last_error = NULL
+                        WHERE channel_id = ?
+                        """,
+                        (row["channel_id"],),
+                    )
+
+                prospective["needs_review"] = 1
+                prospective["download_enabled"] = 0
+                prospective["source_authorised"] = 0
+                apply_subscription_source_authority(
+                    prospective,
+                    apply_settings=True,
+                )
+
             elif action == "range":
                 mode = request.form.get(
                     "bulk_history_mode",
@@ -6672,6 +7217,51 @@ def bulk_subscription_action():
         )
 
     return redirect(url_for("index") + "#subscriptions")
+
+
+@app.post("/single-download/start")
+def single_download_start():
+    payload = request.get_json(silent=True) or {}
+    youtube_url = str(payload.get("youtube_url") or "").strip()
+
+    try:
+        job_id, created = enqueue_download(
+            youtube_url,
+            source_type="single",
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "job_id": job_id,
+                "created": created,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/downloads/<job_id>")
+def download_status(job_id):
+    job = download_job_row(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Download job not found."}), 404
+
+    job["downloaded_text"] = format_bytes(job.get("downloaded_bytes"))
+    job["total_text"] = format_bytes(job.get("total_bytes"))
+    return jsonify({"ok": True, "job": job})
+
+
+@app.get("/api/discover")
+def discover_videos():
+    kind = request.args.get("kind", "videos").strip().lower()
+    if kind not in {"videos", "shorts"}:
+        kind = "videos"
+
+    try:
+        result = youtube_discovery_results(kind=kind, limit=24)
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 @app.post("/settings/youtube")
@@ -6843,10 +7433,17 @@ scheduler = BackgroundScheduler(
     timezone=os.getenv("TZ", "Europe/London")
 )
 scheduler.add_job(
-    sync_once,
+    youtube_sync_once,
     "interval",
-    minutes=current_sync_interval(),
-    id="subscription-sync",
+    minutes=current_youtube_sync_interval(),
+    id="youtube-subscription-sync",
+    max_instances=1,
+)
+scheduler.add_job(
+    pinchflat_sync_once,
+    "interval",
+    minutes=current_pinchflat_sync_interval(),
+    id="pinchflat-source-sync",
     max_instances=1,
 )
 scheduler.add_job(
@@ -6861,20 +7458,6 @@ scheduler.add_job(
     "interval",
     minutes=1,
     id="unsubscribe-cleanup",
-    max_instances=1,
-)
-scheduler.add_job(
-    reconcile_removed_pinchflat_sources,
-    "interval",
-    minutes=5,
-    id="removed-source-reconcile",
-    max_instances=1,
-)
-scheduler.add_job(
-    reconcile_active_source_authority,
-    "interval",
-    minutes=5,
-    id="active-source-authority",
     max_instances=1,
 )
 scheduler.start()
