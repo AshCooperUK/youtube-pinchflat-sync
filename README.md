@@ -2,6 +2,24 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.2.2
+
+Personalised Discover and YouTube Like controls.
+
+- Moves the Random Shorts title, channel name and description below the action buttons so `Next Short` no longer shifts position when the text changes.
+- Removes `Save to list` from Random Videos and Random Shorts.
+- Keeps custom video lists available from the Favourites area.
+- Adds `Like on YouTube` to Random Videos and Random Shorts.
+- The Like button calls YouTube `videos.rate` with `rating=like`, so the rating is written to the connected YouTube account.
+- A successful YouTube Like is also stored as a local Discover interest hint.
+- Random Shorts and Random Videos now build their search query from the user's own interests rather than only generic discovery terms.
+- Explicitly liked Discover videos carry the strongest weighting.
+- Favourite channels carry the next strongest weighting.
+- Current active YouTube subscriptions provide the broader interest pool.
+- Up to three interest seeds are combined for each discovery batch.
+- Random Shorts still exclude channels already present in the current subscription list, keeping Discover focused on finding other creators.
+- The Shorts panel shows which subscription/favourite interests influenced the current batch.
+
 ## Version 2.2.1
 
 Latest subscriptions feed fix.

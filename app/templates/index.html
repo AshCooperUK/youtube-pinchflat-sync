@@ -270,6 +270,7 @@
     .shorts-player-frame { width:min(100%,330px); aspect-ratio:9/16; background:#000; border-radius:16px; overflow:hidden; margin:0 auto; }
     .shorts-player-frame iframe { display:block; width:100%; height:100%; border:0; }
     .shorts-info { padding:16px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .shorts-actions { align-items:flex-start; min-height:48px; }
     .shorts-description {
       margin:12px 0 16px;
       padding:12px 14px;
@@ -840,19 +841,21 @@
       <div class="shorts-shell">
         <div class="shorts-player-frame"><div id="youtube-shorts-player"></div></div>
         <div class="shorts-info">
-          <h3 id="shorts-title">Random Short</h3>
-          <p id="shorts-channel" class="muted"></p>
-          <div id="shorts-description" class="shorts-description"></div>
-          <div class="actions">
+          <div class="actions shorts-actions">
             <button class="btn" type="button" onclick="nextRandomShort()">Next Short</button>
             <button id="shorts-sound-btn" class="btn secondary" type="button" onclick="toggleShortsSound()">Sound on</button>
             <button id="shorts-video-heart" class="btn secondary" type="button" onclick="toggleCurrentShortVideoFavourite()">♡ Video</button>
             <button id="shorts-channel-heart" class="btn secondary" type="button" onclick="toggleCurrentShortChannelFavourite()">♡ Channel</button>
-            <button class="btn secondary" type="button" onclick="saveCurrentShortToList()">Save to list</button>
+            <button id="shorts-youtube-like" class="btn secondary" type="button" onclick="likeCurrentShortOnYouTube()">👍 Like on YouTube</button>
             <a id="shorts-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank">Open on YouTube</a>
           </div>
+
+          <h3 id="shorts-title" style="margin-top:18px">Random Short</h3>
+          <p id="shorts-channel" class="muted"></p>
+          <div id="shorts-description" class="shorts-description"></div>
+
           <label style="margin-top:16px"><input id="shorts-auto-next" type="checkbox" checked> Automatically play the next Short when the current video finishes</label>
-          <p class="muted small">The Shorts feed is refreshed in batches. Shuffle loads a new batch.</p>
+          <p id="shorts-interest-note" class="muted small">Shorts are selected using your favourite channels, videos you like here, and your current YouTube subscriptions.</p>
         </div>
       </div>
     </div>
@@ -2021,6 +2024,13 @@ async function loadDiscover(mode, force=false) {
       if (mode === "videos") {
         renderDiscoverTiles(discoverResults.videos);
       } else {
+        const interests = (data.interest_seeds || []).slice(0, 3);
+        const note = document.getElementById("shorts-interest-note");
+        if (note) {
+          note.textContent = interests.length
+            ? `This batch is influenced by your subscriptions and favourites, including: ${interests.join(" · ")}.`
+            : "This batch is influenced by your current YouTube subscriptions and favourites.";
+        }
         shortsIndex = 0;
         await playRandomShort(0);
       }
@@ -2082,11 +2092,12 @@ function renderDiscoverTiles(items) {
     videoHeart.className = `btn secondary smallbtn ${item.is_favourite_video ? "active" : ""}`;
     videoHeart.textContent = item.is_favourite_video ? "♥ Video" : "♡ Video";
     videoHeart.onclick = () => toggleVideoFavourite(videoHeart, item);
-    const saveList = document.createElement("button");
-    saveList.className = "btn ghost smallbtn";
-    saveList.textContent = "Save to list";
-    saveList.onclick = () => openListPicker(item);
-    actions.append(videoHeart, saveList);
+    const youtubeLike = document.createElement("button");
+    youtubeLike.className = "btn ghost smallbtn";
+    youtubeLike.textContent = "👍 Like on YouTube";
+    youtubeLike.title = "Like this video on YouTube";
+    youtubeLike.onclick = () => likeVideoOnYouTube(youtubeLike, item);
+    actions.append(videoHeart, youtubeLike);
 
     card.append(heart, link, actions);
     grid.appendChild(card);
@@ -2154,6 +2165,11 @@ async function playRandomShort(index) {
   channelHeart.textContent = item.is_favourite_channel ? "♥ Channel" : "♡ Channel";
   channelHeart.classList.toggle("active", !!item.is_favourite_channel);
 
+  const youtubeLike = document.getElementById("shorts-youtube-like");
+  youtubeLike.textContent = "👍 Like on YouTube";
+  youtubeLike.disabled = false;
+  youtubeLike.classList.remove("active");
+
   await ensureYouTubeIframeApi();
 
   if (!shortsPlayer) {
@@ -2207,9 +2223,49 @@ function toggleCurrentShortChannelFavourite() {
   if (!item) return;
   toggleChannelFavourite(document.getElementById("shorts-channel-heart"), item.channel_id, item.channel_title, `https://www.youtube.com/channel/${item.channel_id}`, item.channel_avatar_url || "").then(() => playRandomShort(shortsIndex));
 }
-function saveCurrentShortToList() {
+async function likeVideoOnYouTube(button, item) {
+  if (!item?.video_id || !button) return;
+
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Liking…";
+
+  try {
+    const response = await fetch("/api/youtube/video/like", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        video_id: item.video_id,
+        title: item.title || "YouTube video",
+        channel_id: item.channel_id || "",
+        channel_title: item.channel_title || "YouTube"
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+
+    button.textContent = "✓ Liked on YouTube";
+    button.classList.add("active");
+    button.title = "This video is liked on your YouTube account";
+  } catch (err) {
+    button.textContent = original;
+    button.disabled = false;
+    alert(`YouTube Like failed: ${err.message || String(err)}`);
+    return;
+  }
+
+  button.disabled = true;
+}
+
+function likeCurrentShortOnYouTube() {
   const item = currentShortItem();
-  if (item) openListPicker(item);
+  const button = document.getElementById("shorts-youtube-like");
+  if (!item || !button) return;
+  likeVideoOnYouTube(button, item);
 }
 
 function nextRandomShort() {

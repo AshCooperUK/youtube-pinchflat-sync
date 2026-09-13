@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.2.1"
+VERSION = "2.2.2"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -420,6 +420,16 @@ def init_db():
                 thumbnail_url TEXT,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (user_id, channel_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS discovery_likes (
+                user_id INTEGER NOT NULL,
+                video_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                channel_id TEXT,
+                channel_title TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, video_id)
             );
 
             CREATE TABLE IF NOT EXISTS saved_videos (
@@ -1584,6 +1594,160 @@ def youtube_latest_subscription_videos(limit=12, force=False):
 
 
 
+def discovery_interest_titles():
+    """
+    Build a weighted pool of interests from this user's own YouTube activity
+    inside the app.
+
+    Favourite channels and videos explicitly liked through this app get the
+    strongest weight. Current active subscriptions provide the broad fallback.
+    """
+    user_id = current_user_id()
+    weighted = []
+
+    with db() as conn:
+        subscriptions = conn.execute(
+            """
+            SELECT title
+            FROM subscriptions
+            WHERE active = 1
+              AND title IS NOT NULL
+              AND TRIM(title) != ''
+            """
+        ).fetchall()
+
+        favourites = []
+        likes = []
+
+        if user_id:
+            favourites = conn.execute(
+                """
+                SELECT channel_title
+                FROM favourite_channels
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 100
+                """,
+                (user_id,),
+            ).fetchall()
+
+            likes = conn.execute(
+                """
+                SELECT title, channel_title
+                FROM discovery_likes
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 100
+                """,
+                (user_id,),
+            ).fetchall()
+
+    # Strongest signal: explicit YouTube likes from Discover.
+    for row in likes:
+        channel_title = str(row["channel_title"] or "").strip()
+        title = str(row["title"] or "").strip()
+
+        if channel_title:
+            weighted.extend([channel_title] * 6)
+
+        # Video titles help the search move towards the subject rather than
+        # always searching for the same creator.
+        if title:
+            title = re.sub(r"#\w+", " ", title)
+            title = re.sub(r"\s+", " ", title).strip()
+            if len(title) > 90:
+                title = title[:90].rsplit(" ", 1)[0]
+            if title:
+                weighted.extend([title] * 3)
+
+    # Second strongest signal: channels explicitly favourited in our app.
+    for row in favourites:
+        title = str(row["channel_title"] or "").strip()
+        if title:
+            weighted.extend([title] * 4)
+
+    # Broad interest signal: all current YouTube subscriptions.
+    for row in subscriptions:
+        title = str(row["title"] or "").strip()
+        if title:
+            weighted.append(title)
+
+    return weighted
+
+
+def personalised_discovery_query(kind):
+    """
+    Build a discovery query from the user's own subscriptions and likes.
+
+    Multiple seeds are ORed together so the result batch covers several of
+    the user's interests rather than one fixed generic topic.
+    """
+    interests = discovery_interest_titles()
+
+    seeds = []
+    if interests:
+        random.shuffle(interests)
+        for value in interests:
+            value = re.sub(r"[|]+", " ", str(value or "")).strip()
+            value = re.sub(r"\s+", " ", value)
+            if not value:
+                continue
+            if value.casefold() in {item.casefold() for item in seeds}:
+                continue
+            seeds.append(value)
+            if len(seeds) >= 3:
+                break
+
+    if not seeds:
+        seeds = [random.choice(DISCOVERY_TERMS)]
+
+    query = "|".join(seeds)
+
+    if kind == "shorts":
+        query = f"{query} #shorts"
+
+    return query, seeds
+
+
+def record_discovery_like(item):
+    user_id = current_user_id()
+    if not user_id:
+        return
+
+    video_id = str(item.get("video_id") or "").strip()
+    if not video_id:
+        return
+
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO discovery_likes (
+                user_id,
+                video_id,
+                title,
+                channel_id,
+                channel_title,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, video_id)
+            DO UPDATE SET
+                title = excluded.title,
+                channel_id = excluded.channel_id,
+                channel_title = excluded.channel_title,
+                created_at = excluded.created_at
+            """,
+            (
+                user_id,
+                video_id,
+                str(item.get("title") or "YouTube video")[:500],
+                str(item.get("channel_id") or ""),
+                str(item.get("channel_title") or "YouTube")[:300],
+                now_iso(),
+            ),
+        )
+
+
 def youtube_discovery_results(kind="videos", limit=24):
     creds = load_credentials()
     if not creds:
@@ -1606,9 +1770,7 @@ def youtube_discovery_results(kind="videos", limit=24):
             ).fetchall()
         }
 
-    query = random.choice(DISCOVERY_TERMS)
-    if kind == "shorts":
-        query = f"{query} #shorts"
+    query, interest_seeds = personalised_discovery_query(kind)
 
     params = {
         "part": "snippet",
@@ -1767,6 +1929,7 @@ def youtube_discovery_results(kind="videos", limit=24):
     return {
         "kind": kind,
         "query": query,
+        "interest_seeds": interest_seeds,
         "results": results,
         "search_remaining": max(0, stats["search_remaining"] - 1),
     }
@@ -8641,6 +8804,72 @@ def latest_subscription_videos():
         return jsonify({"ok": True, **result})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.post("/api/youtube/video/like")
+def like_youtube_video():
+    payload = request.get_json(silent=True) or {}
+    video_id = str(payload.get("video_id") or "").strip()
+
+    if not video_id:
+        return jsonify(
+            {"ok": False, "error": "A YouTube video ID is required."}
+        ), 400
+
+    try:
+        creds = load_credentials()
+        if not creds:
+            raise RuntimeError("Google account is not connected.")
+
+        if not google_write_scope_ready(creds):
+            raise RuntimeError(
+                "Google is connected without YouTube write access. "
+                "Reconnect Google to enable liking videos."
+            )
+
+        youtube_api_request(
+            creds,
+            "POST",
+            "videos/rate",
+            "videos.rate",
+            50,
+            params={
+                "id": video_id,
+                "rating": "like",
+            },
+        )
+
+        item = {
+            "video_id": video_id,
+            "title": str(payload.get("title") or "YouTube video"),
+            "channel_id": str(payload.get("channel_id") or ""),
+            "channel_title": str(payload.get("channel_title") or "YouTube"),
+        }
+        record_discovery_like(item)
+
+        log_activity(
+            "youtube",
+            "YouTube video liked",
+            (
+                f"Liked {item['title']} from "
+                f"{item['channel_title']} on YouTube."
+            ),
+            "success",
+            item["channel_id"] or None,
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "video_id": video_id,
+                "liked": True,
+            }
+        )
+
+    except Exception as exc:
+        return jsonify(
+            {"ok": False, "error": str(exc)}
+        ), 400
 
 
 @app.get("/api/discover")
