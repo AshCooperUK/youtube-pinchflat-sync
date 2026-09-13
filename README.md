@@ -2,6 +2,16 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.5.1
+
+Maintenance release fixing the v1.5.0 startup failure.
+
+- Fixes the missing `current_emby_poll_interval()` function which prevented Gunicorn from booting.
+- Adds a persistent 5-minute default for the `Emby Download` playlist polling interval.
+- Passes the polling interval into the Settings interface.
+- Saves changes to the polling interval correctly.
+- Reschedules the background playlist job immediately after changing the interval.
+
 ## Version 1.5.0
 
 Version 1.5.0 adds:

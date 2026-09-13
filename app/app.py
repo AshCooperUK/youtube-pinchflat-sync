@@ -21,7 +21,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -257,6 +257,7 @@ def init_db():
             "auto_create_media_profile": "1",
             "emby_download_enabled": "1",
             "emby_download_playlist_name": "Emby Download",
+            "emby_download_poll_minutes": "5",
             "emby_download_remove_after_success": "1",
             "youtube_daily_quota": "10000",
             "single_download_folder": "Single Downloads",
@@ -977,6 +978,11 @@ def youtube_unsubscribe(channel_id, youtube_subscription_id=None):
 
 def current_sync_interval():
     return setting_int("sync_interval_minutes", SYNC_INTERVAL_MINUTES, 5, 1440)
+
+
+def current_emby_poll_interval():
+    """Return the configured Emby Download playlist polling interval."""
+    return setting_int("emby_download_poll_minutes", 5, 1, 1440)
 
 
 def new_subscription_policy():
@@ -2377,6 +2383,7 @@ def index():
         recent_downloads=recent_downloads,
         emby_download_enabled=setting_bool("emby_download_enabled", True),
         emby_download_playlist_name=get_setting("emby_download_playlist_name", "Emby Download"),
+        emby_download_poll_minutes=current_emby_poll_interval(),
         emby_download_playlist_id=emby_playlist_id,
         emby_download_remove_after_success=setting_bool("emby_download_remove_after_success", True),
         youtube_daily_quota=setting_int("youtube_daily_quota", 10000, 100, 100000000),
@@ -3204,6 +3211,12 @@ def save_youtube_settings():
         "1" if request.form.get("emby_download_enabled") == "1" else "0",
     )
     set_setting("emby_download_playlist_name", "Emby Download")
+    try:
+        poll_minutes = int(request.form.get("emby_download_poll_minutes", "5"))
+    except ValueError:
+        poll_minutes = 5
+    poll_minutes = min(max(poll_minutes, 1), 1440)
+    set_setting("emby_download_poll_minutes", str(poll_minutes))
     set_setting(
         "emby_download_remove_after_success",
         "1" if request.form.get("emby_download_remove_after_success") == "1" else "0",
@@ -3221,6 +3234,8 @@ def save_youtube_settings():
         except Exception as exc:
             flash(f"Settings saved, but Emby Download setup needs attention: {exc}", "error")
             return redirect(url_for("index"))
+
+    reschedule_sync_job()
 
     log_activity(
         "settings",

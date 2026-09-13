@@ -127,7 +127,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.5.0"
+  version: "1.5.1"
   update_at: "2026-09-13"
   release_notes:
     en_US: Adds Emby Download playlist automation, one-off downloads with live progress, YouTube unsubscribe controls, API quota statistics, disk usage reporting and interface refinements.
