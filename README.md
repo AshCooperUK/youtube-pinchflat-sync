@@ -2,6 +2,21 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.9.2
+
+Verified direct source deletion release.
+
+- Fixes the app showing `Not in Pinchflat` while the source still exists in Pinchflat.
+- Fixes a v1.9.0/v1.9.1 verification bug where an unavailable read-only Pinchflat SQLite database could be mistaken for successful deletion.
+- Source deletion now locates the source inside the live Pinchflat application by YouTube channel identity.
+- YouTube channel ID is authoritative. Numeric Pinchflat source ID is only used when channel identity is unavailable.
+- The app calls `Pinchflat.Sources.delete_source/2` directly.
+- Pinchflat removes associated source tasks, media records and the source record through its own application code.
+- The app performs a second live source-list check after deletion.
+- `Not in Pinchflat` is shown only after Pinchflat reports zero matching sources.
+- Existing downloaded files remain when a channel is disabled.
+- Docker power control and explicit source authorisation remain unchanged.
+
 ## Version 1.9.1
 
 Safe source-authorisation and first-import release.

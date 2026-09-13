@@ -32,7 +32,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.9.1"
+VERSION = "1.9.2"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1075,6 +1075,8 @@ def process_deferred_unsubscribe_cleanups():
                     delete_pinchflat_source(
                         source_id,
                         delete_files=delete_files,
+                        subscription=sub,
+                        channel_id=job["channel_id"],
                     )
 
                 source_gone = not pinchflat_source_exists(source_id)
@@ -1284,6 +1286,7 @@ def reconcile_removed_pinchflat_sources():
         source_gone = delete_pinchflat_source(
             source_id,
             delete_files=delete_files,
+            subscription=row,
         )
 
         if source_gone:
@@ -1420,9 +1423,22 @@ def remove_subscription_source_keep_files(row):
     source_gone = delete_pinchflat_source(
         source_id,
         delete_files=False,
+        subscription=row,
     )
 
     if source_gone:
+        docker_state = pinchflat_container_status()
+
+        if docker_state["control_available"] and docker_state["running"]:
+            if pinchflat_source_exists_direct(
+                source_id=source_id,
+                channel_id=row.get("channel_id"),
+                channel_url=row.get("channel_url"),
+            ):
+                raise RuntimeError(
+                    "Pinchflat still contains this source after deletion."
+                )
+
         clear_subscription_pinchflat_link(
             row["channel_id"],
             source_id,
@@ -2911,6 +2927,7 @@ def refresh_subscriptions():
                     source_gone = delete_pinchflat_source(
                         source_id,
                         delete_files=delete_files,
+                        subscription=row,
                     )
 
                 deleted_folder = None
@@ -3252,27 +3269,80 @@ def docker_exec_in_pinchflat(command, timeout=180):
     return decoded
 
 
-def delete_pinchflat_source_direct(source_id, delete_files=False):
-    """
-    Delete through Pinchflat's own Elixir context inside its container.
 
-    This bypasses the web form and SourceDeletionWorker queue while still
-    using Pinchflat.Sources.delete_source/2, which removes all source tasks,
-    media records and the source itself.
-    """
-    source_id = int(source_id)
+def _elixir_b64(value):
+    if value is None:
+        return ""
+    return base64.b64encode(
+        str(value).encode("utf-8")
+    ).decode("ascii")
+
+
+def delete_pinchflat_source_direct(
+    source_id=None,
+    delete_files=False,
+    channel_id=None,
+    channel_url=None,
+):
+    # Delete through Pinchflat's own Sources context and verify the live list.
     delete_literal = "true" if delete_files else "false"
 
+    source_id_literal = (
+        str(int(source_id))
+        if source_id not in (None, "")
+        else "nil"
+    )
+
+    channel_id_b64 = _elixir_b64(channel_id)
+    channel_url_b64 = _elixir_b64(channel_url)
+
     expression = (
-        "case Pinchflat.Repo.get(Pinchflat.Sources.Source, "
-        f"{source_id}) do "
-        'nil -> IO.puts("SOURCE_NOT_FOUND"); '
-        "source -> "
-        "IO.inspect("
-        "Pinchflat.Sources.delete_source("
-        f"source, delete_files: {delete_literal}"
-        '), label: "DELETE_RESULT") '
-        "end"
+        'channel_id = Base.decode64!("' + channel_id_b64 + '")\n'
+        'channel_url = Base.decode64!("' + channel_url_b64 + '")\n'
+        'source_id = ' + source_id_literal + '\n'
+        '\n'
+        'matches =\n'
+        '  Pinchflat.Sources.list_sources()\n'
+        '  |> Enum.filter(fn source ->\n'
+        '    cond do\n'
+        '      channel_id != "" ->\n'
+        '        source.collection_id == channel_id or\n'
+        '          (channel_url != "" and source.original_url == channel_url)\n'
+        '      channel_url != "" ->\n'
+        '        source.original_url == channel_url\n'
+        '      not is_nil(source_id) ->\n'
+        '        source.id == source_id\n'
+        '      true ->\n'
+        '        false\n'
+        '    end\n'
+        '  end)\n'
+        '\n'
+        'IO.puts("MATCH_COUNT=" <> Integer.to_string(length(matches)))\n'
+        '\n'
+        'Enum.each(matches, fn source ->\n'
+        '  case Pinchflat.Sources.delete_source(source, delete_files: ' + delete_literal + ') do\n'
+        '    {:ok, _deleted} -> :ok\n'
+        '    other -> IO.inspect(other, label: "DELETE_ERROR")\n'
+        '  end\n'
+        'end)\n'
+        '\n'
+        'remaining =\n'
+        '  Pinchflat.Sources.list_sources()\n'
+        '  |> Enum.filter(fn source ->\n'
+        '    cond do\n'
+        '      channel_id != "" ->\n'
+        '        source.collection_id == channel_id or\n'
+        '          (channel_url != "" and source.original_url == channel_url)\n'
+        '      channel_url != "" ->\n'
+        '        source.original_url == channel_url\n'
+        '      not is_nil(source_id) ->\n'
+        '        source.id == source_id\n'
+        '      true ->\n'
+        '        false\n'
+        '    end\n'
+        '  end)\n'
+        '\n'
+        'IO.puts("REMAINING_COUNT=" <> Integer.to_string(length(remaining)))\n'
     )
 
     output = docker_exec_in_pinchflat(
@@ -3280,13 +3350,92 @@ def delete_pinchflat_source_direct(source_id, delete_files=False):
         timeout=300,
     )
 
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        if not pinchflat_source_exists_in_db(source_id):
-            return True
-        time.sleep(0.5)
+    matched = re.search(r"MATCH_COUNT=(\\d+)", output)
+    remaining = re.search(r"REMAINING_COUNT=(\\d+)", output)
 
-    return not pinchflat_source_exists_in_db(source_id)
+    if not matched or not remaining:
+        raise RuntimeError(
+            "Pinchflat direct deletion did not return verification markers. "
+            f"Output: {output[:1200] or 'No output'}"
+        )
+
+    match_count = int(matched.group(1))
+    remaining_count = int(remaining.group(1))
+
+    if "DELETE_ERROR" in output:
+        raise RuntimeError(
+            "Pinchflat returned an error while deleting the source. "
+            f"Output: {output[:1200]}"
+        )
+
+    if remaining_count != 0:
+        raise RuntimeError(
+            "Pinchflat still reports the source after direct deletion. "
+            f"Matched {match_count}, remaining {remaining_count}. "
+            f"Output: {output[:1200]}"
+        )
+
+    return {
+        "removed": True,
+        "matched": match_count,
+        "remaining": 0,
+        "output": output,
+    }
+
+
+def pinchflat_source_exists_direct(
+    source_id=None,
+    channel_id=None,
+    channel_url=None,
+):
+    source_id_literal = (
+        str(int(source_id))
+        if source_id not in (None, "")
+        else "nil"
+    )
+
+    channel_id_b64 = _elixir_b64(channel_id)
+    channel_url_b64 = _elixir_b64(channel_url)
+
+    expression = (
+        'channel_id = Base.decode64!("' + channel_id_b64 + '")\n'
+        'channel_url = Base.decode64!("' + channel_url_b64 + '")\n'
+        'source_id = ' + source_id_literal + '\n'
+        '\n'
+        'count =\n'
+        '  Pinchflat.Sources.list_sources()\n'
+        '  |> Enum.count(fn source ->\n'
+        '    cond do\n'
+        '      channel_id != "" ->\n'
+        '        source.collection_id == channel_id or\n'
+        '          (channel_url != "" and source.original_url == channel_url)\n'
+        '      channel_url != "" ->\n'
+        '        source.original_url == channel_url\n'
+        '      not is_nil(source_id) ->\n'
+        '        source.id == source_id\n'
+        '      true ->\n'
+        '        false\n'
+        '    end\n'
+        '  end)\n'
+        '\n'
+        'IO.puts("SOURCE_COUNT=" <> Integer.to_string(count))\n'
+    )
+
+    output = docker_exec_in_pinchflat(
+        ["bin/pinchflat", "eval", expression],
+        timeout=60,
+    )
+
+    match = re.search(r"SOURCE_COUNT=(\\d+)", output)
+
+    if not match:
+        raise RuntimeError(
+            "Pinchflat source verification returned no SOURCE_COUNT marker. "
+            f"Output: {output[:1000] or 'No output'}"
+        )
+
+    return int(match.group(1)) > 0
+
 
 
 def pinchflat_db_readonly():
@@ -4247,36 +4396,55 @@ def update_pinchflat_source_settings(
 
 
 
-def delete_pinchflat_source(source_id, delete_files=False):
-    """
-    Start Pinchflat's normal asynchronous source deletion.
 
-    True means the source is already gone. False means Pinchflat accepted the
-    deletion request but its background SourceDeletionWorker still owns it.
-    """
-    if not source_id or not pinchflat_source_exists(source_id):
-        return True
+def delete_pinchflat_source(
+    source_id=None,
+    delete_files=False,
+    subscription=None,
+    channel_id=None,
+    channel_url=None,
+):
+    subscription = dict(subscription or {})
+
+    channel_id = channel_id or subscription.get("channel_id") or ""
+    channel_url = channel_url or subscription.get("channel_url") or ""
+
+    if not source_id and subscription:
+        source_id = resolve_pinchflat_source_id(subscription)
 
     docker_state = pinchflat_container_status()
+
     if docker_state["control_available"]:
         if not docker_state["running"]:
-            return False
+            raise RuntimeError(
+                "Pinchflat is stopped. Start Pinchflat before removing "
+                "the source."
+            )
 
-        try:
-            return delete_pinchflat_source_direct(
-                source_id,
-                delete_files=delete_files,
+        result = delete_pinchflat_source_direct(
+            source_id=source_id,
+            delete_files=delete_files,
+            channel_id=channel_id,
+            channel_url=channel_url,
+        )
+
+        if pinchflat_source_exists_direct(
+            source_id=source_id,
+            channel_id=channel_id,
+            channel_url=channel_url,
+        ):
+            raise RuntimeError(
+                "Pinchflat direct deletion completed but the source is still "
+                "present in the live Pinchflat source list."
             )
-        except Exception as exc:
-            log_activity(
-                "pinchflat",
-                "Direct source deletion failed",
-                (
-                    f"Source {source_id}: {exc}. "
-                    "Falling back to Pinchflat's web deletion route."
-                ),
-                "warning",
-            )
+
+        return bool(result["removed"])
+
+    if not source_id:
+        return True
+
+    if not pinchflat_source_exists(source_id):
+        return True
 
     session_obj = pinchflat_session()
     source_url = f"{PINCHFLAT_URL}/sources/{source_id}"
@@ -4288,6 +4456,7 @@ def delete_pinchflat_source(source_id, delete_files=False):
 
     if response.status_code == 404:
         return True
+
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -4301,12 +4470,11 @@ def delete_pinchflat_source(source_id, delete_files=False):
             else ""
         )
         action = form.get("action") or ""
+
         if method_value == "delete" and f"/sources/{source_id}" in action:
             delete_form = form
             break
 
-    # When Pinchflat has already marked a source for deletion its delete form
-    # can disappear while the background worker is still running.
     if delete_form is None:
         return not pinchflat_source_exists(source_id)
 
@@ -4318,11 +4486,12 @@ def delete_pinchflat_source(source_id, delete_files=False):
     target = (
         action
         if action.startswith(("http://", "https://"))
-        else f"{PINCHFLAT_URL}{action if action.startswith('/') else '/' + action}"
+        else (
+            f"{PINCHFLAT_URL}"
+            f"{action if action.startswith('/') else '/' + action}"
+        )
     )
 
-    # Pinchflat's router exposes DELETE /sources/:id directly. Sending the
-    # actual HTTP verb avoids relying on Phoenix/Plug form-method override.
     result = session_obj.delete(
         target,
         data=payload,
@@ -4333,17 +4502,27 @@ def delete_pinchflat_source(source_id, delete_files=False):
     if result.status_code == 404:
         return True
 
-    if result.status_code in (301, 302, 303):
-        return not pinchflat_source_exists(source_id)
+    if result.status_code not in (301, 302, 303):
+        body = " ".join(
+            BeautifulSoup(
+                result.text,
+                "html.parser",
+            ).stripped_strings
+        )
+        raise RuntimeError(
+            f"Pinchflat could not remove source {source_id}. "
+            f"HTTP {result.status_code}. "
+            f"Response: {body[:500] or 'No error text returned.'}"
+        )
 
-    body = " ".join(
-        BeautifulSoup(result.text, "html.parser").stripped_strings
-    )
-    raise RuntimeError(
-        f"Pinchflat could not remove source {source_id}. "
-        f"HTTP {result.status_code}. "
-        f"Response: {body[:300] or 'No error text returned.'}"
-    )
+    deadline = time.time() + 30
+
+    while time.time() < deadline:
+        if not pinchflat_source_exists(source_id):
+            return True
+        time.sleep(1)
+
+    return False
 
 
 
