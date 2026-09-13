@@ -64,9 +64,20 @@
     .pill { display:inline-flex; padding:4px 8px; border-radius:999px; background:#24344a; font-size:12px; white-space:nowrap; }
     .pill.enabled { color:var(--green); } .pill.disabled { color:#c8d3e5; }
     .pill.pending,.pill.review { color:var(--amber); } .pill.error,.pill.removed { color:var(--red); }
+    .channel-cell { width:132px; min-width:132px; text-align:center; }
+    .channel-card {
+      width:116px; display:flex; flex-direction:column; align-items:center;
+      justify-content:flex-start; gap:7px; margin:0 auto;
+    }
+    .channel-avatar {
+      width:72px; height:72px; border-radius:50%; object-fit:cover;
+      display:block; background:#08111f; border:2px solid #30415b;
+      box-shadow:0 2px 10px rgba(0,0,0,.24);
+    }
     .channel-title {
-      display:inline-block; max-width:230px; white-space:nowrap; overflow:hidden;
-      text-overflow:ellipsis; vertical-align:bottom; font-weight:750;
+      display:block; width:116px; max-width:116px; white-space:nowrap;
+      overflow:hidden; text-overflow:ellipsis; text-align:center;
+      font-weight:750; font-size:13px; line-height:1.25;
     }
     .error-text { max-width:300px; color:var(--red); font-size:12px; word-break:break-word; }
     .row-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
@@ -310,10 +321,22 @@
             <td>
               <input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">
             </td>
-            <td>
-              <a class="channel-title" title="{{ sub['title'] }}" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
-              {% if not sub["active"] %}<div class="small bad">No longer subscribed</div>{% endif %}
-              {% if sub["needs_review"] %}<div class="small warn">Waiting for approval</div>{% endif %}
+            <td class="channel-cell">
+              <div class="channel-card">
+                <a href="{{ sub['channel_url'] }}" target="_blank" title="{{ sub['title'] }}">
+                  <img
+                    class="channel-avatar"
+                    src="{{ sub['thumbnail_url'] or url_for('static', filename='channel-placeholder.svg') }}"
+                    alt="{{ sub['title'] }} channel image"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}';"
+                  >
+                </a>
+                <a class="channel-title" title="{{ sub['title'] }}" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
+                {% if not sub["active"] %}<div class="small bad">No longer subscribed</div>{% endif %}
+                {% if sub["needs_review"] %}<div class="small warn">Waiting for approval</div>{% endif %}
+              </div>
             </td>
             <td>
               <span class="pill {{ sub['ui_status'] }}">{{ sub['ui_status']|replace('_',' ')|title }}</span>

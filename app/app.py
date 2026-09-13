@@ -21,7 +21,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -192,6 +192,7 @@ def init_db():
         ensure_column(conn, "subscriptions", "removed_at", "TEXT")
         ensure_column(conn, "subscriptions", "retry_count", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "subscriptions", "youtube_subscription_id", "TEXT")
+        ensure_column(conn, "subscriptions", "thumbnail_url", "TEXT")
 
         conn.executescript(
             """
@@ -1267,6 +1268,14 @@ def youtube_subscriptions(creds):
             snippet = item["snippet"]
             channel_id = snippet["resourceId"]["channelId"]
 
+            thumbnails = snippet.get("thumbnails") or {}
+            thumbnail = (
+                thumbnails.get("high")
+                or thumbnails.get("medium")
+                or thumbnails.get("default")
+                or {}
+            )
+
             items.append(
                 {
                     "channel_id": channel_id,
@@ -1276,6 +1285,7 @@ def youtube_subscriptions(creds):
                     ),
                     "subscribed_at": snippet.get("publishedAt"),
                     "youtube_subscription_id": item.get("id"),
+                    "thumbnail_url": thumbnail.get("url", ""),
                 }
             )
 
@@ -1344,9 +1354,10 @@ def refresh_subscriptions():
                         download_enabled,
                         needs_review,
                         removed_at,
-                        youtube_subscription_id
+                        youtube_subscription_id,
+                        thumbnail_url
                     )
-                    VALUES (?, ?, ?, ?, ?, 1, 'default', ?, ?, NULL, ?)
+                    VALUES (?, ?, ?, ?, ?, 1, 'default', ?, ?, NULL, ?, ?)
                     """,
                     (
                         sub["channel_id"],
@@ -1357,6 +1368,7 @@ def refresh_subscriptions():
                         enabled,
                         needs_review,
                         sub.get("youtube_subscription_id"),
+                        sub.get("thumbnail_url", ""),
                     ),
                 )
             else:
@@ -1367,6 +1379,7 @@ def refresh_subscriptions():
                         channel_url = ?,
                         subscribed_at = ?,
                         youtube_subscription_id = ?,
+                        thumbnail_url = ?,
                         active = 1,
                         removed_at = NULL
                     WHERE channel_id = ?
@@ -1376,6 +1389,7 @@ def refresh_subscriptions():
                         sub["channel_url"],
                         sub["subscribed_at"],
                         sub.get("youtube_subscription_id"),
+                        sub.get("thumbnail_url", ""),
                         sub["channel_id"],
                     ),
                 )

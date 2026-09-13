@@ -2,6 +2,18 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.5.2
+
+Channel artwork update.
+
+- Shows the YouTube channel image above the channel name in the subscriptions table.
+- Stores the thumbnail URL returned by the YouTube subscriptions API.
+- Uses the highest available subscription thumbnail.
+- Existing installations gain the new database field automatically.
+- If a channel has no image, or the remote image fails to load, the app uses its own built-in YouTube Pinchflat Sync icon.
+- Channel names remain shortened in the table, while hovering shows the full name.
+- Run Refresh YouTube once after upgrading to populate images for existing subscriptions.
+
 ## Version 1.5.1
 
 Maintenance release fixing the v1.5.0 startup failure.
