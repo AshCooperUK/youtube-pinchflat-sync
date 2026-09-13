@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1854,7 +1854,9 @@ def youtube_discovery_results(kind="videos", limit=24):
         )
 
     kind = "shorts" if kind == "shorts" else "videos"
-    limit = min(max(int(limit or 24), 1), 40)
+    max_limit = 40 if kind == "shorts" else 100
+    default_limit = 24 if kind == "shorts" else 100
+    limit = min(max(int(limit or default_limit), 1), max_limit)
 
     with db() as conn:
         subscribed_ids = {
@@ -1864,41 +1866,123 @@ def youtube_discovery_results(kind="videos", limit=24):
             ).fetchall()
         }
 
-    query, interest_seeds = personalised_discovery_query(kind)
+    personalised_query, interest_seeds = personalised_discovery_query(kind)
 
-    params = {
-        "part": "snippet",
-        "type": "video",
-        "maxResults": 50,
-        "q": query,
-        "safeSearch": "moderate",
-        "videoEmbeddable": "true",
-        "relevanceLanguage": "en",
-        "regionCode": "GB",
-        "order": random.choice(["relevance", "date", "viewCount"]),
-    }
     if kind == "shorts":
-        params["videoDuration"] = "short"
+        search_plans = [
+            {
+                "query": personalised_query,
+                "order": "relevance",
+                "source": "personalised",
+            },
+            {
+                "query": personalised_query,
+                "order": "date",
+                "source": "personalised",
+            },
+        ]
+    else:
+        fallback_terms = random.sample(
+            DISCOVERY_TERMS,
+            k=min(5, len(DISCOVERY_TERMS)),
+        )
 
-    response = youtube_api_request(
-        creds,
-        "GET",
-        "search",
-        "search.list",
-        1,
-        params=params,
-    )
-    payload = response.json()
+        search_plans = [
+            {
+                "query": personalised_query,
+                "order": "relevance",
+                "source": "personalised",
+            },
+            {
+                "query": personalised_query,
+                "order": "viewCount",
+                "source": "personalised",
+            },
+        ]
 
-    search_items = payload.get("items", [])
+        fallback_orders = [
+            "relevance",
+            "date",
+            "viewCount",
+            "date",
+            "relevance",
+        ]
+
+        for term, order in zip(fallback_terms, fallback_orders):
+            search_plans.append(
+                {
+                    "query": term,
+                    "order": order,
+                    "source": "uk_fallback",
+                }
+            )
+
+    raw_items = []
+    seen_video_ids = set()
+    search_calls = 0
+    search_remaining = stats["search_remaining"]
+    target_pool = 75 if kind == "shorts" else 165
+
+    for plan_index, plan in enumerate(search_plans):
+        if search_calls >= search_remaining:
+            break
+
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "maxResults": 50,
+            "q": plan["query"],
+            "safeSearch": "moderate",
+            "videoEmbeddable": "true",
+            "relevanceLanguage": "en",
+            "regionCode": "GB",
+            "order": plan["order"],
+        }
+
+        if kind == "shorts":
+            params["videoDuration"] = "short"
+
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "search",
+            "search.list",
+            1,
+            params=params,
+        )
+        search_calls += 1
+
+        for position, item in enumerate(response.json().get("items", [])):
+            video_id = (item.get("id") or {}).get("videoId")
+            if not video_id or video_id in seen_video_ids:
+                continue
+
+            seen_video_ids.add(video_id)
+            raw_items.append(
+                {
+                    "search_item": item,
+                    "source": plan["source"],
+                    "plan_index": plan_index,
+                    "position": position,
+                }
+            )
+
+        if len(raw_items) >= target_pool:
+            break
+
     video_ids = [
-        (item.get("id") or {}).get("videoId")
-        for item in search_items
-        if (item.get("id") or {}).get("videoId")
+        (entry["search_item"].get("id") or {}).get("videoId")
+        for entry in raw_items
+        if (entry["search_item"].get("id") or {}).get("videoId")
     ]
 
-    language_by_video = {}
-    if video_ids:
+    details_by_video = {}
+
+    for chunk_start in range(0, len(video_ids), 50):
+        chunk = video_ids[chunk_start:chunk_start + 50]
+        if not chunk:
+            continue
+
         details_response = youtube_api_request(
             creds,
             "GET",
@@ -1906,80 +1990,146 @@ def youtube_discovery_results(kind="videos", limit=24):
             "videos.list",
             1,
             params={
-                "part": "snippet",
-                "id": ",".join(video_ids[:50]),
+                "part": "snippet,statistics,contentDetails",
+                "id": ",".join(chunk),
                 "maxResults": 50,
             },
         )
 
         for video in details_response.json().get("items", []):
+            video_id = video.get("id") or ""
             snippet = video.get("snippet") or {}
-            language_by_video[video.get("id")] = {
-                "default_audio_language": snippet.get("defaultAudioLanguage") or "",
+            statistics = video.get("statistics") or {}
+            content_details = video.get("contentDetails") or {}
+            thumbnails = snippet.get("thumbnails") or {}
+
+            thumbnail = (
+                thumbnails.get("maxres")
+                or thumbnails.get("standard")
+                or thumbnails.get("high")
+                or thumbnails.get("medium")
+                or thumbnails.get("default")
+                or {}
+            )
+
+            details_by_video[video_id] = {
+                "default_audio_language": (
+                    snippet.get("defaultAudioLanguage") or ""
+                ),
                 "default_language": snippet.get("defaultLanguage") or "",
                 "description": snippet.get("description") or "",
+                "channel_id": snippet.get("channelId") or "",
+                "channel_title": snippet.get("channelTitle") or "",
+                "title": snippet.get("title") or "",
+                "published_at": snippet.get("publishedAt") or "",
+                "thumbnail_url": thumbnail.get("url") or "",
+                "view_count": int(statistics.get("viewCount") or 0),
+                "duration": youtube_duration_label(
+                    content_details.get("duration") or ""
+                ),
             }
 
     candidates = []
     channel_ids = []
-    for item in search_items:
+
+    for entry in raw_items:
+        item = entry["search_item"]
         snippet = item.get("snippet") or {}
         video_id = (item.get("id") or {}).get("videoId")
-        channel_id = snippet.get("channelId")
-        if not video_id or not channel_id:
-            continue
-        if channel_id in subscribed_ids:
-            continue
+        details = details_by_video.get(video_id, {})
 
-        language_info = language_by_video.get(video_id, {})
-        explicit_language = (
-            language_info.get("default_audio_language")
-            or language_info.get("default_language")
+        channel_id = (
+            details.get("channel_id")
+            or snippet.get("channelId")
             or ""
         )
 
-        # When YouTube publishes an explicit language, require English.
-        if explicit_language and not english_language_code(explicit_language):
+        if not video_id or not channel_id:
             continue
 
-        # When no language metadata exists, reject obviously non-Latin titles.
-        # Remaining results are already ranked by relevanceLanguage=en and GB.
+        if channel_id in subscribed_ids:
+            continue
+
+        explicit_language = (
+            details.get("default_audio_language")
+            or details.get("default_language")
+            or ""
+        )
+
+        if (
+            explicit_language
+            and not english_language_code(explicit_language)
+        ):
+            continue
+
+        title = (
+            details.get("title")
+            or snippet.get("title")
+            or "YouTube video"
+        )
+        channel_title = (
+            details.get("channel_title")
+            or snippet.get("channelTitle")
+            or "YouTube"
+        )
+
         if (
             not explicit_language
             and (
-                has_obvious_non_latin_title(snippet.get("title"))
-                or has_obvious_non_latin_title(snippet.get("channelTitle"))
+                has_obvious_non_latin_title(title)
+                or has_obvious_non_latin_title(channel_title)
             )
         ):
             continue
 
-        candidates.append(
-            {
-                "video_id": video_id,
-                "channel_id": channel_id,
-                "title": snippet.get("title") or "YouTube video",
-                "channel_title": snippet.get("channelTitle") or "YouTube",
-                "published_at": snippet.get("publishedAt") or "",
-                "description": (
-                    language_info.get("description")
-                    or snippet.get("description")
-                    or ""
-                ),
-                "video_url": f"https://www.youtube.com/watch?v={video_id}",
-                "shorts_url": f"https://www.youtube.com/shorts/{video_id}",
-                "thumbnail_url": (
-                    ((snippet.get("thumbnails") or {}).get("high") or {}).get("url")
-                    or ((snippet.get("thumbnails") or {}).get("medium") or {}).get("url")
-                    or ((snippet.get("thumbnails") or {}).get("default") or {}).get("url")
-                    or ""
-                ),
-            }
-        )
+        candidate = {
+            "video_id": video_id,
+            "channel_id": channel_id,
+            "title": title,
+            "channel_title": channel_title,
+            "published_at": (
+                details.get("published_at")
+                or snippet.get("publishedAt")
+                or ""
+            ),
+            "description": details.get("description") or "",
+            "video_url": (
+                f"https://www.youtube.com/watch?v={video_id}"
+            ),
+            "shorts_url": (
+                f"https://www.youtube.com/shorts/{video_id}"
+            ),
+            "channel_url": (
+                f"https://www.youtube.com/channel/{channel_id}"
+            ),
+            "thumbnail_url": (
+                details.get("thumbnail_url")
+                or (
+                    (
+                        (snippet.get("thumbnails") or {}).get("high")
+                        or {}
+                    ).get("url")
+                )
+                or ""
+            ),
+            "view_count": int(details.get("view_count") or 0),
+            "duration": details.get("duration") or "",
+            "recommendation_source": entry["source"],
+            "_plan_index": entry["plan_index"],
+            "_position": entry["position"],
+        }
+
+        candidates.append(candidate)
         channel_ids.append(channel_id)
 
     avatar_by_channel = {}
-    unique_channel_ids = list(dict.fromkeys(channel_ids))[:50]
-    if unique_channel_ids:
+    unique_channel_ids = list(dict.fromkeys(channel_ids))
+
+    for chunk_start in range(0, len(unique_channel_ids), 50):
+        chunk = unique_channel_ids[chunk_start:chunk_start + 50]
+        if not chunk:
+            continue
+
         response = youtube_api_request(
             creds,
             "GET",
@@ -1988,12 +2138,13 @@ def youtube_discovery_results(kind="videos", limit=24):
             1,
             params={
                 "part": "snippet",
-                "id": ",".join(unique_channel_ids),
+                "id": ",".join(chunk),
                 "maxResults": 50,
             },
         )
-        for item in response.json().get("items", []):
-            snippet = item.get("snippet") or {}
+
+        for channel in response.json().get("items", []):
+            snippet = channel.get("snippet") or {}
             thumbnails = snippet.get("thumbnails") or {}
             image = (
                 thumbnails.get("high")
@@ -2001,31 +2152,59 @@ def youtube_discovery_results(kind="videos", limit=24):
                 or thumbnails.get("default")
                 or {}
             )
-            avatar_by_channel[item.get("id")] = image.get("url", "")
+            avatar_by_channel[channel.get("id")] = image.get("url", "")
 
-    random.shuffle(candidates)
-    results = []
-    seen_channels = set()
+    grouped = {}
     for item in candidates:
-        # Video discovery is deliberately channel-diverse. Shorts are allowed
-        # to repeat a channel if the search result set is small.
-        if kind == "videos" and item["channel_id"] in seen_channels:
-            continue
-        seen_channels.add(item["channel_id"])
-        item["channel_avatar_url"] = avatar_by_channel.get(
-            item["channel_id"],
-            "",
-        )
-        results.append(item)
-        if len(results) >= limit:
+        grouped.setdefault(item["_plan_index"], []).append(item)
+
+    ordered = []
+    seen_result_ids = set()
+    personalised_count = 0
+    fallback_count = 0
+
+    for plan_index in sorted(grouped):
+        batch = grouped[plan_index]
+        random.shuffle(batch)
+
+        for item in batch:
+            if item["video_id"] in seen_result_ids:
+                continue
+
+            seen_result_ids.add(item["video_id"])
+
+            avatar = avatar_by_channel.get(item["channel_id"], "")
+            item["channel_avatar_url"] = avatar
+            item["channel_thumbnail_url"] = avatar
+
+            item.pop("_plan_index", None)
+            item.pop("_position", None)
+
+            if item["recommendation_source"] == "personalised":
+                personalised_count += 1
+            else:
+                fallback_count += 1
+
+            ordered.append(item)
+
+            if len(ordered) >= limit:
+                break
+
+        if len(ordered) >= limit:
             break
 
     return {
         "kind": kind,
-        "query": query,
+        "query": personalised_query,
         "interest_seeds": interest_seeds,
-        "results": results,
-        "search_remaining": max(0, stats["search_remaining"] - 1),
+        "results": ordered,
+        "personalised_count": personalised_count,
+        "fallback_count": fallback_count,
+        "search_calls_used": search_calls,
+        "search_remaining": max(
+            0,
+            stats["search_remaining"] - search_calls,
+        ),
     }
 
 
@@ -8987,7 +9166,10 @@ def discover_videos():
                 }
             )
 
-        result = youtube_discovery_results(kind=kind, limit=24)
+        result = youtube_discovery_results(
+            kind=kind,
+            limit=24 if kind == "shorts" else 100,
+        )
         result["results"] = annotate_favourites(result.get("results", []))
         return jsonify({"ok": True, **result})
     except Exception as exc:

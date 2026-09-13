@@ -2,6 +2,26 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.5.0
+
+Random Videos / For You redesign.
+
+- Expands Random Videos to a target of up to 100 video tiles.
+- YouTube Data API does not expose the signed-in YouTube Home recommendation feed, so the app builds its own For You-style feed.
+- The first search batches use subscriptions, favourite channels and videos liked through this app as personal interest signals.
+- If personalised results do not fill 100 positions, additional English/UK discovery searches fill the remaining tiles.
+- Current subscribed channels remain excluded from Discover so the page continues to help find other creators.
+- Uses several relevance, date and view-count search batches to improve variety.
+- Random Video cards are now clean 16:9 thumbnail-only tiles.
+- Channel avatars, channel names and action buttons are removed from the normal tile layout.
+- Hovering a tile reveals the video title, channel, views and publication age.
+- Duration remains visible in the bottom-right corner.
+- A small Favourite Channel heart appears over the thumbnail on hover and remains visible when favourited.
+- Favourite Video and Like on YouTube buttons are removed from the Random Videos grid.
+- Clicking a Random Video opens the existing in-app playback popup.
+- Channel avatar data is still retained in the background for Favourite Channel and the playback popup.
+- Random Shorts and Top 100 retain their existing layouts.
+
 ## Version 2.4.0
 
 Home-page Shorts shelf.

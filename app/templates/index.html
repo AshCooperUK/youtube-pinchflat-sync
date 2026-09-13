@@ -152,6 +152,130 @@
     .discover-video-title { color:var(--text); font-weight:700; line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
     .discover-channel { color:var(--muted); font-size:13px; }
 
+    .discover-video-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(230px,1fr));
+      gap:12px;
+    }
+    .discover-video-tile {
+      position:relative;
+      aspect-ratio:16/9;
+      overflow:hidden;
+      border-radius:12px;
+      background:#050a12;
+      border:1px solid var(--line);
+      cursor:pointer;
+      min-width:0;
+    }
+    .discover-video-tile:hover { border-color:#4f79ba; }
+    .discover-video-thumb {
+      display:block;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      transition:transform .18s ease;
+    }
+    .discover-video-tile:hover .discover-video-thumb {
+      transform:scale(1.025);
+    }
+    .discover-video-overlay {
+      position:absolute;
+      inset:0;
+      display:flex;
+      flex-direction:column;
+      justify-content:flex-end;
+      padding:14px;
+      background:linear-gradient(
+        to bottom,
+        rgba(2,7,14,0) 22%,
+        rgba(2,7,14,.20) 45%,
+        rgba(2,7,14,.94) 100%
+      );
+      opacity:0;
+      transition:opacity .16s ease;
+      pointer-events:none;
+    }
+    .discover-video-tile:hover .discover-video-overlay,
+    .discover-video-tile:focus-within .discover-video-overlay {
+      opacity:1;
+    }
+    .discover-hover-title {
+      color:#fff;
+      font-size:14px;
+      font-weight:800;
+      line-height:1.3;
+      display:-webkit-box;
+      -webkit-box-orient:vertical;
+      -webkit-line-clamp:2;
+      overflow:hidden;
+    }
+    .discover-hover-channel {
+      margin-top:5px;
+      color:#d2dcec;
+      font-size:12px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .discover-hover-meta {
+      margin-top:4px;
+      color:#aebbd0;
+      font-size:11px;
+    }
+    .discover-video-duration {
+      position:absolute;
+      right:8px;
+      bottom:8px;
+      padding:3px 6px;
+      border-radius:5px;
+      background:rgba(0,0,0,.84);
+      color:#fff;
+      font-size:11px;
+      font-weight:800;
+      transition:opacity .16s ease;
+    }
+    .discover-video-tile:hover .discover-video-duration {
+      opacity:0;
+    }
+    .discover-channel-heart {
+      position:absolute;
+      z-index:3;
+      top:8px;
+      right:8px;
+      width:34px;
+      height:34px;
+      display:grid;
+      place-items:center;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.30);
+      background:rgba(4,10,18,.84);
+      color:#fff;
+      font-size:19px;
+      cursor:pointer;
+      opacity:0;
+      transition:opacity .16s ease, transform .16s ease;
+    }
+    .discover-video-tile:hover .discover-channel-heart,
+    .discover-channel-heart.active {
+      opacity:1;
+    }
+    .discover-channel-heart:hover { transform:scale(1.08); }
+    .discover-channel-heart.active {
+      color:#ff4f81;
+      border-color:#ff4f81;
+      background:rgba(44,8,23,.92);
+    }
+    @media (max-width:720px) {
+      .discover-video-grid {
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+    }
+    @media (max-width:460px) {
+      .discover-video-grid {
+        grid-template-columns:1fr;
+      }
+    }
+
     .latest-videos-card { margin-top:18px; margin-bottom:18px; }
     .latest-videos-grid {
       display:grid;
@@ -1111,7 +1235,7 @@
 
 <dialog id="discover-dialog">
   <div class="modal-head">
-    <div><h2 style="margin:0">YouTube Discover</h2><div class="muted small">Random public videos from channels you are not currently subscribed to.</div></div>
+    <div><h2 style="margin:0">YouTube Discover</h2><div class="muted small">A For You-style feed based on your subscriptions, favourites and likes, filled with English UK videos when needed.</div></div>
     <button class="modal-close" onclick="closeDiscover()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
@@ -1125,7 +1249,7 @@
     <div id="discover-loading" class="empty hidden">Finding something different…</div>
     <div id="discover-error" class="flash error hidden"></div>
     <div id="discover-videos-panel">
-      <div id="discover-grid" class="discover-grid"></div>
+      <div id="discover-grid" class="discover-video-grid"></div>
     </div>
     <div id="discover-top100-panel" class="hidden">
       <p class="muted small">English-language channels from the current global Top 100 subscriber ranking. Channel images come from YouTube. Click a tile to open the channel.</p>
@@ -2649,12 +2773,16 @@ async function loadDiscover(mode, force=false) {
         `Top 100 source: ${data.source || "Wikipedia"}. No YouTube search quota used.`;
       renderTop100Tiles(discoverResults.top100);
     } else {
-      document.getElementById("discover-quota").textContent =
-        `YouTube discovery searches remaining today: ${data.search_remaining}`;
-
       if (mode === "videos") {
+        const personalised = Number(data.personalised_count || 0);
+        const fallback = Number(data.fallback_count || 0);
+        document.getElementById("discover-quota").textContent =
+          `${discoverResults.videos.length} videos · ${personalised} matched to your interests · ${fallback} UK English fallback · ${data.search_remaining} discovery searches remaining today`;
         renderDiscoverTiles(discoverResults.videos);
       } else {
+        document.getElementById("discover-quota").textContent =
+          `YouTube discovery searches remaining today: ${data.search_remaining}`;
+
         const interests = (data.interest_seeds || []).slice(0, 3);
         const note = document.getElementById("shorts-interest-note");
         if (note) {
@@ -2685,61 +2813,120 @@ function renderDiscoverTiles(items) {
   grid.replaceChildren();
 
   if (!items.length) {
-    grid.appendChild(emptyMessage("No discovery results were returned. Press Refresh to try another search."));
+    grid.appendChild(
+      emptyMessage(
+        "No discovery results were returned. Press Refresh to try another search."
+      )
+    );
     return;
   }
 
   items.forEach(item => {
-    const card = document.createElement("div");
-    card.className = "discover-tile";
+    const card = document.createElement("article");
+    card.className = "discover-video-tile";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.title = `${item.channel_title}: ${item.title}`;
+
+    const image = document.createElement("img");
+    image.className = "discover-video-thumb";
+    image.src =
+      item.thumbnail_url ||
+      "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    image.alt = item.title || "YouTube video";
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
 
     const heart = document.createElement("button");
-    heart.className = `heart-btn discover-heart ${item.is_favourite_channel ? "active" : ""}`;
+    heart.type = "button";
+    heart.className =
+      `discover-channel-heart ${item.is_favourite_channel ? "active" : ""}`;
+    heart.dataset.channelId = item.channel_id || "";
     heart.textContent = item.is_favourite_channel ? "♥" : "♡";
-    heart.title = item.is_favourite_channel ? "Remove channel from favourites" : "Favourite channel";
-    heart.onclick = () => toggleChannelFavourite(heart, item.channel_id, item.channel_title, `https://www.youtube.com/channel/${item.channel_id}`, item.channel_avatar_url || "");
+    heart.title = item.is_favourite_channel
+      ? `Remove ${item.channel_title} from favourite channels`
+      : `Favourite ${item.channel_title}`;
 
-    const link = document.createElement("a");
-    link.className = "discover-main-link";
-    link.href = item.video_url;
-    link.target = "_blank";
-    link.rel = "noopener";
-    link.title = `${item.channel_title}: ${item.title}`;
+    heart.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
 
-    const img = document.createElement("img");
-    img.className = "discover-avatar";
-    img.src = item.channel_avatar_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
-    img.alt = `${item.channel_title} channel image`;
-    img.referrerPolicy = "no-referrer";
-    img.onerror = () => { img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
+      toggleChannelFavourite(
+        heart,
+        item.channel_id || "",
+        item.channel_title || "YouTube channel",
+        item.channel_url ||
+          `https://www.youtube.com/channel/${item.channel_id}`,
+        item.channel_thumbnail_url ||
+          item.channel_avatar_url ||
+          ""
+      );
+    });
 
-    const channel = document.createElement("div");
-    channel.className = "discover-channel";
-    channel.textContent = item.channel_title;
+    const overlay = document.createElement("div");
+    overlay.className = "discover-video-overlay";
 
     const title = document.createElement("div");
-    title.className = "discover-video-title";
-    title.textContent = item.title;
+    title.className = "discover-hover-title";
+    title.textContent = item.title || "YouTube video";
 
-    link.append(img, channel, title);
+    const channel = document.createElement("div");
+    channel.className = "discover-hover-channel";
+    channel.textContent = item.channel_title || "YouTube";
 
-    const actions = document.createElement("div");
-    actions.className = "discover-actions";
-    const videoHeart = document.createElement("button");
-    videoHeart.className = `btn secondary smallbtn ${item.is_favourite_video ? "active" : ""}`;
-    videoHeart.textContent = item.is_favourite_video ? "♥ Video" : "♡ Video";
-    videoHeart.onclick = () => toggleVideoFavourite(videoHeart, item);
-    const youtubeLike = document.createElement("button");
-    youtubeLike.className = "btn ghost smallbtn";
-    youtubeLike.textContent = "👍 Like on YouTube";
-    youtubeLike.title = "Like this video on YouTube";
-    youtubeLike.onclick = () => likeVideoOnYouTube(youtubeLike, item);
-    actions.append(videoHeart, youtubeLike);
+    const meta = document.createElement("div");
+    meta.className = "discover-hover-meta";
 
-    card.append(heart, link, actions);
+    const bits = [
+      formatLatestViewCount(item.view_count),
+      formatLatestAge(item.published_at)
+    ].filter(Boolean);
+
+    meta.textContent = bits.join(" · ");
+
+    overlay.append(title, channel, meta);
+
+    card.append(image, heart, overlay);
+
+    if (item.duration) {
+      const duration = document.createElement("span");
+      duration.className = "discover-video-duration";
+      duration.textContent = item.duration;
+      card.appendChild(duration);
+    }
+
+    card.addEventListener("click", event => {
+      if (event.target.closest(".discover-channel-heart")) return;
+
+      openLatestVideo({
+        ...item,
+        is_short: false,
+        channel_thumbnail_url:
+          item.channel_thumbnail_url ||
+          item.channel_avatar_url ||
+          ""
+      });
+    });
+
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+
+        openLatestVideo({
+          ...item,
+          is_short: false,
+          channel_thumbnail_url:
+            item.channel_thumbnail_url ||
+            item.channel_avatar_url ||
+            ""
+        });
+      }
+    });
+
     grid.appendChild(card);
   });
 }
+
 
 function renderTop100Tiles(items) {
   const grid = document.getElementById("discover-top100-grid");
