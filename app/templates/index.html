@@ -467,7 +467,13 @@
                   </div>
                 {% else %}
                   <div class="small muted">
-                    {{ 'In Pinchflat' if sub['pinchflat_added'] else 'Pending' }}
+                    {% if sub['pinchflat_added'] %}
+                      In Pinchflat
+                    {% elif sub['source_authorised'] %}
+                      Pending Pinchflat creation
+                    {% else %}
+                      Save to add to Pinchflat
+                    {% endif %}
                   </div>
                 {% endif %}
               {% endif %}

@@ -32,7 +32,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -251,6 +251,33 @@ def init_db():
         ensure_column(conn, "subscriptions", "retry_count", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "subscriptions", "youtube_subscription_id", "TEXT")
         ensure_column(conn, "subscriptions", "thumbnail_url", "TEXT")
+        source_authorised_added = ensure_column(
+            conn,
+            "subscriptions",
+            "source_authorised",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+
+        # v1.9.1 safety migration. Only an existing Pinchflat link is trusted
+        # as authorised. Old Enabled/Pending state must not recreate sources.
+        if source_authorised_added:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET source_authorised = CASE
+                    WHEN pinchflat_added = 1 THEN 1
+                    ELSE 0
+                END
+                """
+            )
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET download_enabled = 0
+                WHERE source_authorised = 0
+                  AND pinchflat_added = 0
+                """
+            )
 
         conn.executescript(
             """
@@ -388,6 +415,21 @@ def init_db():
                     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
                     (key, value),
                 )
+
+        baseline = conn.execute(
+            "SELECT value FROM settings WHERE key = 'youtube_baseline_complete'"
+        ).fetchone()
+        if baseline is None:
+            existing_count = conn.execute(
+                "SELECT COUNT(*) AS c FROM subscriptions"
+            ).fetchone()["c"]
+            conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES ('youtube_baseline_complete', ?)
+                """,
+                ("1" if existing_count else "0",),
+            )
 
 
 def now_iso():
@@ -1428,6 +1470,7 @@ def ensure_enabled_subscription_source(row, apply_settings=True):
         not row.get("active")
         or row.get("needs_review")
         or not subscription_download_enabled(row)
+        or not subscription_source_authorised(row)
     ):
         return {
             "created": False,
@@ -1500,6 +1543,7 @@ def apply_subscription_source_authority(row, apply_settings=True):
 
     desired_in_pinchflat = (
         subscription_download_enabled(row)
+        and subscription_source_authorised(row)
         and not bool(row.get("needs_review"))
     )
 
@@ -1564,6 +1608,7 @@ def reconcile_active_source_authority(max_changes=25):
 
         desired = (
             subscription_download_enabled(row)
+            and subscription_source_authorised(row)
             and not bool(row.get("needs_review"))
         )
         source_id = resolve_pinchflat_source_id(row)
@@ -2543,6 +2588,10 @@ def refresh_subscriptions():
     first_seen = now_iso()
     current_ids = {sub["channel_id"] for sub in subs}
     policy = new_subscription_policy()
+    first_import = not setting_bool(
+        "youtube_baseline_complete",
+        False,
+    )
 
     new_count = 0
     reactivated_count = 0
@@ -2576,8 +2625,19 @@ def refresh_subscriptions():
 
             if existing is None:
                 new_count += 1
-                enabled = 1 if policy == "auto_enable" else 0
-                needs_review = 1 if policy == "review" else 0
+
+                # First connection establishes a safe baseline. Existing
+                # subscriptions are not treated as newly subscribed channels.
+                if first_import:
+                    enabled = 0
+                    needs_review = 1
+                    source_authorised = 0
+                else:
+                    enabled = 1 if policy == "auto_enable" else 0
+                    needs_review = 1 if policy == "review" else 0
+                    source_authorised = (
+                        1 if policy == "auto_enable" else 0
+                    )
 
                 conn.execute(
                     """
@@ -2590,12 +2650,13 @@ def refresh_subscriptions():
                         active,
                         history_mode,
                         download_enabled,
+                        source_authorised,
                         needs_review,
                         removed_at,
                         youtube_subscription_id,
                         thumbnail_url
                     )
-                    VALUES (?, ?, ?, ?, ?, 1, 'default', ?, ?, NULL, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, 1, 'default', ?, ?, ?, NULL, ?, ?)
                     """,
                     (
                         sub["channel_id"],
@@ -2604,6 +2665,7 @@ def refresh_subscriptions():
                         sub["subscribed_at"],
                         first_seen,
                         enabled,
+                        source_authorised,
                         needs_review,
                         sub.get("youtube_subscription_id"),
                         sub.get("thumbnail_url", ""),
@@ -2619,6 +2681,9 @@ def refresh_subscriptions():
                     reactivated_count += 1
                     enabled = 1 if policy == "auto_enable" else 0
                     needs_review = 1 if policy == "review" else 0
+                    source_authorised = (
+                        1 if policy == "auto_enable" else 0
+                    )
 
                     conn.execute(
                         """
@@ -2631,6 +2696,7 @@ def refresh_subscriptions():
                             active = 1,
                             removed_at = NULL,
                             download_enabled = ?,
+                            source_authorised = ?,
                             needs_review = ?,
                             last_error = NULL,
                             retry_count = 0
@@ -2643,6 +2709,7 @@ def refresh_subscriptions():
                             sub.get("youtube_subscription_id"),
                             sub.get("thumbnail_url", ""),
                             enabled,
+                            source_authorised,
                             needs_review,
                             sub["channel_id"],
                         ),
@@ -2675,6 +2742,7 @@ def refresh_subscriptions():
                             "active": 1,
                             "removed_at": None,
                             "download_enabled": enabled,
+                            "source_authorised": source_authorised,
                             "needs_review": needs_review,
                             "last_error": None,
                             "retry_count": 0,
@@ -2715,6 +2783,19 @@ def refresh_subscriptions():
                 """,
                 (now_iso(), row["channel_id"]),
             )
+
+    if first_import:
+        set_setting("youtube_baseline_complete", "1")
+        log_activity(
+            "youtube_refresh",
+            "Initial YouTube baseline imported",
+            (
+                f"Imported {len(subs)} existing subscription(s) as disabled "
+                "and waiting for approval. Future new subscriptions follow "
+                "the configured new-subscription policy."
+            ),
+            "success",
+        )
 
     policy_errors = 0
 
@@ -3990,6 +4071,14 @@ def complete_pinchflat_onboarding():
         return False
 
 
+def subscription_source_authorised(sub):
+    value = row_value(sub, "source_authorised", 0)
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return bool(value)
+
+
 def subscription_download_enabled(sub):
     value = row_value(sub, "download_enabled", 0)
     try:
@@ -4360,6 +4449,7 @@ def add_pending_sources():
               AND pinchflat_added = 0
               AND COALESCE(needs_review, 0) = 0
               AND COALESCE(download_enabled, 0) = 1
+              AND COALESCE(source_authorised, 0) = 1
             ORDER BY first_seen_at ASC, title COLLATE NOCASE ASC
             """
         ).fetchall()
@@ -5472,10 +5562,13 @@ def save_subscription_row(channel_id):
         needs_review = False
         enabled = True
 
+    source_authorised = 1 if (enabled and not needs_review) else 0
+
     prospective = dict(current)
     prospective.update(
         {
             "download_enabled": 1 if enabled else 0,
+            "source_authorised": source_authorised,
             "history_mode": mode,
             "history_custom_date": custom_date,
             "media_profile_id": profile_id or None,
@@ -5488,6 +5581,7 @@ def save_subscription_row(channel_id):
             """
             UPDATE subscriptions
             SET download_enabled = ?,
+                source_authorised = ?,
                 history_mode = ?,
                 history_custom_date = ?,
                 media_profile_id = ?,
@@ -5497,6 +5591,7 @@ def save_subscription_row(channel_id):
             """,
             (
                 1 if enabled else 0,
+                source_authorised,
                 mode,
                 custom_date,
                 profile_id or None,
@@ -6238,14 +6333,20 @@ def bulk_subscription_action():
                         """
                         UPDATE subscriptions
                         SET download_enabled = ?,
+                            source_authorised = ?,
                             needs_review = 0,
                             last_error = NULL
                         WHERE channel_id = ?
                         """,
-                        (1 if enabled else 0, row["channel_id"]),
+                        (
+                            1 if enabled else 0,
+                            1 if enabled else 0,
+                            row["channel_id"],
+                        ),
                     )
 
                 prospective["download_enabled"] = 1 if enabled else 0
+                prospective["source_authorised"] = 1 if enabled else 0
                 prospective["needs_review"] = 0
 
                 apply_subscription_source_authority(
@@ -6260,6 +6361,7 @@ def bulk_subscription_action():
                         UPDATE subscriptions
                         SET needs_review = 0,
                             download_enabled = 1,
+                            source_authorised = 1,
                             last_error = NULL
                         WHERE channel_id = ?
                         """,
@@ -6268,6 +6370,7 @@ def bulk_subscription_action():
 
                 prospective["needs_review"] = 0
                 prospective["download_enabled"] = 1
+                prospective["source_authorised"] = 1
 
                 apply_subscription_source_authority(
                     prospective,

@@ -2,6 +2,21 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.9.1
+
+Safe source-authorisation and first-import release.
+
+- Stops stale Enabled/Pending state from an older `/data` directory recreating Pinchflat sources after a reinstall.
+- Adds explicit source authorisation. Pinchflat source creation requires both Enabled and an authorised Save/Approve action.
+- Save with Enabled on authorises and creates or repairs the source.
+- Save with Enabled off revokes authorisation and removes the source.
+- Approve + Save enables and authorises the source.
+- Automatic retry and Add pending cannot create unauthorised sources.
+- A truly new database treats the first Google import as a baseline. Existing subscriptions start disabled and waiting for approval.
+- Future newly subscribed channels still follow the configured new-subscription policy.
+- Existing rows already linked to Pinchflat remain authorised. Stale Enabled/Pending rows without a Pinchflat link reset to Disabled.
+- Status text now distinguishes `Pending Pinchflat creation` from `Save to add to Pinchflat`.
+
 ## Version 1.9.0
 
 Direct Pinchflat control release.
