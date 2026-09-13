@@ -17,7 +17,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -109,6 +109,8 @@ def ensure_column(conn, table, column, definition):
     }
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        return True
+    return False
 
 
 def init_db():
@@ -144,10 +146,29 @@ def init_db():
             """
         )
 
-        # v1.2 migration. Existing databases are upgraded in place.
+        # Existing databases are upgraded in place.
         ensure_column(conn, "subscriptions", "history_mode", "TEXT")
         ensure_column(conn, "subscriptions", "history_custom_date", "TEXT")
         ensure_column(conn, "subscriptions", "pinchflat_source_id", "TEXT")
+        download_enabled_added = ensure_column(
+            conn,
+            "subscriptions",
+            "download_enabled",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+
+        # Preserve the behaviour of sources created before v1.3. New YouTube
+        # subscriptions still default to disabled.
+        if download_enabled_added:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET download_enabled = CASE
+                    WHEN pinchflat_added = 1 THEN 1
+                    ELSE 0
+                END
+                """
+            )
 
         defaults = {
             "history_mode": DEFAULT_HISTORY_MODE,
@@ -497,9 +518,10 @@ def refresh_subscriptions():
                     subscribed_at,
                     first_seen_at,
                     active,
-                    history_mode
+                    history_mode,
+                    download_enabled
                 )
-                VALUES (?, ?, ?, ?, ?, 1, 'default')
+                VALUES (?, ?, ?, ?, ?, 1, 'default', 0)
                 ON CONFLICT(channel_id) DO UPDATE SET
                     title = excluded.title,
                     channel_url = excluded.channel_url,
@@ -542,90 +564,8 @@ def pinchflat_health():
         return False
 
 
-def add_pinchflat_source(sub):
-    session_obj = pinchflat_session()
-
-    form_page = session_obj.get(
-        f"{PINCHFLAT_URL}/sources/new",
-        timeout=30,
-    )
-    form_page.raise_for_status()
-
-    soup = BeautifulSoup(form_page.text, "html.parser")
-    csrf = soup.find("input", {"name": "_csrf_token"})
-
-    if not csrf or not csrf.get("value"):
-        raise RuntimeError(
-            "Pinchflat CSRF token was not found. "
-            "Check the Pinchflat URL and authentication."
-        )
-
-    cutoff = subscription_cutoff(sub)
-
-    payload = {
-        "_csrf_token": csrf["value"],
-        "source[original_url]": row_value(sub, "channel_url", ""),
-        "source[custom_name]": row_value(sub, "title", ""),
-        "source[media_profile_id]": effective_media_profile_id(),
-        "source[download_media]": "true",
-        "source[fast_index]": "false",
-        "source[index_frequency_minutes]": "1440",
-        "source[download_cutoff_date]": cutoff,
-        "source[retention_period_days]": "",
-        "source[title_filter_regex]": "",
-        "source[output_path_template_override]": "",
-        "source[min_duration_seconds]": "",
-        "source[max_duration_seconds]": "",
-        "source[cookie_behaviour]": "disabled",
-    }
-
-    if DRY_RUN:
-        return "dry-run"
-
-    response = session_obj.post(
-        f"{PINCHFLAT_URL}/sources",
-        data=payload,
-        timeout=180,
-        allow_redirects=False,
-    )
-
-    if response.status_code in (301, 302, 303):
-        location = response.headers.get("Location", "")
-        match = __import__("re").search(r"/sources/([^/?#]+)", location)
-        source_id = match.group(1) if match else None
-        return "created", source_id
-
-    if response.status_code == 200:
-        error_soup = BeautifulSoup(
-            response.text,
-            "html.parser",
-        )
-        text = " ".join(error_soup.stripped_strings)
-
-        if "already been taken" in text.lower():
-            return "exists", None
-
-        raise RuntimeError(
-            "Pinchflat rejected the source. "
-            "Open Pinchflat and check its logs."
-        )
-
-    response.raise_for_status()
-    return "created", None
-
-
-def update_pinchflat_source_cutoff(source_id, cutoff):
-    """Update the download cutoff on an existing Pinchflat source via its HTML edit form."""
-    session_obj = pinchflat_session()
-    edit_url = f"{PINCHFLAT_URL}/sources/{source_id}/edit"
-    response = session_obj.get(edit_url, timeout=30)
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    form = soup.find("form")
-    if not form:
-        raise RuntimeError("Pinchflat edit form was not found.")
-
+def scrape_form_payload(form):
+    """Build a normal HTML form payload using the values Pinchflat supplies."""
     payload = {}
 
     for field in form.find_all(["input", "select", "textarea"]):
@@ -635,7 +575,7 @@ def update_pinchflat_source_cutoff(source_id, cutoff):
 
         if field.name == "input":
             field_type = (field.get("type") or "text").lower()
-            if field_type in ("submit", "button", "file"):
+            if field_type in ("submit", "button", "file", "image"):
                 continue
             if field_type in ("checkbox", "radio") and not field.has_attr("checked"):
                 continue
@@ -650,13 +590,299 @@ def update_pinchflat_source_cutoff(source_id, cutoff):
         else:
             payload[name] = field.text or ""
 
-    payload["source[download_cutoff_date]"] = cutoff
+    return payload
+
+
+def load_new_source_form(session_obj):
+    form_page = session_obj.get(
+        f"{PINCHFLAT_URL}/sources/new",
+        timeout=30,
+    )
+    form_page.raise_for_status()
+
+    soup = BeautifulSoup(form_page.text, "html.parser")
+    form = soup.find("form", action=lambda value: value and "/sources" in value)
+    if form is None:
+        form = soup.find("form")
+
+    if form is None:
+        raise RuntimeError(
+            "Pinchflat is online but its New Source form is unavailable."
+        )
+
+    profile_select = form.find("select", {"name": "source[media_profile_id]"})
+    profiles = []
+    if profile_select:
+        for option in profile_select.find_all("option"):
+            value = (option.get("value") or "").strip()
+            label = " ".join(option.stripped_strings).strip()
+            if value:
+                profiles.append({"id": value, "name": label})
+
+    return form, profiles
+
+
+def create_default_media_profile(session_obj=None):
+    """Create a simple Pinchflat media profile using Pinchflat's own form."""
+    session_obj = session_obj or pinchflat_session()
+
+    page = session_obj.get(
+        f"{PINCHFLAT_URL}/media_profiles/new",
+        timeout=30,
+    )
+    page.raise_for_status()
+
+    soup = BeautifulSoup(page.text, "html.parser")
+    form = soup.find(
+        "form",
+        action=lambda value: value and "/media_profiles" in value,
+    )
+    if form is None:
+        form = soup.find("form")
+
+    if form is None:
+        raise RuntimeError(
+            "Pinchflat's New Media Profile form is unavailable."
+        )
+
+    payload = scrape_form_payload(form)
+    payload["media_profile[name]"] = "YouTube Sync"
+    payload["media_profile[output_path_template]"] = (
+        "/{{ source_custom_name }}/{{ upload_yyyy_mm_dd }} {{ title }}/"
+        "{{ title }} [{{ id }}].{{ ext }}"
+    )
+
+    action = form.get("action") or "/media_profiles"
+    if action.startswith("http://") or action.startswith("https://"):
+        target = action
+    else:
+        target = (
+            f"{PINCHFLAT_URL}"
+            f"{action if action.startswith('/') else '/' + action}"
+        )
+
+    response = session_obj.post(
+        target,
+        data=payload,
+        timeout=60,
+        allow_redirects=False,
+    )
+
+    if response.status_code not in (301, 302, 303):
+        text = " ".join(
+            BeautifulSoup(response.text, "html.parser").stripped_strings
+        )
+        raise RuntimeError(
+            "Pinchflat could not create the automatic Media Profile. "
+            f"Response: {text[:350] or 'No error text returned.'}"
+        )
+
+    # Reload the source form and identify the newly created profile by name.
+    source_form, profiles = load_new_source_form(session_obj)
+    created = next(
+        (
+            profile
+            for profile in profiles
+            if profile["name"].strip().lower() == "youtube sync"
+        ),
+        None,
+    )
+
+    if created is None and len(profiles) == 1:
+        created = profiles[0]
+
+    if created is None:
+        raise RuntimeError(
+            "The Media Profile was created, but its ID could not be identified."
+        )
+
+    set_setting("pinchflat_media_profile_id", created["id"])
+    return created, source_form, profiles
+
+
+def get_new_source_form(session_obj=None, auto_create_profile=True):
+    """Load Pinchflat's source form and ensure a usable media profile exists."""
+    session_obj = session_obj or pinchflat_session()
+
+    try:
+        form, profiles = load_new_source_form(session_obj)
+    except RuntimeError:
+        if not auto_create_profile:
+            raise
+        _created, form, profiles = create_default_media_profile(session_obj)
+
+    if not profiles and auto_create_profile:
+        _created, form, profiles = create_default_media_profile(session_obj)
+
+    if not profiles:
+        raise RuntimeError(
+            "Pinchflat has no Media Profile and automatic creation failed."
+        )
+
+    configured_profile = effective_media_profile_id()
+    profile_ids = [profile["id"] for profile in profiles]
+
+    if configured_profile not in profile_ids:
+        # If there is only one profile, use it automatically. This keeps fresh
+        # installs portable even if Pinchflat did not allocate ID 1.
+        if len(profiles) == 1:
+            configured_profile = profiles[0]["id"]
+            set_setting("pinchflat_media_profile_id", configured_profile)
+        else:
+            raise RuntimeError(
+                f"Pinchflat Media Profile ID {configured_profile} does not exist. "
+                f"Available profile ID(s): {', '.join(profile_ids)}."
+            )
+
+    return session_obj, form, profile_ids
+
+
+def pinchflat_profile_status():
+    """Return whether Pinchflat has a usable profile, creating one if needed."""
+    if not pinchflat_health():
+        return {
+            "ready": False,
+            "message": "Pinchflat is offline or unreachable.",
+            "profile_ids": [],
+        }
+
+    try:
+        _session, _form, profile_ids = get_new_source_form(
+            auto_create_profile=True
+        )
+        return {
+            "ready": True,
+            "message": f"Media Profile {effective_media_profile_id()} ready.",
+            "profile_ids": profile_ids,
+        }
+    except Exception as exc:
+        return {
+            "ready": False,
+            "message": str(exc),
+            "profile_ids": [],
+        }
+
+
+def complete_pinchflat_onboarding():
+    """Use Pinchflat's supported onboarding flag to open the normal dashboard."""
+    try:
+        session_obj = pinchflat_session()
+        response = session_obj.get(
+            f"{PINCHFLAT_URL}/",
+            params={"onboarding": "0"},
+            timeout=30,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException:
+        return False
+
+
+def subscription_download_enabled(sub):
+    value = row_value(sub, "download_enabled", 0)
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return bool(value)
+
+
+def add_pinchflat_source(sub):
+    session_obj, form, _profile_ids = get_new_source_form()
+    payload = scrape_form_payload(form)
+
+    cutoff = subscription_cutoff(sub)
+    payload.update(
+        {
+            "source[original_url]": row_value(sub, "channel_url", ""),
+            "source[custom_name]": row_value(sub, "title", ""),
+            "source[media_profile_id]": effective_media_profile_id(),
+            "source[download_media]": (
+                "true" if subscription_download_enabled(sub) else "false"
+            ),
+            "source[fast_index]": "false",
+            "source[index_frequency_minutes]": "1440",
+            "source[download_cutoff_date]": cutoff,
+        }
+    )
+
+    if DRY_RUN:
+        return "dry-run", None
+
+    action = form.get("action") or "/sources"
+    if action.startswith("http://") or action.startswith("https://"):
+        target = action
+    else:
+        target = f"{PINCHFLAT_URL}{action if action.startswith('/') else '/' + action}"
+
+    response = session_obj.post(
+        target,
+        data=payload,
+        timeout=180,
+        allow_redirects=False,
+    )
+
+    if response.status_code in (301, 302, 303):
+        location = response.headers.get("Location", "")
+        match = __import__("re").search(r"/sources/([^/?#]+)", location)
+        source_id = match.group(1) if match else None
+        return "created", source_id
+
+    text = " ".join(BeautifulSoup(response.text, "html.parser").stripped_strings)
+
+    if response.status_code == 200:
+        if "already been taken" in text.lower():
+            return "exists", None
+
+        raise RuntimeError(
+            "Pinchflat rejected the source. "
+            f"Response: {text[:350] or 'No error text returned.'}"
+        )
+
+    if response.status_code >= 500:
+        raise RuntimeError(
+            f"Pinchflat returned HTTP {response.status_code} while creating the source. "
+            "Check the selected Media Profile and Pinchflat logs. "
+            f"Response: {text[:250] or 'No error text returned.'}"
+        )
+
+    response.raise_for_status()
+    return "created", None
+
+def update_pinchflat_source_settings(
+    source_id,
+    cutoff=None,
+    download_enabled=None,
+):
+    """Update an existing Pinchflat source through its HTML edit form."""
+    session_obj = pinchflat_session()
+    edit_url = f"{PINCHFLAT_URL}/sources/{source_id}/edit"
+    response = session_obj.get(edit_url, timeout=30)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    form = soup.find("form")
+    if not form:
+        raise RuntimeError("Pinchflat edit form was not found.")
+
+    payload = scrape_form_payload(form)
+
+    if cutoff is not None:
+        payload["source[download_cutoff_date]"] = cutoff
+
+    if download_enabled is not None:
+        payload["source[download_media]"] = (
+            "true" if download_enabled else "false"
+        )
 
     action = form.get("action") or f"/sources/{source_id}"
     if action.startswith("http://") or action.startswith("https://"):
         target = action
     else:
-        target = f"{PINCHFLAT_URL}{action}"
+        target = (
+            f"{PINCHFLAT_URL}"
+            f"{action if action.startswith('/') else '/' + action}"
+        )
 
     update_response = session_obj.post(
         target,
@@ -668,15 +894,19 @@ def update_pinchflat_source_cutoff(source_id, cutoff):
     if update_response.status_code in (301, 302, 303):
         return True
 
+    text = " ".join(
+        BeautifulSoup(update_response.text, "html.parser").stripped_strings
+    )
+
     if update_response.status_code == 200:
-        text = " ".join(BeautifulSoup(update_response.text, "html.parser").stripped_strings)
         raise RuntimeError(
-            "Pinchflat did not accept the updated cutoff. "
+            "Pinchflat did not accept the source update. "
             f"Response: {text[:300]}"
         )
 
     update_response.raise_for_status()
     return True
+
 
 
 def add_pending_sources():
@@ -734,6 +964,9 @@ def add_pending_sources():
 
         if ADD_DELAY_SECONDS > 0:
             time.sleep(ADD_DELAY_SECONDS)
+
+    if added > 0:
+        complete_pinchflat_onboarding()
 
     return {
         "pending": len(pending),
@@ -855,6 +1088,7 @@ def subscription_view(row):
         custom_date,
         item.get("subscribed_at"),
     )
+    item["download_enabled"] = subscription_download_enabled(item)
 
     return item
 
@@ -888,6 +1122,7 @@ def index():
 
     subs = [subscription_view(row) for row in rows]
     defaults = default_history_settings()
+    profile_status = pinchflat_profile_status()
 
     return render_template(
         "index.html",
@@ -898,7 +1133,14 @@ def index():
         app_url=effective_app_url(),
         media_profile_id=effective_media_profile_id(),
         pinchflat_online=pinchflat_health(),
+        pinchflat_profile_ready=profile_status["ready"],
+        pinchflat_profile_message=profile_status["message"],
         pinchflat_public_url=PINCHFLAT_PUBLIC_URL,
+        pinchflat_open_url=(
+            f"{PINCHFLAT_PUBLIC_URL}/?onboarding=0"
+            if profile_status["ready"]
+            else PINCHFLAT_PUBLIC_URL
+        ),
         subs=subs,
         last_run=last_run,
         dry_run=DRY_RUN,
@@ -1055,7 +1297,7 @@ def save_subscription_history(channel_id):
     with db() as conn:
         row = conn.execute(
             """
-            SELECT pinchflat_added, pinchflat_source_id, subscribed_at
+            SELECT pinchflat_added, pinchflat_source_id, subscribed_at, download_enabled
             FROM subscriptions
             WHERE channel_id = ?
             """,
@@ -1093,12 +1335,13 @@ def save_subscription_history(channel_id):
                 mode=mode,
                 custom_date=custom_date,
             )
-            update_pinchflat_source_cutoff(
+            update_pinchflat_source_settings(
                 row["pinchflat_source_id"],
-                cutoff,
+                cutoff=cutoff,
+                download_enabled=bool(row["download_enabled"]),
             )
             flash(
-                f"Source download range saved and Pinchflat cutoff updated to {cutoff}.",
+                f"Source download range saved and Pinchflat updated to cutoff {cutoff}.",
                 "success",
             )
         except Exception as exc:
@@ -1122,6 +1365,133 @@ def save_subscription_history(channel_id):
     return redirect(
         url_for("index") + "#subscriptions"
     )
+
+
+
+@app.post("/subscriptions/<channel_id>/download")
+def save_subscription_download(channel_id):
+    enabled = request.form.get("download_enabled", "0") == "1"
+
+    with db() as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM subscriptions
+            WHERE channel_id = ?
+            """,
+            (channel_id,),
+        ).fetchone()
+
+        if not row:
+            flash("The YouTube subscription was not found.", "error")
+            return redirect(url_for("index") + "#subscriptions")
+
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET download_enabled = ?,
+                last_error = NULL
+            WHERE channel_id = ?
+            """,
+            (1 if enabled else 0, channel_id),
+        )
+
+    if row["pinchflat_added"] and row["pinchflat_source_id"]:
+        try:
+            update_pinchflat_source_settings(
+                row["pinchflat_source_id"],
+                cutoff=subscription_cutoff(row),
+                download_enabled=enabled,
+            )
+            flash(
+                f"{row['title']} is now "
+                f"{'enabled' if enabled else 'disabled'} in Pinchflat.",
+                "success",
+            )
+        except Exception as exc:
+            flash(
+                "The local setting was saved, but Pinchflat could not be updated: "
+                f"{exc}",
+                "error",
+            )
+    else:
+        flash(
+            f"{row['title']} will be "
+            f"{'enabled' if enabled else 'disabled'} when added to Pinchflat.",
+            "success",
+        )
+
+    return redirect(url_for("index") + "#subscriptions")
+
+
+@app.post("/subscriptions/bulk-download")
+def bulk_subscription_download():
+    channel_ids = request.form.getlist("channel_ids")
+    action = request.form.get("bulk_action", "").strip()
+
+    if action not in {"enable", "disable"}:
+        flash("Choose Enable selected or Disable selected.", "error")
+        return redirect(url_for("index") + "#subscriptions")
+
+    if not channel_ids:
+        flash("Select at least one source.", "error")
+        return redirect(url_for("index") + "#subscriptions")
+
+    enabled = action == "enable"
+    updated = 0
+    pinchflat_errors = 0
+
+    with db() as conn:
+        placeholders = ",".join("?" for _ in channel_ids)
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM subscriptions
+            WHERE channel_id IN ({placeholders})
+            """,
+            channel_ids,
+        ).fetchall()
+
+        conn.executemany(
+            """
+            UPDATE subscriptions
+            SET download_enabled = ?,
+                last_error = NULL
+            WHERE channel_id = ?
+            """,
+            [
+                (1 if enabled else 0, row["channel_id"])
+                for row in rows
+            ],
+        )
+
+    for row in rows:
+        updated += 1
+        if row["pinchflat_added"] and row["pinchflat_source_id"]:
+            try:
+                update_pinchflat_source_settings(
+                    row["pinchflat_source_id"],
+                    cutoff=subscription_cutoff(row),
+                    download_enabled=enabled,
+                )
+            except Exception as exc:
+                pinchflat_errors += 1
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET last_error = ?
+                        WHERE channel_id = ?
+                        """,
+                        (str(exc)[:1000], row["channel_id"]),
+                    )
+
+    flash(
+        f"{'Enabled' if enabled else 'Disabled'} {updated} selected source(s). "
+        f"Pinchflat errors: {pinchflat_errors}.",
+        "success" if pinchflat_errors == 0 else "error",
+    )
+    return redirect(url_for("index") + "#subscriptions")
 
 
 @app.route("/oauth/google/login")
@@ -1178,7 +1548,7 @@ def refresh_only():
         total = refresh_subscriptions()
         flash(
             f"Refreshed {total} YouTube subscriptions. "
-            "Choose per-source ranges before adding pending sources if required.",
+            "New sources default to downloads disabled.",
             "success",
         )
     except Exception as exc:

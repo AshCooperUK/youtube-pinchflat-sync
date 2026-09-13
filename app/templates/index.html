@@ -47,7 +47,10 @@
       padding: 10px;
       margin-top: 5px;
     }
+    input[type="checkbox"] { width: auto; margin: 0; accent-color: #2563eb; }
     label { display: block; margin: 10px 0; font-size: 14px; }
+    .bulk-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+    .source-download { min-width: 145px; }
     code {
       display: inline-block;
       max-width: 100%;
@@ -114,13 +117,17 @@
 
     <div class="card">
       <strong>Pinchflat</strong><br>
-      {% if pinchflat_online %}
+      {% if pinchflat_online and pinchflat_profile_ready %}
         <span class="ok">Online</span>
+        <div class="muted small">{{ pinchflat_profile_message }}</div>
+      {% elif pinchflat_online %}
+        <span class="warn">Setup required</span>
+        <div class="muted small">{{ pinchflat_profile_message }}</div>
       {% else %}
         <span class="bad">Offline</span>
       {% endif %}
       <br><br>
-      <a class="btn secondary" href="{{ pinchflat_public_url }}" target="_blank">Open Pinchflat</a>
+      <a class="btn secondary" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
     </div>
 
     <div class="card">
@@ -251,20 +258,34 @@
     </div>
 
     <p class="muted small">
-      Refresh first if you want to choose individual ranges before adding sources. Full sync refreshes YouTube and immediately adds pending sources.
+      New subscriptions start with downloads disabled. Add pending sources safely, then enable only the channels you want.
+      Full sync refreshes YouTube and adds pending sources using each source's current enabled or disabled state.
     </p>
   </div>
 
   <div class="card" id="subscriptions" style="margin-top:14px">
     <h2>Subscriptions</h2>
+    <p class="muted small">
+      Pinchflat still indexes disabled sources, but it will not download their media.
+      Select several channels below and enable or disable them together.
+    </p>
 
     {% if subs %}
+    <form id="bulk-source-form" method="post" action="/subscriptions/bulk-download">
+      <div class="bulk-bar">
+        <button class="btn smallbtn" type="submit" name="bulk_action" value="enable">Enable selected</button>
+        <button class="btn smallbtn secondary" type="submit" name="bulk_action" value="disable">Disable selected</button>
+        <span class="muted small" id="selected-count">0 selected</span>
+      </div>
+    </form>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
+            <th><input type="checkbox" id="select-all-sources" title="Select all sources"></th>
             <th>Channel</th>
             <th>Status</th>
+            <th>Download</th>
             <th>Download range</th>
             <th>Pinchflat cutoff</th>
             <th>Error</th>
@@ -273,6 +294,16 @@
         <tbody>
         {% for sub in subs %}
           <tr>
+            <td>
+              <input
+                type="checkbox"
+                class="source-select"
+                name="channel_ids"
+                value="{{ sub['channel_id'] }}"
+                form="bulk-source-form"
+                aria-label="Select {{ sub['title'] }}"
+              >
+            </td>
             <td>
               <a href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
               {% if not sub["active"] %}
@@ -286,6 +317,25 @@
               {% else %}
                 <span class="status-pill warn">Pending</span>
               {% endif %}
+              <div class="muted small source-meta">
+                {{ "Enabled" if sub["download_enabled"] else "Disabled" }}
+              </div>
+            </td>
+
+            <td class="source-download">
+              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/download">
+                <select name="download_enabled" onchange="this.form.submit()">
+                  <option value="0" {% if not sub["download_enabled"] %}selected{% endif %}>Disabled</option>
+                  <option value="1" {% if sub["download_enabled"] %}selected{% endif %}>Enabled</option>
+                </select>
+              </form>
+              <div class="muted small source-meta">
+                {% if sub["download_enabled"] %}
+                  Media downloads enabled
+                {% else %}
+                  Index only. No downloads
+                {% endif %}
+              </div>
             </td>
 
             <td class="source-range">
@@ -317,7 +367,7 @@
 
               {% if sub["pinchflat_added"] %}
                 <div class="muted small source-meta">
-                  Saving also updates the Pinchflat cutoff when the source ID is known.
+                  Saving updates the Pinchflat cutoff when the source ID is known.
                 </div>
               {% endif %}
             </td>
@@ -342,6 +392,27 @@
 </div>
 
 <script>
+function updateSelectedCount() {
+  const boxes = Array.from(document.querySelectorAll(".source-select"));
+  const selected = boxes.filter(box => box.checked).length;
+  const label = document.getElementById("selected-count");
+  if (label) label.textContent = `${selected} selected`;
+}
+
+const selectAll = document.getElementById("select-all-sources");
+if (selectAll) {
+  selectAll.addEventListener("change", function () {
+    document.querySelectorAll(".source-select").forEach(box => {
+      box.checked = selectAll.checked;
+    });
+    updateSelectedCount();
+  });
+}
+
+document.querySelectorAll(".source-select").forEach(box => {
+  box.addEventListener("change", updateSelectedCount);
+});
+
 function toggleDefaultHistoryFields() {
   const mode = document.getElementById("default_history_mode").value;
   document.getElementById("default_years_field").classList.toggle("hidden", mode !== "years_back");

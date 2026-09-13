@@ -120,10 +120,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.2.0"
+  version: "1.3.0"
   update_at: "2026-09-13"
   release_notes:
-    en_US: Adds per-source download ranges, a refresh-only workflow and hides OAuth configuration after Google connects.
+    en_US: New subscriptions default to downloads disabled, adds bulk enable and disable controls, and automatically creates a Pinchflat Media Profile on fresh installs.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
