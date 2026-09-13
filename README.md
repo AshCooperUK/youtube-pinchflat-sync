@@ -2,6 +2,22 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.5.1
+
+Random Videos / Shorts separation and Shorts layout fix.
+
+- Random Videos now exclude Shorts and other very short clips.
+- Normal discovery searches use YouTube's `medium` and `long` duration classes.
+- A second safety check removes any Random Video result at three minutes or less.
+- Random Shorts continue to use YouTube's `short` duration search.
+- The Random Shorts popup now uses a smaller portrait player so the complete interface fits inside the modal.
+- Random Shorts mode disables the outer modal scrollbar.
+- The Shorts description no longer has its own scrollbar.
+- Long Short descriptions are clipped inside a fixed-height description area instead of creating nested scrolling.
+- Buttons are slightly more compact in Shorts mode.
+- On smaller displays the Shorts player reduces further to keep the complete layout visible.
+- Random Videos, Top 100 and other Discover pages keep their normal scrolling behaviour.
+
 ## Version 2.5.0
 
 Random Videos / For You redesign.

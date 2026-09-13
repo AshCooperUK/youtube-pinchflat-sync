@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1908,12 +1908,31 @@ def youtube_discovery_results(kind="videos", limit=24):
             "relevance",
         ]
 
-        for term, order in zip(fallback_terms, fallback_orders):
+        # Normal Random Videos deliberately use only YouTube's medium and
+        # long duration classes. This prevents Shorts and other very short
+        # clips from entering the Random Videos grid.
+        search_plans[0]["video_duration"] = "medium"
+        search_plans[1]["video_duration"] = "long"
+
+        fallback_durations = [
+            "medium",
+            "long",
+            "medium",
+            "long",
+            "medium",
+        ]
+
+        for term, order, video_duration in zip(
+            fallback_terms,
+            fallback_orders,
+            fallback_durations,
+        ):
             search_plans.append(
                 {
                     "query": term,
                     "order": order,
                     "source": "uk_fallback",
+                    "video_duration": video_duration,
                 }
             )
 
@@ -1941,6 +1960,8 @@ def youtube_discovery_results(kind="videos", limit=24):
 
         if kind == "shorts":
             params["videoDuration"] = "short"
+        elif plan.get("video_duration"):
+            params["videoDuration"] = plan["video_duration"]
 
         response = youtube_api_request(
             creds,
@@ -2027,6 +2048,9 @@ def youtube_discovery_results(kind="videos", limit=24):
                 "duration": youtube_duration_label(
                     content_details.get("duration") or ""
                 ),
+                "duration_seconds": youtube_duration_seconds(
+                    content_details.get("duration") or ""
+                ),
             }
 
     candidates = []
@@ -2082,6 +2106,13 @@ def youtube_discovery_results(kind="videos", limit=24):
         ):
             continue
 
+        duration_seconds = int(
+            details.get("duration_seconds") or 0
+        )
+
+        if kind == "videos" and duration_seconds <= 180:
+            continue
+
         candidate = {
             "video_id": video_id,
             "channel_id": channel_id,
@@ -2114,6 +2145,7 @@ def youtube_discovery_results(kind="videos", limit=24):
             ),
             "view_count": int(details.get("view_count") or 0),
             "duration": details.get("duration") or "",
+            "duration_seconds": duration_seconds,
             "recommendation_source": entry["source"],
             "_plan_index": entry["plan_index"],
             "_position": entry["position"],

@@ -156,7 +156,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.5.0"
+  version: "2.5.1"
   update_at: "2026-09-13"
   release_notes:
     en_US: v2.0 adds YouTube Discover and auto-next Shorts, independent YouTube/Pinchflat/Emby schedules, Unapprove actions, standard quality profiles, Emby artwork/NFO metadata, favicon and interface refinements.

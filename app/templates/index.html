@@ -142,6 +142,14 @@
     #settings-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; overflow-x:hidden; }
     #discover-dialog { width:min(1220px,96vw); height:min(840px,92vh); }
     #discover-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
+
+    /* Random Shorts is sized to fit the popup instead of scrolling. */
+    #discover-dialog.shorts-mode {
+      height:min(760px,90vh);
+    }
+    #discover-dialog.shorts-mode .modal-body {
+      overflow:hidden;
+    }
     .discover-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
     .discover-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; }
     .discover-tile { position:relative; display:flex; flex-direction:column; align-items:center; text-align:center; gap:8px; padding:16px 10px; border:1px solid var(--line); border-radius:14px; background:var(--panel); text-decoration:none; min-height:220px; }
@@ -631,23 +639,47 @@
       .latest-popup-action-grid { grid-template-columns:1fr; }
       .latest-popup-header-video { white-space:normal; }
     }
-    .shorts-shell { display:grid; grid-template-columns:minmax(260px,330px) minmax(240px,1fr); gap:22px; align-items:start; }
-    .shorts-player-frame { width:min(100%,330px); aspect-ratio:9/16; background:#000; border-radius:16px; overflow:hidden; margin:0 auto; }
+    .shorts-shell {
+      display:grid;
+      grid-template-columns:minmax(230px,280px) minmax(240px,1fr);
+      gap:20px;
+      align-items:start;
+    }
+    .shorts-player-frame {
+      width:min(100%,280px);
+      aspect-ratio:9/16;
+      background:#000;
+      border-radius:16px;
+      overflow:hidden;
+      margin:0 auto;
+    }
     .shorts-player-frame iframe { display:block; width:100%; height:100%; border:0; }
-    .shorts-info { padding:16px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
-    .shorts-actions { align-items:flex-start; min-height:48px; }
+    .shorts-info {
+      padding:14px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:var(--panel);
+    }
+    .shorts-actions {
+      align-items:flex-start;
+      min-height:44px;
+      gap:7px;
+    }
+    .shorts-actions .btn {
+      padding:8px 10px;
+    }
     .shorts-description {
-      margin:12px 0 16px;
-      padding:12px 14px;
+      margin:10px 0 12px;
+      padding:10px 12px;
       border:1px solid var(--line);
       border-radius:12px;
       background:rgba(255,255,255,.025);
       color:var(--text);
-      line-height:1.5;
+      line-height:1.4;
       white-space:pre-wrap;
       overflow-wrap:anywhere;
-      max-height:250px;
-      overflow-y:auto;
+      max-height:min(180px,22vh);
+      overflow:hidden;
     }
     .shorts-description:empty { display:none; }
     .top100-rank { font-size:13px; color:var(--accent); font-weight:800; }
@@ -668,8 +700,22 @@
     #list-picker-dialog { width:min(520px,92vw); }
     @media (max-width:760px) { .favourite-list-layout { grid-template-columns:1fr; } }
     @media (max-width:760px) {
-      .shorts-shell { grid-template-columns:1fr; }
-      .shorts-player-frame { width:min(100%,290px); }
+      #discover-dialog.shorts-mode {
+        height:min(860px,94vh);
+      }
+      #discover-dialog.shorts-mode .modal-body {
+        overflow:hidden;
+      }
+      .shorts-shell {
+        grid-template-columns:1fr;
+        gap:12px;
+      }
+      .shorts-player-frame {
+        width:min(100%,230px);
+      }
+      .shorts-description {
+        max-height:110px;
+      }
     }
     .tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:18px; }
     .tab-btn { border:1px solid var(--line); background:#132139; color:var(--text); padding:8px 11px; border-radius:8px; cursor:pointer; }
@@ -2734,6 +2780,11 @@ function ensureYouTubeIframeApi() {
 
 async function showDiscoverMode(mode) {
   discoverMode = ["videos", "shorts", "top100"].includes(mode) ? mode : "videos";
+
+  discoverDialog.classList.toggle(
+    "shorts-mode",
+    discoverMode === "shorts"
+  );
 
   document.getElementById("discover-videos-panel").classList.toggle("hidden", discoverMode !== "videos");
   document.getElementById("discover-shorts-panel").classList.toggle("hidden", discoverMode !== "shorts");
