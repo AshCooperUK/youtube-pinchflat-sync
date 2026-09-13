@@ -14,27 +14,29 @@
     }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--text); }
-    body.modal-open { overflow:hidden; }
     a { color:#9dc1ff; }
-    .wrap { max-width:1540px; margin:0 auto; padding:26px 22px 54px; }
+    .wrap { max-width:1600px; margin:0 auto; padding:26px 22px 54px; }
     .header { display:flex; justify-content:space-between; align-items:flex-start; gap:18px; }
     .header-actions { display:flex; gap:9px; flex-wrap:wrap; justify-content:flex-end; }
+    .header-actions form { margin:0; }
     h1 { margin:0; font-size:30px; }
     h2 { margin:0 0 13px; font-size:20px; }
     h3 { margin:0 0 10px; font-size:16px; }
     p { line-height:1.5; }
     .subtitle,.muted { color:var(--muted); }
     .small { font-size:13px; }
+    .version { color:var(--muted); font-size:12px; }
     .btn {
-      border:0; border-radius:9px; padding:10px 14px; cursor:pointer;
+      border:0; border-radius:9px; padding:10px 14px; min-height:41px; cursor:pointer;
       background:var(--blue); color:white; font-weight:700; text-decoration:none;
       display:inline-flex; align-items:center; justify-content:center; gap:6px;
     }
+    .header-actions .btn { min-width:126px; height:42px; }
     .btn:hover { background:var(--blue2); }
     .btn.secondary { background:#34445d; }
     .btn.ghost { background:transparent; border:1px solid var(--line); }
     .btn.danger { background:#9f2e37; }
-    .btn.smallbtn { padding:7px 10px; font-size:12px; }
+    .btn.smallbtn { padding:7px 10px; min-height:34px; font-size:12px; }
     .btn[disabled] { opacity:.45; cursor:not-allowed; }
     .grid { display:grid; grid-template-columns:repeat(5,minmax(180px,1fr)); gap:12px; margin:22px 0 14px; }
     .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:17px; }
@@ -44,6 +46,7 @@
     .flash.error { background:#7a252d; } .flash.success { background:#175a35; }
     .toolbar { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin:12px 0; }
     .toolbar .grow { flex:1 1 240px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     input,select {
       background:#08111f; color:var(--text); border:1px solid #30415b;
       border-radius:8px; padding:9px 10px; min-height:39px;
@@ -53,26 +56,35 @@
     label { display:block; margin:10px 0; font-size:14px; }
     .inline-control { min-width:170px; }
     .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
-    table { width:100%; border-collapse:collapse; min-width:1180px; }
-    th,td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    table { width:100%; border-collapse:collapse; min-width:1370px; }
+    th,td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; }
     th { color:var(--muted); font-size:12px; position:sticky; top:0; background:#0e192a; z-index:1; }
     tr:last-child td { border-bottom:0; }
     tr.hidden-row { display:none; }
     .pill { display:inline-flex; padding:4px 8px; border-radius:999px; background:#24344a; font-size:12px; white-space:nowrap; }
     .pill.enabled { color:var(--green); } .pill.disabled { color:#c8d3e5; }
     .pill.pending,.pill.review { color:var(--amber); } .pill.error,.pill.removed { color:var(--red); }
-    .channel-title { font-weight:750; }
-    .error-text { max-width:330px; color:var(--red); font-size:12px; word-break:break-word; }
+    .channel-title {
+      display:inline-block; max-width:230px; white-space:nowrap; overflow:hidden;
+      text-overflow:ellipsis; vertical-align:bottom; font-weight:750;
+    }
+    .error-text { max-width:300px; color:var(--red); font-size:12px; word-break:break-word; }
     .row-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
-    .source-range,.source-profile { min-width:185px; }
+    .source-range { min-width:340px; }
+    .source-profile { min-width:190px; }
+    .inline-range-form { display:flex; align-items:center; gap:6px; min-width:330px; }
+    .inline-range-form select { min-width:185px; flex:1; }
+    .inline-range-form .source-date { width:145px; flex:0 0 145px; }
+    .storage-value { white-space:nowrap; font-weight:700; }
     code { background:#08111f; border-radius:5px; padding:3px 6px; overflow-wrap:anywhere; }
     .empty { padding:30px; text-align:center; color:var(--muted); }
     .hidden { display:none !important; }
 
     dialog {
-      width:min(1000px,94vw); max-height:90vh; padding:0; border:1px solid var(--line);
+      width:min(1020px,94vw); max-height:90vh; padding:0; border:1px solid var(--line);
       border-radius:16px; background:var(--panel2); color:var(--text); box-shadow:0 24px 80px rgba(0,0,0,.55);
     }
+    #single-download-dialog { width:min(720px,94vw); }
     dialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(2px); }
     .modal-head { display:flex; justify-content:space-between; align-items:center; padding:18px 20px; border-bottom:1px solid var(--line); }
     .modal-body { padding:18px 20px 24px; overflow:auto; max-height:calc(90vh - 72px); }
@@ -87,7 +99,13 @@
     .activity-item:last-child { border-bottom:0; }
     .activity-time { color:var(--muted); font-size:12px; }
     .modal-close { background:none; border:0; color:var(--muted); cursor:pointer; font-size:24px; }
-    .version { color:var(--muted); font-size:12px; }
+    .progress-wrap { margin-top:18px; }
+    progress { width:100%; height:20px; accent-color:var(--blue); }
+    .progress-meta { display:flex; justify-content:space-between; gap:12px; margin-top:6px; color:var(--muted); font-size:13px; }
+    .quota-bar { width:100%; height:12px; background:#08111f; border-radius:999px; overflow:hidden; border:1px solid var(--line); }
+    .quota-fill { height:100%; background:var(--blue); }
+    .compact-table { min-width:0; }
+    .compact-table th,.compact-table td { padding:7px; }
 
     @media (max-width:1100px) {
       .grid { grid-template-columns:repeat(2,minmax(180px,1fr)); }
@@ -98,6 +116,7 @@
       .header-actions { justify-content:flex-start; margin-top:14px; }
       .grid,.settings-grid { grid-template-columns:1fr; }
       h1 { font-size:25px; }
+      .inline-range-form { flex-wrap:wrap; min-width:250px; }
     }
   </style>
 </head>
@@ -113,6 +132,7 @@
       <form method="post" action="/sync">
         <button class="btn" {% if not google_connected %}disabled{% endif %}>Sync now</button>
       </form>
+      <button class="btn secondary" type="button" onclick="openSingleDownload()">Single Download</button>
       <button class="btn secondary" type="button" onclick="openActivity()">Activity</button>
       <button class="btn secondary" type="button" onclick="openSettings()">Settings</button>
       <a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
@@ -125,11 +145,21 @@
     {% endfor %}
   {% endwith %}
 
+  {% if google_connected and not google_write_ready %}
+    <div class="flash error">
+      Google is connected with the older read-only permission. Reconnect Google from Settings → YouTube to enable YouTube unsubscribe and the Emby Download playlist.
+    </div>
+  {% endif %}
+
   <div class="grid">
     <div class="card">
       <div class="muted small">Google</div>
-      {% if google_connected %}
+      {% if google_connected and google_write_ready %}
         <div class="metric ok">Connected</div>
+        <div class="muted small">Read + write access</div>
+      {% elif google_connected %}
+        <div class="metric warn">Reconnect</div>
+        <div class="muted small">Read-only token</div>
       {% elif google_configured %}
         <div class="metric warn">Ready</div>
         <a class="btn smallbtn" href="/oauth/google/login">Connect</a>
@@ -157,10 +187,11 @@
       <div class="muted small">Downloads</div>
       <div class="metric ok">{{ counts.enabled }}</div>
       <div class="muted small">{{ counts.disabled }} disabled · {{ counts.pending }} pending</div>
+      <div class="muted small">{{ storage_total }} used · {{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
     </div>
     <div class="card">
       <div class="muted small">Errors</div>
-      <div class="metric {% if counts.errors %}bad{% else %}ok{% endif %}">{{ counts.errors }}</div>
+      <div class="metric {% if counts.errors or download_counts.failed %}bad{% else %}ok{% endif %}">{{ counts.errors + download_counts.failed }}</div>
       <div class="muted small">
         {% if last_run %}Last sync: {{ last_run["status"] }}{% else %}No sync yet{% endif %}
       </div>
@@ -171,7 +202,7 @@
     <div class="header">
       <div>
         <h2>Subscriptions</h2>
-        <div class="muted small">New subscriptions follow the policy in Settings. Filters and sorting are remembered in this browser.</div>
+        <div class="muted small">New subscriptions auto-download by default. Filters and sorting are remembered in this browser.</div>
       </div>
       <div class="actions">
         <form method="post" action="/refresh-subscriptions">
@@ -204,6 +235,7 @@
           <option value="title">A → Z</option>
           <option value="status">Status</option>
           <option value="newest">Newest first</option>
+          <option value="storage">Disk usage</option>
         </select>
       </div>
       <span class="muted small" id="visible-count"></span>
@@ -260,6 +292,7 @@
             <th>Range</th>
             <th>Media Profile</th>
             <th>Cutoff</th>
+            <th>Disk usage</th>
             <th>Error / Actions</th>
           </tr>
         </thead>
@@ -272,19 +305,13 @@
             data-active="{{ 1 if sub['active'] else 0 }}"
             data-error="{{ 1 if sub['last_error'] else 0 }}"
             data-first-seen="{{ sub['first_seen_at'] }}"
+            data-storage="{{ sub['disk_bytes'] }}"
           >
             <td>
-              <input
-                class="source-select"
-                type="checkbox"
-                name="channel_ids"
-                value="{{ sub['channel_id'] }}"
-                form="bulk-form"
-                onchange="updateSelectedCount()"
-              >
+              <input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">
             </td>
             <td>
-              <a class="channel-title" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
+              <a class="channel-title" title="{{ sub['title'] }}" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
               {% if not sub["active"] %}<div class="small bad">No longer subscribed</div>{% endif %}
               {% if sub["needs_review"] %}<div class="small warn">Waiting for approval</div>{% endif %}
             </td>
@@ -301,7 +328,7 @@
               </form>
             </td>
             <td class="source-range">
-              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/history">
+              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/history" class="inline-range-form">
                 {% set current_mode = sub["history_mode"] or "default" %}
                 <select name="history_mode" class="source-history-mode" onchange="toggleSourceDate(this)">
                   <option value="default" {% if current_mode == "default" %}selected{% endif %}>Default</option>
@@ -310,9 +337,7 @@
                   <option value="this_month" {% if current_mode == "this_month" %}selected{% endif %}>This month</option>
                   <option value="six_months" {% if current_mode == "six_months" %}selected{% endif %}>Last 6 months</option>
                   <option value="last_year" {% if current_mode == "last_year" %}selected{% endif %}>Last year</option>
-                  {% for y in range(2, 11) %}
-                    <option value="years_{{ y }}" {% if current_mode == "years_" ~ y %}selected{% endif %}>Last {{ y }} years</option>
-                  {% endfor %}
+                  {% for y in range(2, 11) %}<option value="years_{{ y }}" {% if current_mode == "years_" ~ y %}selected{% endif %}>Last {{ y }} years</option>{% endfor %}
                   <option value="subscription_date" {% if current_mode == "subscription_date" %}selected{% endif %}>Subscription date</option>
                   <option value="custom_date" {% if current_mode == "custom_date" %}selected{% endif %}>Custom date</option>
                 </select>
@@ -333,6 +358,7 @@
               <code>{{ sub["cutoff"] }}</code>
               <div class="small muted">{{ sub["history_label"] }}</div>
             </td>
+            <td class="storage-value">{{ sub["disk_usage"] }}</td>
             <td>
               {% if sub["last_error"] %}
                 <div class="error-text">{{ sub["last_error"] }}</div>
@@ -341,6 +367,11 @@
                 </form>
               {% else %}
                 <span class="small muted">No error</span>
+              {% endif %}
+              {% if sub["active"] %}
+                <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" class="row-actions" onsubmit="return confirm('Unsubscribe from this channel on YouTube? Existing downloaded files are not deleted.')">
+                  <button class="btn ghost smallbtn" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
+                </form>
               {% endif %}
             </td>
           </tr>
@@ -354,9 +385,35 @@
   </div>
 </div>
 
+<dialog id="single-download-dialog">
+  <div class="modal-head">
+    <div><h2 style="margin:0">Single Download</h2><div class="muted small">Download one YouTube video directly into the Emby YouTube library.</div></div>
+    <button class="modal-close" onclick="closeSingleDownload()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <form id="single-download-form" onsubmit="startSingleDownload(event)">
+      <label>YouTube URL
+        <input id="single-download-url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+      </label>
+      <button class="btn" id="single-download-start">Start download</button>
+    </form>
+    <div id="single-download-status" class="progress-wrap hidden">
+      <strong id="single-download-title">Queued</strong>
+      <progress id="single-download-progress" max="100" value="0"></progress>
+      <div class="progress-meta">
+        <span id="single-download-percent">0%</span>
+        <span id="single-download-speed"></span>
+        <span id="single-download-eta"></span>
+      </div>
+      <div class="muted small" id="single-download-bytes"></div>
+      <div class="bad small" id="single-download-error"></div>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="settings-dialog">
   <div class="modal-head">
-    <div><h2 style="margin:0">Settings</h2><div class="muted small">Configuration is kept out of the main dashboard.</div></div>
+    <div><h2 style="margin:0">Settings</h2><div class="muted small">Application configuration and automation.</div></div>
     <button class="modal-close" onclick="closeSettings()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
@@ -372,7 +429,7 @@
     <section class="tab-panel active" data-panel="general">
       <div class="settings-grid">
         <div class="setting-box">
-          <h3>New subscriptions</h3>
+          <h3>Subscription behaviour</h3>
           <form method="post" action="/settings/general">
             <label>When a new YouTube subscription appears
               <select name="new_subscription_policy">
@@ -394,9 +451,9 @@
         </div>
         <div class="setting-box">
           <h3>Current behaviour</h3>
+          <p>New subscriptions: <strong>{{ new_subscription_policy }}</strong></p>
+          <p>Unsubscribed channels: <strong>{{ unsubscribe_policy }}</strong></p>
           <p class="muted small">Automatic sync applies these rules every {{ interval }} minutes.</p>
-          <p>New: <strong>{{ new_subscription_policy }}</strong></p>
-          <p>Unsubscribed: <strong>{{ unsubscribe_policy }}</strong></p>
         </div>
       </div>
     </section>
@@ -406,7 +463,12 @@
         <div class="setting-box">
           <h3>Google OAuth</h3>
           {% if google_connected %}
-            <p class="ok">Google is connected.</p>
+            <p class="{% if google_write_ready %}ok{% else %}warn{% endif %}">
+              {% if google_write_ready %}Google is connected with read + write access.{% else %}Google is connected with read-only access.{% endif %}
+            </p>
+            {% if not google_write_ready %}
+              <p><a class="btn" href="/oauth/google/login">Reconnect Google</a></p>
+            {% endif %}
             <form method="post" action="/oauth/google/disconnect">
               <button class="btn danger">Disconnect Google</button>
             </form>
@@ -426,11 +488,32 @@
             </form>
             {% if google_configured %}<p><a class="btn secondary" href="/oauth/google/login">Connect Google</a></p>{% endif %}
           {% endif %}
+          <p class="muted small">Callback: <code>{{ callback_uri if callback_uri else "Set the public URL first" }}</code></p>
         </div>
+
         <div class="setting-box">
-          <h3>Google callback</h3>
-          <code>{{ callback_uri if callback_uri else "Set your public dashboard URL first" }}</code>
-          <p class="muted small">This exact address belongs in Google Cloud as the authorised redirect URI.</p>
+          <h3>Emby Download playlist</h3>
+          <form method="post" action="/settings/youtube">
+            <label><input type="checkbox" name="emby_download_enabled" value="1" {% if emby_download_enabled %}checked{% endif %}> Monitor the private “Emby Download” playlist</label>
+            <label>Playlist name
+              <input type="text" value="Emby Download" disabled>
+            </label>
+            <label>Check playlist every
+              <input type="number" min="1" max="1440" name="emby_download_poll_minutes" value="{{ emby_download_poll_minutes }}">
+              <span class="muted small">minutes</span>
+            </label>
+            <label><input type="checkbox" name="emby_download_remove_after_success" value="1" {% if emby_download_remove_after_success %}checked{% endif %}> Remove videos from the playlist after a successful download</label>
+            <label>Daily API quota used for the estimate
+              <input type="number" min="100" name="youtube_daily_quota" value="{{ youtube_daily_quota }}">
+            </label>
+            <button class="btn">Save YouTube</button>
+          </form>
+          <div class="actions" style="margin-top:10px">
+            <form method="post" action="/emby-download/ensure">
+              <button class="btn secondary smallbtn" {% if not google_write_ready %}disabled{% endif %}>Ensure playlist exists</button>
+            </form>
+          </div>
+          <p class="muted small">Playlist ID: {{ emby_download_playlist_id or "not created yet" }}</p>
         </div>
       </div>
     </section>
@@ -490,9 +573,10 @@
           </form>
         </div>
         <div class="setting-box">
-          <h3>Effective default</h3>
-          <div class="metric">{{ default_history_cutoff }}</div>
-          <p class="muted small">Each channel can override this in the subscription table.</p>
+          <h3>Storage</h3>
+          <div class="metric">{{ storage_total }}</div>
+          <p class="muted small">Current size under the shared YouTube download directory. Per-channel estimates appear in the main table.</p>
+          <p>{{ download_counts.running }} active direct download(s) · {{ download_counts.queued }} queued · {{ download_counts.failed }} failed</p>
         </div>
       </div>
     </section>
@@ -502,7 +586,7 @@
         <div class="setting-box">
           <h3>Scheduled sync</h3>
           <form method="post" action="/settings/automation">
-            <label>Sync interval in minutes
+            <label>Subscription sync interval in minutes
               <input type="number" min="5" max="1440" name="sync_interval_minutes" value="{{ interval }}">
             </label>
             <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Automatically retry failed source updates</label>
@@ -511,8 +595,10 @@
         </div>
         <div class="setting-box">
           <h3>Schedule</h3>
-          <p>Every <strong>{{ interval }} minutes</strong></p>
-          <p class="muted small">Next run: <span id="next-sync">{{ next_sync or "not available" }}</span></p>
+          <p>Subscriptions: every <strong>{{ interval }} minutes</strong></p>
+          <p>Emby Download: every <strong>{{ emby_download_poll_minutes }} minutes</strong></p>
+          <p class="muted small">Next subscription sync: {{ next_sync or "not available" }}</p>
+          <p class="muted small">Next Emby Download check: {{ next_emby_sync or "not available" }}</p>
         </div>
       </div>
     </section>
@@ -520,15 +606,30 @@
     <section class="tab-panel" data-panel="advanced">
       <div class="settings-grid">
         <div class="setting-box">
+          <h3>YouTube API usage</h3>
+          <div class="metric">{{ api_stats.used }} / {{ api_stats.quota }}</div>
+          <div class="quota-bar"><div class="quota-fill" style="width:{{ api_stats.percent }}%"></div></div>
+          <p class="muted small">{{ api_stats.remaining }} estimated units remaining today · {{ api_stats.calls }} calls · {{ api_stats.failures }} failed calls</p>
+          {% if api_stats.methods %}
+          <table class="compact-table">
+            <thead><tr><th>Method</th><th>Calls</th><th>Units</th></tr></thead>
+            <tbody>
+              {% for method in api_stats.methods %}
+                <tr><td>{{ method.method }}</td><td>{{ method.calls }}</td><td>{{ method.units }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+          <p class="muted small">These figures track calls made by this app. Google Cloud Console remains the source for the project’s actual quota.</p>
+        </div>
+
+        <div class="setting-box">
           <h3>Application</h3>
           <p>Version <strong>{{ version }}</strong></p>
           <p>Dry run: <strong>{{ "Enabled" if dry_run else "Disabled" }}</strong></p>
+          <p>Download storage: <strong>{{ storage_total }}</strong></p>
+          <p><a href="/health" target="_blank">Health endpoint</a></p>
           <p><a href="https://github.com/AshCooperUK/youtube-pinchflat-sync" target="_blank">GitHub repository</a></p>
-        </div>
-        <div class="setting-box">
-          <h3>Health</h3>
-          <p><a href="/health" target="_blank">Open health endpoint</a></p>
-          <p class="muted small">Use Activity for recent sync and error history.</p>
         </div>
       </div>
     </section>
@@ -537,7 +638,7 @@
 
 <dialog id="activity-dialog">
   <div class="modal-head">
-    <div><h2 style="margin:0">Activity</h2><div class="muted small">Recent automation, source and settings events.</div></div>
+    <div><h2 style="margin:0">Activity</h2><div class="muted small">Recent automation, source, download and settings events.</div></div>
     <button class="modal-close" onclick="closeActivity()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
@@ -552,6 +653,23 @@
     {% else %}
       <div class="empty">No activity has been recorded yet.</div>
     {% endif %}
+
+    <h3 style="margin-top:24px">Recent direct downloads</h3>
+    {% if recent_downloads %}
+      {% for item in recent_downloads %}
+        <div class="activity-item">
+          <strong class="{% if item['status'] == 'completed' %}ok{% elif item['status'] == 'failed' %}bad{% elif item['status'] in ['downloading','processing'] %}warn{% endif %}">
+            {{ item["title"] or item["youtube_url"] }}
+          </strong>
+          <div>{{ item["source_type"] }} · {{ item["status"] }} · {{ "%.0f"|format(item["progress"] or 0) }}%</div>
+          {% if item["error"] %}<div class="bad small">{{ item["error"] }}</div>{% endif %}
+          <div class="activity-time">{{ item["created_at"] }}</div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="muted small">No direct downloads yet.</div>
+    {% endif %}
+
     <h3 style="margin-top:24px">Recent sync runs</h3>
     {% for run in recent_runs %}
       <div class="activity-item">
@@ -566,11 +684,18 @@
 <script>
 const settingsDialog = document.getElementById("settings-dialog");
 const activityDialog = document.getElementById("activity-dialog");
+const singleDownloadDialog = document.getElementById("single-download-dialog");
+let singleDownloadTimer = null;
 
 function openSettings(tab="general") { showTab(tab); settingsDialog.showModal(); }
 function closeSettings() { settingsDialog.close(); }
 function openActivity() { activityDialog.showModal(); }
 function closeActivity() { activityDialog.close(); }
+function openSingleDownload() { singleDownloadDialog.showModal(); }
+function closeSingleDownload() {
+  singleDownloadDialog.close();
+  if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+}
 
 function showTab(name) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
@@ -585,8 +710,59 @@ function toggleDefaultHistory() {
 toggleDefaultHistory();
 
 function toggleSourceDate(select) {
-  const input = select.closest("form").querySelector(".source-date");
+  const form = select.closest("form");
+  const input = form.querySelector(".source-date");
   input.classList.toggle("hidden", select.value !== "custom_date");
+}
+
+async function startSingleDownload(event) {
+  event.preventDefault();
+  const url = document.getElementById("single-download-url").value.trim();
+  const button = document.getElementById("single-download-start");
+  button.disabled = true;
+
+  const response = await fetch("/single-download/start", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({youtube_url:url})
+  });
+  const data = await response.json();
+
+  if (!data.ok) {
+    document.getElementById("single-download-status").classList.remove("hidden");
+    document.getElementById("single-download-error").textContent = data.error || "Download could not be queued.";
+    button.disabled = false;
+    return;
+  }
+
+  document.getElementById("single-download-status").classList.remove("hidden");
+  document.getElementById("single-download-error").textContent = "";
+  pollSingleDownload(data.job_id);
+  if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+  singleDownloadTimer = setInterval(() => pollSingleDownload(data.job_id), 1000);
+}
+
+async function pollSingleDownload(jobId) {
+  const response = await fetch(`/api/downloads/${jobId}`);
+  const data = await response.json();
+  if (!data.ok) return;
+
+  const job = data.job;
+  const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+  document.getElementById("single-download-progress").value = progress;
+  document.getElementById("single-download-percent").textContent = `${progress.toFixed(0)}%`;
+  document.getElementById("single-download-title").textContent = job.title || job.status || "Download";
+  document.getElementById("single-download-speed").textContent = job.speed || "";
+  document.getElementById("single-download-eta").textContent = job.eta ? `ETA ${job.eta}` : "";
+  document.getElementById("single-download-bytes").textContent =
+    `${job.downloaded_text || "0 B"}${job.total_bytes ? " / " + job.total_text : ""} · ${job.status}`;
+  document.getElementById("single-download-error").textContent = job.error || "";
+
+  if (["completed","failed"].includes(job.status)) {
+    clearInterval(singleDownloadTimer);
+    singleDownloadTimer = null;
+    document.getElementById("single-download-start").disabled = false;
+  }
 }
 
 const search = document.getElementById("source-search");
@@ -622,6 +798,7 @@ function applyFilters() {
   visible.sort((a,b) => {
     if (sortFilter.value === "status") return a.dataset.status.localeCompare(b.dataset.status) || a.dataset.title.localeCompare(b.dataset.title);
     if (sortFilter.value === "newest") return b.dataset.firstSeen.localeCompare(a.dataset.firstSeen);
+    if (sortFilter.value === "storage") return Number(b.dataset.storage || 0) - Number(a.dataset.storage || 0);
     return a.dataset.title.localeCompare(b.dataset.title);
   });
   visible.forEach(row => body.appendChild(row));
@@ -640,10 +817,10 @@ function updateSelectedCount() {
 }
 
 function toggleBulkOptions() {
-  const action = document.getElementById("bulk-action").value;
-  document.getElementById("bulk-range").classList.toggle("hidden", action !== "range");
-  document.getElementById("bulk-profile").classList.toggle("hidden", action !== "profile");
-  document.getElementById("bulk-custom-date").classList.add("hidden");
+  const action = document.getElementById("bulk-action")?.value;
+  document.getElementById("bulk-range")?.classList.toggle("hidden", action !== "range");
+  document.getElementById("bulk-profile")?.classList.toggle("hidden", action !== "profile");
+  document.getElementById("bulk-custom-date")?.classList.add("hidden");
 }
 document.getElementById("bulk-range")?.addEventListener("change", function() {
   document.getElementById("bulk-custom-date").classList.toggle("hidden", this.value !== "custom_date");
@@ -660,7 +837,7 @@ initialFilter();
 applyFilters();
 toggleBulkOptions();
 
-[settingsDialog, activityDialog].forEach(d => {
+[settingsDialog, activityDialog, singleDownloadDialog].forEach(d => {
   d?.addEventListener("click", event => {
     const rect = d.getBoundingClientRect();
     const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;

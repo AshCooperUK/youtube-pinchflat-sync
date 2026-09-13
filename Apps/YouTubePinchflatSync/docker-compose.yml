@@ -44,11 +44,12 @@ services:
     environment:
       TZ: Europe/London
       DATA_DIR: /data
+      DOWNLOAD_ROOT: /downloads
       APP_URL: ""
       GOOGLE_CLIENT_ID: ""
       GOOGLE_CLIENT_SECRET: ""
       GOOGLE_REDIRECT_URI: ""
-      YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube.readonly
+      YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube
       PINCHFLAT_URL: http://butane.grovefarm:8945
       PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
       PINCHFLAT_MEDIA_PROFILE_ID: "1"
@@ -69,6 +70,9 @@ services:
       - type: bind
         source: /media/NVME-Storage/AppData/youtube-pinchflat-sync/data
         target: /data
+      - type: bind
+        source: /media/Storage/Media/YouTube
+        target: /downloads
     labels:
       icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
     x-casaos:
@@ -80,6 +84,9 @@ services:
         - container: /data
           description:
             en_US: OAuth token, settings and subscription database
+        - container: /downloads
+          description:
+            en_US: Shared YouTube media library used for storage statistics and direct downloads
       envs:
         - container: TZ
           description:
@@ -120,10 +127,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.4.0"
+  version: "1.5.0"
   update_at: "2026-09-13"
   release_notes:
-    en_US: Redesigned dashboard with Settings and Activity popups, automatic downloads for new subscriptions, unsubscribe policies, filters, bulk tools, retries and selectable Pinchflat Media Profiles.
+    en_US: Adds Emby Download playlist automation, one-off downloads with live progress, YouTube unsubscribe controls, API quota statistics, disk usage reporting and interface refinements.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

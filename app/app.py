@@ -1,13 +1,17 @@
 import json
 import os
+import queue
+import re
 import secrets
 import sqlite3
 import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
+import yt_dlp
 from apscheduler.schedulers.background import BackgroundScheduler
 from bs4 import BeautifulSoup
 from dateutil.relativedelta import relativedelta
@@ -17,7 +21,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -27,8 +31,17 @@ SECRET_PATH = DATA_DIR / "flask-secret.txt"
 
 YOUTUBE_SCOPE = os.getenv(
     "YOUTUBE_SCOPE",
-    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube",
 )
+YOUTUBE_WRITE_SCOPES = {
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+    "https://www.googleapis.com/auth/youtubepartner",
+}
+YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
+
+DOWNLOAD_ROOT = Path(os.getenv("DOWNLOAD_ROOT", "/downloads"))
+DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 PINCHFLAT_URL = os.getenv("PINCHFLAT_URL", "http://pinchflat:8945").rstrip("/")
 PINCHFLAT_PUBLIC_URL = os.getenv(
@@ -94,6 +107,10 @@ app.config.update(
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 sync_lock = threading.Lock()
+download_queue = queue.Queue()
+download_worker_started = False
+storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
+storage_cache_lock = threading.Lock()
 
 
 def db():
@@ -174,6 +191,7 @@ def init_db():
         ensure_column(conn, "subscriptions", "media_profile_id", "TEXT")
         ensure_column(conn, "subscriptions", "removed_at", "TEXT")
         ensure_column(conn, "subscriptions", "retry_count", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "subscriptions", "youtube_subscription_id", "TEXT")
 
         conn.executescript(
             """
@@ -185,6 +203,38 @@ def init_db():
                 message TEXT NOT NULL,
                 severity TEXT NOT NULL DEFAULT 'info',
                 channel_id TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS api_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at TEXT NOT NULL,
+                usage_date TEXT NOT NULL,
+                method TEXT NOT NULL,
+                units INTEGER NOT NULL,
+                success INTEGER NOT NULL DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS downloads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT UNIQUE NOT NULL,
+                source_type TEXT NOT NULL,
+                youtube_url TEXT NOT NULL,
+                video_id TEXT,
+                title TEXT,
+                channel_title TEXT,
+                playlist_item_id TEXT,
+                status TEXT NOT NULL DEFAULT 'queued',
+                progress REAL NOT NULL DEFAULT 0,
+                speed TEXT,
+                eta TEXT,
+                downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+                total_bytes INTEGER NOT NULL DEFAULT 0,
+                output_path TEXT,
+                error TEXT,
+                remove_playlist_item INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT
             );
             """
         )
@@ -205,6 +255,12 @@ def init_db():
             "sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "auto_retry": "1",
             "auto_create_media_profile": "1",
+            "emby_download_enabled": "1",
+            "emby_download_playlist_name": "Emby Download",
+            "emby_download_remove_after_success": "1",
+            "youtube_daily_quota": "10000",
+            "single_download_folder": "Single Downloads",
+            "emby_download_folder": "Emby Download",
         }
         for key, value in defaults.items():
             if value:
@@ -268,6 +324,655 @@ def log_activity(event_type, title, message, severity="info", channel_id=None):
             """,
             (now_iso(), event_type, title, message, severity, channel_id),
         )
+
+
+def record_api_usage(method, units, success=True):
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO api_usage (occurred_at, usage_date, method, units, success)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (now_iso(), date.today().isoformat(), method, int(units), 1 if success else 0),
+        )
+
+
+def api_usage_stats():
+    today = date.today().isoformat()
+    quota = setting_int("youtube_daily_quota", 10000, 100, 100000000)
+    with db() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(units), 0) AS units,
+                   COUNT(*) AS calls,
+                   COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) AS failures
+            FROM api_usage
+            WHERE usage_date = ?
+            """,
+            (today,),
+        ).fetchone()
+        methods = conn.execute(
+            """
+            SELECT method, SUM(units) AS units, COUNT(*) AS calls
+            FROM api_usage
+            WHERE usage_date = ?
+            GROUP BY method
+            ORDER BY units DESC, method ASC
+            LIMIT 20
+            """,
+            (today,),
+        ).fetchall()
+
+    used = int(row["units"] or 0)
+    return {
+        "date": today,
+        "quota": quota,
+        "used": used,
+        "remaining": max(0, quota - used),
+        "calls": int(row["calls"] or 0),
+        "failures": int(row["failures"] or 0),
+        "percent": min(100.0, (used / quota * 100.0) if quota else 0.0),
+        "methods": [dict(item) for item in methods],
+    }
+
+
+def youtube_api_request(creds, http_method, path, quota_method, quota_cost=1, **kwargs):
+    url = path if path.startswith("http") else f"{YOUTUBE_API_BASE}/{path.lstrip('/')}"
+    headers = dict(kwargs.pop("headers", {}) or {})
+    headers["Authorization"] = f"Bearer {creds.token}"
+    response = requests.request(
+        http_method,
+        url,
+        headers=headers,
+        timeout=kwargs.pop("timeout", 30),
+        **kwargs,
+    )
+    record_api_usage(quota_method, quota_cost, response.ok)
+    response.raise_for_status()
+    return response
+
+
+def google_write_scope_ready(creds=None):
+    try:
+        creds = creds or load_credentials()
+    except Exception:
+        return False
+    if not creds:
+        return False
+    granted = set(creds.scopes or [])
+    return bool(granted.intersection(YOUTUBE_WRITE_SCOPES))
+
+
+def format_bytes(value):
+    try:
+        value = float(value or 0)
+    except (TypeError, ValueError):
+        value = 0.0
+
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    index = 0
+    while value >= 1024 and index < len(units) - 1:
+        value /= 1024.0
+        index += 1
+
+    if index == 0:
+        return f"{int(value)} {units[index]}"
+    return f"{value:.1f} {units[index]}"
+
+
+def normalise_storage_name(value):
+    value = (value or "").strip().casefold()
+    value = re.sub(r'[<>:"/\\\\|?*]', "", value)
+    value = re.sub(r"\\s+", " ", value)
+    return value.strip(" .")
+
+
+def storage_snapshot(force=False):
+    now = time.time()
+    with storage_cache_lock:
+        if not force and now - storage_cache["updated_at"] < 300:
+            return {
+                "total": storage_cache["total"],
+                "by_name": dict(storage_cache["by_name"]),
+            }
+
+    total = 0
+    by_name = {}
+    if DOWNLOAD_ROOT.exists():
+        for root, _dirs, files in os.walk(DOWNLOAD_ROOT):
+            root_path = Path(root)
+            try:
+                relative = root_path.relative_to(DOWNLOAD_ROOT)
+                parts = list(relative.parts)
+            except ValueError:
+                parts = []
+
+            folder_keys = {
+                normalise_storage_name(part)
+                for part in parts[-4:]
+                if normalise_storage_name(part)
+            }
+
+            for filename in files:
+                path = root_path / filename
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                total += size
+                for key in folder_keys:
+                    by_name[key] = by_name.get(key, 0) + size
+
+    with storage_cache_lock:
+        storage_cache["updated_at"] = now
+        storage_cache["total"] = total
+        storage_cache["by_name"] = dict(by_name)
+
+    return {"total": total, "by_name": by_name}
+
+
+def channel_disk_usage(title, snapshot=None):
+    snapshot = snapshot or storage_snapshot()
+    return int(snapshot["by_name"].get(normalise_storage_name(title), 0))
+
+
+def valid_youtube_url(value):
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+    host = (parsed.hostname or "").casefold()
+    return parsed.scheme in {"http", "https"} and (
+        host == "youtu.be"
+        or host.endswith(".youtube.com")
+        or host == "youtube.com"
+        or host.endswith(".youtube-nocookie.com")
+    )
+
+
+def download_job_row(job_id):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM downloads WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def enqueue_download(
+    youtube_url,
+    source_type="single",
+    video_id=None,
+    title=None,
+    channel_title=None,
+    playlist_item_id=None,
+    remove_playlist_item=False,
+):
+    if not valid_youtube_url(youtube_url):
+        raise RuntimeError("Enter a valid YouTube video URL.")
+
+    if playlist_item_id:
+        with db() as conn:
+            existing = conn.execute(
+                """
+                SELECT job_id, status
+                FROM downloads
+                WHERE playlist_item_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (playlist_item_id,),
+            ).fetchone()
+        if existing and existing["status"] in {"queued", "downloading", "completed"}:
+            return existing["job_id"], False
+
+    job_id = secrets.token_hex(12)
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO downloads (
+                job_id, source_type, youtube_url, video_id, title, channel_title,
+                playlist_item_id, status, progress, remove_playlist_item, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
+            """,
+            (
+                job_id,
+                source_type,
+                youtube_url,
+                video_id,
+                title,
+                channel_title,
+                playlist_item_id,
+                1 if remove_playlist_item else 0,
+                now_iso(),
+            ),
+        )
+
+    download_queue.put(job_id)
+    log_activity(
+        "download",
+        "Download queued",
+        f"{title or youtube_url} queued from {source_type}.",
+        "info",
+    )
+    return job_id, True
+
+
+def update_download_job(job_id, **values):
+    if not values:
+        return
+    allowed = {
+        "video_id", "title", "channel_title", "status", "progress", "speed",
+        "eta", "downloaded_bytes", "total_bytes", "output_path", "error",
+        "started_at", "finished_at",
+    }
+    values = {key: value for key, value in values.items() if key in allowed}
+    if not values:
+        return
+    assignments = ", ".join(f"{key} = ?" for key in values)
+    params = list(values.values()) + [job_id]
+    with db() as conn:
+        conn.execute(
+            f"UPDATE downloads SET {assignments} WHERE job_id = ?",
+            params,
+        )
+
+
+def remove_playlist_item_from_youtube(playlist_item_id):
+    if not playlist_item_id:
+        return False
+    creds = load_credentials()
+    if not creds or not google_write_scope_ready(creds):
+        raise RuntimeError("Google needs reconnecting with YouTube write access.")
+    youtube_api_request(
+        creds,
+        "DELETE",
+        "playlistItems",
+        "playlistItems.delete",
+        50,
+        params={"id": playlist_item_id},
+    )
+    return True
+
+
+def _download_progress_hook(job_id):
+    def hook(data):
+        status = data.get("status")
+        if status == "downloading":
+            downloaded = int(data.get("downloaded_bytes") or 0)
+            total = int(data.get("total_bytes") or data.get("total_bytes_estimate") or 0)
+            progress = (downloaded / total * 100.0) if total else 0.0
+            speed = data.get("_speed_str") or (
+                f"{format_bytes(data.get('speed'))}/s" if data.get("speed") else ""
+            )
+            eta = data.get("_eta_str") or (
+                str(data.get("eta")) + "s" if data.get("eta") is not None else ""
+            )
+            update_download_job(
+                job_id,
+                status="downloading",
+                progress=round(progress, 2),
+                speed=str(speed).strip(),
+                eta=str(eta).strip(),
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+            )
+        elif status == "finished":
+            update_download_job(
+                job_id,
+                status="processing",
+                progress=100.0,
+                output_path=data.get("filename") or "",
+            )
+    return hook
+
+
+def run_download_job(job_id):
+    job = download_job_row(job_id)
+    if not job:
+        return
+
+    folder_setting = (
+        get_setting("emby_download_folder", "Emby Download")
+        if job["source_type"] == "emby_download"
+        else get_setting("single_download_folder", "Single Downloads")
+    )
+    folder_setting = folder_setting.strip().strip("/\\\\") or "Single Downloads"
+    output_dir = DOWNLOAD_ROOT / folder_setting
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    update_download_job(
+        job_id,
+        status="downloading",
+        started_at=now_iso(),
+        error=None,
+        progress=0,
+    )
+
+    output_template = str(
+        output_dir
+        / "%(uploader,channel|Unknown Channel).80B"
+        / "%(title).180B [%(id)s].%(ext)s"
+    )
+
+    ydl_opts = {
+        "format": "bestvideo*+bestaudio/best",
+        "merge_output_format": "mp4",
+        "outtmpl": output_template,
+        "noplaylist": True,
+        "continuedl": True,
+        "overwrites": False,
+        "writethumbnail": True,
+        "writeinfojson": True,
+        "embedmetadata": True,
+        "embedthumbnail": True,
+        "progress_hooks": [_download_progress_hook(job_id)],
+        "quiet": True,
+        "no_warnings": True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(job["youtube_url"], download=True)
+
+        output_path = ""
+        requested = info.get("requested_downloads") or []
+        if requested:
+            output_path = requested[0].get("filepath") or requested[0].get("filename") or ""
+        if not output_path:
+            try:
+                output_path = ydl.prepare_filename(info)
+            except Exception:
+                output_path = job.get("output_path") or ""
+
+        update_download_job(
+            job_id,
+            video_id=info.get("id") or job.get("video_id"),
+            title=info.get("title") or job.get("title"),
+            channel_title=(
+                info.get("uploader")
+                or info.get("channel")
+                or job.get("channel_title")
+            ),
+            status="completed",
+            progress=100.0,
+            output_path=output_path,
+            finished_at=now_iso(),
+            error=None,
+        )
+
+        if job.get("remove_playlist_item") and job.get("playlist_item_id"):
+            try:
+                remove_playlist_item_from_youtube(job["playlist_item_id"])
+                log_activity(
+                    "emby_download",
+                    "Emby Download item completed",
+                    f"{info.get('title') or job['youtube_url']} downloaded and removed from the playlist.",
+                    "success",
+                )
+            except Exception as exc:
+                log_activity(
+                    "emby_download",
+                    "Playlist cleanup failed",
+                    f"Download completed, but the playlist item could not be removed: {exc}",
+                    "warning",
+                )
+        else:
+            log_activity(
+                "download",
+                "Download completed",
+                f"{info.get('title') or job['youtube_url']} completed.",
+                "success",
+            )
+
+        storage_snapshot(force=True)
+
+    except Exception as exc:
+        update_download_job(
+            job_id,
+            status="failed",
+            error=str(exc)[:1500],
+            finished_at=now_iso(),
+        )
+        log_activity(
+            "download",
+            "Download failed",
+            f"{job.get('title') or job['youtube_url']}: {exc}",
+            "error",
+        )
+
+
+def download_worker():
+    while True:
+        job_id = download_queue.get()
+        try:
+            run_download_job(job_id)
+        finally:
+            download_queue.task_done()
+
+
+def start_download_worker():
+    global download_worker_started
+    if download_worker_started:
+        return
+    download_worker_started = True
+
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE downloads
+            SET status = 'queued', started_at = NULL
+            WHERE status IN ('downloading', 'processing')
+            """
+        )
+        queued = conn.execute(
+            "SELECT job_id FROM downloads WHERE status = 'queued' ORDER BY id ASC"
+        ).fetchall()
+
+    thread = threading.Thread(
+        target=download_worker,
+        name="youtube-download-worker",
+        daemon=True,
+    )
+    thread.start()
+
+    for row in queued:
+        download_queue.put(row["job_id"])
+
+
+def youtube_playlists(creds):
+    items = []
+    page_token = None
+    while True:
+        params = {
+            "part": "snippet,status",
+            "mine": "true",
+            "maxResults": 50,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "playlists",
+            "playlists.list",
+            1,
+            params=params,
+        )
+        payload = response.json()
+        items.extend(payload.get("items", []))
+        page_token = payload.get("nextPageToken")
+        if not page_token:
+            break
+    return items
+
+
+def ensure_emby_download_playlist(creds=None):
+    if not setting_bool("emby_download_enabled", True):
+        return None
+
+    creds = creds or load_credentials()
+    if not creds:
+        raise RuntimeError("Google account is not connected.")
+    if not google_write_scope_ready(creds):
+        raise RuntimeError("Reconnect Google to enable Emby Download playlist access.")
+
+    playlist_name = get_setting("emby_download_playlist_name", "Emby Download").strip() or "Emby Download"
+    playlists = youtube_playlists(creds)
+    for item in playlists:
+        if (item.get("snippet", {}).get("title") or "").strip().casefold() == playlist_name.casefold():
+            playlist_id = item.get("id")
+            set_setting("emby_download_playlist_id", playlist_id or "")
+            return playlist_id
+
+    response = youtube_api_request(
+        creds,
+        "POST",
+        "playlists?part=snippet,status",
+        "playlists.insert",
+        50,
+        json={
+            "snippet": {
+                "title": playlist_name,
+                "description": "Videos placed here are downloaded automatically by YouTube Pinchflat Sync for Emby.",
+            },
+            "status": {"privacyStatus": "private"},
+        },
+    )
+    playlist_id = response.json().get("id")
+    if not playlist_id:
+        raise RuntimeError("YouTube created the playlist but returned no playlist ID.")
+    set_setting("emby_download_playlist_id", playlist_id)
+    log_activity(
+        "emby_download",
+        "Emby Download playlist created",
+        f'Created private YouTube playlist "{playlist_name}".',
+        "success",
+    )
+    return playlist_id
+
+
+def emby_download_playlist_items(creds, playlist_id):
+    items = []
+    page_token = None
+    while True:
+        params = {
+            "part": "snippet,contentDetails",
+            "playlistId": playlist_id,
+            "maxResults": 50,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "playlistItems",
+            "playlistItems.list",
+            1,
+            params=params,
+        )
+        payload = response.json()
+        items.extend(payload.get("items", []))
+        page_token = payload.get("nextPageToken")
+        if not page_token:
+            break
+    return items
+
+
+def sync_emby_download_playlist():
+    result = {"playlist_id": None, "found": 0, "queued": 0, "skipped": 0, "error": None}
+    if not setting_bool("emby_download_enabled", True):
+        return result
+
+    try:
+        creds = load_credentials()
+        if not creds:
+            return result
+        if not google_write_scope_ready(creds):
+            result["error"] = "Reconnect Google to grant YouTube write access."
+            return result
+
+        playlist_id = ensure_emby_download_playlist(creds)
+        result["playlist_id"] = playlist_id
+        if not playlist_id:
+            return result
+
+        items = emby_download_playlist_items(creds, playlist_id)
+        result["found"] = len(items)
+        remove_after = setting_bool("emby_download_remove_after_success", True)
+
+        for item in items:
+            snippet = item.get("snippet", {})
+            details = item.get("contentDetails", {})
+            video_id = details.get("videoId") or snippet.get("resourceId", {}).get("videoId")
+            playlist_item_id = item.get("id")
+            title = snippet.get("title") or video_id
+            channel_title = snippet.get("videoOwnerChannelTitle") or snippet.get("channelTitle") or ""
+
+            if not video_id or not playlist_item_id:
+                result["skipped"] += 1
+                continue
+
+            job_id, created = enqueue_download(
+                f"https://www.youtube.com/watch?v={video_id}",
+                source_type="emby_download",
+                video_id=video_id,
+                title=title,
+                channel_title=channel_title,
+                playlist_item_id=playlist_item_id,
+                remove_playlist_item=remove_after,
+            )
+            if created:
+                result["queued"] += 1
+            else:
+                result["skipped"] += 1
+
+        if result["queued"]:
+            log_activity(
+                "emby_download",
+                "Emby Download queue updated",
+                f"Queued {result['queued']} new video(s) from the Emby Download playlist.",
+                "success",
+            )
+    except Exception as exc:
+        result["error"] = str(exc)
+        log_activity(
+            "emby_download",
+            "Emby Download sync failed",
+            str(exc),
+            "error",
+        )
+
+    return result
+
+
+def youtube_unsubscribe(channel_id, youtube_subscription_id=None):
+    creds = load_credentials()
+    if not creds:
+        raise RuntimeError("Google account is not connected.")
+    if not google_write_scope_ready(creds):
+        raise RuntimeError("Reconnect Google to grant permission to unsubscribe from channels.")
+
+    subscription_id = youtube_subscription_id
+    if not subscription_id:
+        for item in youtube_subscriptions(creds):
+            if item.get("channel_id") == channel_id:
+                subscription_id = item.get("youtube_subscription_id")
+                break
+
+    if not subscription_id:
+        raise RuntimeError("The YouTube subscription ID could not be found.")
+
+    youtube_api_request(
+        creds,
+        "DELETE",
+        "subscriptions",
+        "subscriptions.delete",
+        50,
+        params={"id": subscription_id},
+    )
+    return subscription_id
 
 
 def current_sync_interval():
@@ -370,10 +1075,7 @@ def load_credentials():
         return None
 
     data = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
-    creds = Credentials.from_authorized_user_info(
-        data,
-        scopes=[YOUTUBE_SCOPE],
-    )
+    creds = Credentials.from_authorized_user_info(data)
 
     if creds.expired and creds.refresh_token:
         creds.refresh(GoogleRequest())
@@ -545,13 +1247,14 @@ def youtube_subscriptions(creds):
         else:
             params.pop("pageToken", None)
 
-        response = requests.get(
-            "https://www.googleapis.com/youtube/v3/subscriptions",
-            headers=headers,
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "subscriptions",
+            "subscriptions.list",
+            1,
             params=params,
-            timeout=30,
         )
-        response.raise_for_status()
         payload = response.json()
 
         for item in payload.get("items", []):
@@ -566,6 +1269,7 @@ def youtube_subscriptions(creds):
                         f"https://www.youtube.com/channel/{channel_id}"
                     ),
                     "subscribed_at": snippet.get("publishedAt"),
+                    "youtube_subscription_id": item.get("id"),
                 }
             )
 
@@ -633,9 +1337,10 @@ def refresh_subscriptions():
                         history_mode,
                         download_enabled,
                         needs_review,
-                        removed_at
+                        removed_at,
+                        youtube_subscription_id
                     )
-                    VALUES (?, ?, ?, ?, ?, 1, 'default', ?, ?, NULL)
+                    VALUES (?, ?, ?, ?, ?, 1, 'default', ?, ?, NULL, ?)
                     """,
                     (
                         sub["channel_id"],
@@ -645,6 +1350,7 @@ def refresh_subscriptions():
                         first_seen,
                         enabled,
                         needs_review,
+                        sub.get("youtube_subscription_id"),
                     ),
                 )
             else:
@@ -654,6 +1360,7 @@ def refresh_subscriptions():
                     SET title = ?,
                         channel_url = ?,
                         subscribed_at = ?,
+                        youtube_subscription_id = ?,
                         active = 1,
                         removed_at = NULL
                     WHERE channel_id = ?
@@ -662,6 +1369,7 @@ def refresh_subscriptions():
                         sub["title"],
                         sub["channel_url"],
                         sub["subscribed_at"],
+                        sub.get("youtube_subscription_id"),
                         sub["channel_id"],
                     ),
                 )
@@ -1412,11 +2120,13 @@ def sync_once():
         refresh = refresh_subscriptions()
         result = add_pending_sources()
         retry = retry_failed_source_updates()
+        emby = sync_emby_download_playlist()
 
         total_errors = (
             refresh["policy_errors"]
             + result["errors"]
             + retry["errors"]
+            + (1 if emby.get("error") else 0)
         )
 
         status = (
@@ -1429,7 +2139,9 @@ def sync_once():
             f"Found {refresh['total']} subscriptions. "
             f"New {refresh['new']}. Removed {refresh['removed']}. "
             f"Added {result['added']} Pinchflat sources. "
-            f"Retry fixes {retry['fixed']}. Errors {total_errors}."
+            f"Retry fixes {retry['fixed']}. "
+            f"Emby Download queued {emby.get('queued', 0)}. "
+            f"Errors {total_errors}."
         )
 
         with db() as conn:
@@ -1539,11 +2251,13 @@ def subscription_view(row):
 @app.route("/")
 def index():
     google_connected = False
+    google_write_ready = False
 
     if google_configured():
         try:
             creds = load_credentials()
             google_connected = bool(creds and creds.valid)
+            google_write_ready = bool(google_connected and google_write_scope_ready(creds))
         except Exception as exc:
             flash(
                 f"Google token error: {exc}",
@@ -1571,10 +2285,36 @@ def index():
             "SELECT * FROM activity ORDER BY id DESC LIMIT 60"
         ).fetchall()
 
+        recent_downloads = conn.execute(
+            "SELECT * FROM downloads ORDER BY id DESC LIMIT 30"
+        ).fetchall()
+
+        download_counts_row = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
+                SUM(CASE WHEN status IN ('downloading','processing') THEN 1 ELSE 0 END) AS running,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+            FROM downloads
+            """
+        ).fetchone()
+
     subs = [subscription_view(row) for row in rows]
     defaults = default_history_settings()
     profile_status = pinchflat_profile_status()
     profiles = pinchflat_profiles()
+    storage = storage_snapshot()
+    for sub in subs:
+        sub["disk_bytes"] = channel_disk_usage(sub.get("title"), storage)
+        sub["disk_usage"] = format_bytes(sub["disk_bytes"])
+
+    download_counts = {
+        "queued": int(download_counts_row["queued"] or 0),
+        "running": int(download_counts_row["running"] or 0),
+        "failed": int(download_counts_row["failed"] or 0),
+    }
+    api_stats = api_usage_stats()
+    emby_playlist_id = get_setting("emby_download_playlist_id", "")
 
     counts = {
         "active": sum(1 for sub in subs if sub["active"]),
@@ -1599,6 +2339,7 @@ def index():
         version=VERSION,
         google_configured=google_configured(),
         google_connected=google_connected,
+        google_write_ready=google_write_ready,
         callback_uri=google_redirect_uri(),
         app_url=effective_app_url(),
         media_profile_id=effective_media_profile_id(),
@@ -1629,6 +2370,16 @@ def index():
         show_removed=setting_bool("show_removed", False),
         auto_retry=setting_bool("auto_retry", True),
         auto_create_media_profile=setting_bool("auto_create_media_profile", True),
+        api_stats=api_stats,
+        storage_total_bytes=storage["total"],
+        storage_total=format_bytes(storage["total"]),
+        download_counts=download_counts,
+        recent_downloads=recent_downloads,
+        emby_download_enabled=setting_bool("emby_download_enabled", True),
+        emby_download_playlist_name=get_setting("emby_download_playlist_name", "Emby Download"),
+        emby_download_playlist_id=emby_playlist_id,
+        emby_download_remove_after_success=setting_bool("emby_download_remove_after_success", True),
+        youtube_daily_quota=setting_int("youtube_daily_quota", 10000, 100, 100000000),
     )
 
 
@@ -1987,6 +2738,15 @@ def reschedule_sync_job():
     except Exception:
         pass
 
+    try:
+        scheduler.reschedule_job(
+            "emby-download-sync",
+            trigger="interval",
+            minutes=current_emby_poll_interval(),
+        )
+    except Exception:
+        pass
+
 
 @app.post("/settings/general")
 def save_general_settings():
@@ -2325,6 +3085,164 @@ def bulk_subscription_action():
     return redirect(url_for("index") + "#subscriptions")
 
 
+@app.post("/subscriptions/<channel_id>/unsubscribe")
+def unsubscribe_from_youtube(channel_id):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ?",
+            (channel_id,),
+        ).fetchone()
+
+    if row is None:
+        flash("Subscription was not found.", "error")
+        return redirect(url_for("index") + "#subscriptions")
+
+    try:
+        youtube_unsubscribe(
+            channel_id,
+            row_value(row, "youtube_subscription_id", None),
+        )
+
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET active = 0,
+                    removed_at = ?,
+                    last_error = NULL
+                WHERE channel_id = ?
+                """,
+                (now_iso(), channel_id),
+            )
+
+        row_dict = dict(row)
+        policy = unsubscribe_policy()
+        if policy == "disable" and row_dict.get("pinchflat_added") and row_dict.get("pinchflat_source_id"):
+            update_pinchflat_source_settings(
+                row_dict["pinchflat_source_id"],
+                cutoff=subscription_cutoff(row_dict),
+                download_enabled=False,
+                media_profile_id=subscription_media_profile_id(row_dict),
+            )
+        elif policy == "remove" and row_dict.get("pinchflat_added") and row_dict.get("pinchflat_source_id"):
+            delete_pinchflat_source(row_dict["pinchflat_source_id"], delete_files=False)
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET pinchflat_added = 0, pinchflat_source_id = NULL
+                    WHERE channel_id = ?
+                    """,
+                    (channel_id,),
+                )
+
+        log_activity(
+            "youtube",
+            "YouTube subscription removed",
+            f"Unsubscribed from {row_dict.get('title') or channel_id}.",
+            "success",
+            channel_id,
+        )
+        flash(f"Unsubscribed from {row_dict.get('title') or channel_id} on YouTube.", "success")
+    except Exception as exc:
+        with db() as conn:
+            conn.execute(
+                "UPDATE subscriptions SET last_error = ? WHERE channel_id = ?",
+                (str(exc)[:1000], channel_id),
+            )
+        flash(str(exc), "error")
+
+    return redirect(url_for("index") + "#subscriptions")
+
+
+@app.post("/single-download/start")
+def single_download_start():
+    payload = request.get_json(silent=True) or request.form
+    youtube_url = str(payload.get("youtube_url", "")).strip()
+    try:
+        job_id, _created = enqueue_download(youtube_url, source_type="single")
+        return jsonify({"ok": True, "job_id": job_id})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/downloads/<job_id>")
+def download_status(job_id):
+    row = download_job_row(job_id)
+    if not row:
+        return jsonify({"ok": False, "error": "Download job not found."}), 404
+    row["downloaded_text"] = format_bytes(row.get("downloaded_bytes"))
+    row["total_text"] = format_bytes(row.get("total_bytes"))
+    return jsonify({"ok": True, "job": row})
+
+
+@app.get("/api/downloads/recent")
+def recent_download_status():
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM downloads ORDER BY id DESC LIMIT 20"
+        ).fetchall()
+    return jsonify(
+        {
+            "ok": True,
+            "jobs": [
+                {
+                    **dict(row),
+                    "downloaded_text": format_bytes(row["downloaded_bytes"]),
+                    "total_text": format_bytes(row["total_bytes"]),
+                }
+                for row in rows
+            ],
+        }
+    )
+
+
+@app.post("/settings/youtube")
+def save_youtube_settings():
+    set_setting(
+        "emby_download_enabled",
+        "1" if request.form.get("emby_download_enabled") == "1" else "0",
+    )
+    set_setting("emby_download_playlist_name", "Emby Download")
+    set_setting(
+        "emby_download_remove_after_success",
+        "1" if request.form.get("emby_download_remove_after_success") == "1" else "0",
+    )
+    try:
+        quota = int(request.form.get("youtube_daily_quota", "10000"))
+    except ValueError:
+        quota = 10000
+    quota = min(max(quota, 100), 100000000)
+    set_setting("youtube_daily_quota", str(quota))
+
+    if setting_bool("emby_download_enabled", True) and google_write_scope_ready():
+        try:
+            ensure_emby_download_playlist()
+        except Exception as exc:
+            flash(f"Settings saved, but Emby Download setup needs attention: {exc}", "error")
+            return redirect(url_for("index"))
+
+    log_activity(
+        "settings",
+        "YouTube settings updated",
+        "Emby Download and API settings were updated.",
+        "info",
+    )
+    flash("YouTube settings saved.", "success")
+    return redirect(url_for("index"))
+
+
+@app.post("/emby-download/ensure")
+def ensure_emby_download_now():
+    try:
+        playlist_id = ensure_emby_download_playlist()
+        flash(f'Private playlist "Emby Download" is ready ({playlist_id}).', "success")
+    except Exception as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("index"))
+
+
+
 @app.route("/oauth/google/login")
 def google_login():
     if not google_configured():
@@ -2337,7 +3255,6 @@ def google_login():
     flow = make_flow()
     auth_url, state = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
         prompt="consent",
     )
 
@@ -2355,8 +3272,16 @@ def google_callback():
     save_credentials(flow.credentials)
     log_activity("google", "Google connected", "Google OAuth connection completed.", "success")
 
+    playlist_note = ""
+    if google_write_scope_ready(flow.credentials) and setting_bool("emby_download_enabled", True):
+        try:
+            ensure_emby_download_playlist(flow.credentials)
+            playlist_note = ' Private playlist "Emby Download" is ready.'
+        except Exception as exc:
+            playlist_note = f" Emby Download setup needs attention: {exc}"
+
     flash(
-        "Google account connected.",
+        "Google account connected." + playlist_note,
         "success",
     )
     return redirect(url_for("index"))
@@ -2452,12 +3377,15 @@ def health():
             "version": VERSION,
             "google_configured": google_configured(),
             "pinchflat": pinchflat_health(),
+            "google_write_ready": google_write_scope_ready(),
             "default_cutoff": resolve_history_cutoff(),
+            "download_storage_bytes": storage_snapshot()["total"],
         }
     )
 
 
 init_db()
+start_download_worker()
 
 scheduler = BackgroundScheduler(
     timezone=os.getenv("TZ", "Europe/London")
@@ -2467,6 +3395,13 @@ scheduler.add_job(
     "interval",
     minutes=current_sync_interval(),
     id="subscription-sync",
+    max_instances=1,
+)
+scheduler.add_job(
+    sync_emby_download_playlist,
+    "interval",
+    minutes=current_emby_poll_interval(),
+    id="emby-download-sync",
     max_instances=1,
 )
 scheduler.start()

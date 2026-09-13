@@ -24,7 +24,10 @@ services:
       - .env
     environment:
       DATA_DIR: /data
+      DOWNLOAD_ROOT: /downloads
+      YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube
     ports:
       - "8787:8787"
     volumes:
       - /media/NVME-Storage/AppData/youtube-pinchflat-sync/data:/data
+      - /media/Storage/Media/YouTube:/downloads

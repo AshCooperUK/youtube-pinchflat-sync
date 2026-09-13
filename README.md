@@ -1,204 +1,116 @@
 # YouTube Pinchflat Sync
 
-A Docker dashboard for ZimaOS which reads the subscriptions from your Google/YouTube account and manages matching Pinchflat sources.
+A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 1.4.0
+## Version 1.5.0
 
-Version 1.4.0 is the UI and automation release.
+Version 1.5.0 adds:
 
-### New dashboard
+- Private YouTube playlist automation using the exact playlist name `Emby Download`.
+- Automatic creation of `Emby Download` after Google is connected with write access.
+- Playlist polling every 5 minutes by default.
+- Videos added to `Emby Download` are queued for direct download automatically.
+- Playlist items can be removed from `Emby Download` after a successful download.
+- A `Single Download` popup for one YouTube video URL.
+- Live download percentage, speed, ETA and transferred size.
+- Direct downloads use yt-dlp and FFmpeg inside the sync container.
+- YouTube unsubscribe buttons with confirmation.
+- Google OAuth write scope for supported YouTube write operations.
+- Estimated YouTube Data API quota usage in Settings → Advanced.
+- Total YouTube library disk usage on the dashboard.
+- Estimated disk usage per channel in the subscription table.
+- Disk usage sorting.
+- Long channel names are shortened visually and show the full title on hover.
+- Consistent dashboard button sizes.
+- Per-channel Range and Save controls sit on one row.
+- Existing v1.4 automation remains, including automatic downloads for new subscriptions, unsubscribe policies, retries, bulk actions and selectable Pinchflat Media Profiles.
 
-The main page now focuses on:
+## Google OAuth change
 
-- Google status
-- Pinchflat status
-- Active subscriptions
-- Enabled and disabled downloads
-- Pending sources
-- Errors
-- Subscription management
+v1.5.0 uses:
 
-Configuration no longer fills the main page.
+`https://www.googleapis.com/auth/youtube`
 
-Use the `Settings` button to open a tabbed settings popup.
+Existing installations which were connected with `youtube.readonly` need to reconnect Google once.
 
-Use the `Activity` button to view recent sync activity and sync runs.
-
-### New subscription behaviour
-
-The default is now:
-
-`Automatically enable and download`
-
-When the scheduled sync finds a brand-new YouTube subscription it:
-
-1. Adds the channel to the local database.
-2. Enables downloads.
-3. Creates the Pinchflat source.
-4. Uses the configured default download range.
-5. Uses the configured default Pinchflat Media Profile.
-
-The Settings > General tab also offers:
-
-- Automatically enable and download
-- Add to Pinchflat with downloads disabled
-- Wait for approval before adding
-
-### YouTube unsubscribe behaviour
-
-When a channel disappears from your YouTube subscriptions, choose one of:
-
-- Keep Pinchflat source
-- Disable downloads in Pinchflat
-- Remove Pinchflat source while keeping downloaded files
-
-Removed YouTube subscriptions stay in the local history and are hidden from the normal active view. Use the `Removed` filter to see them.
-
-### Subscription filters and sorting
-
-The source table now has:
-
-- Channel search
-- All active filter
-- Enabled filter
-- Disabled filter
-- Pending filter
-- Needs review filter
-- Error filter
-- Removed filter
-- A to Z sorting
-- Status sorting
-- Newest-first sorting
-
-The browser remembers search, filter and sorting choices.
-
-### Bulk actions
-
-Select several channels and apply:
-
-- Enable downloads
-- Disable downloads
-- Approve review sources
-- Set download range
-- Set Pinchflat Media Profile
-- Retry errors
-
-A confirmation box appears before a bulk change is applied.
-
-### Media Profiles
-
-Pinchflat Media Profiles are loaded into dropdowns.
-
-You can choose:
-
-- A default Media Profile in Settings > Pinchflat
-- A different Media Profile for an individual YouTube source
-- A Media Profile for several selected sources using the bulk controls
-
-On a fresh Pinchflat installation the app can automatically create a `YouTube Sync` Media Profile.
-
-### Automatic retries
-
-Failed Pinchflat source updates are retried during scheduled syncs.
-
-The dashboard keeps the last error and retry count until the update succeeds.
-
-### Activity history
-
-The Activity popup keeps recent events such as:
-
-- New YouTube subscriptions
-- Removed YouTube subscriptions
-- Pinchflat source imports
-- Automatic retries
-- Settings changes
-- Synchronisation results
-
-### Download ranges
-
-The existing per-source ranges remain:
-
-- Default
-- Today
-- This week
-- This month
-- Last 6 months
-- Last year
-- Last 2 to 10 years
-- Original YouTube subscription date
-- Custom date
-
-The default download history lives under Settings > Downloads.
-
-### Settings tabs
-
-The Settings popup contains:
-
-- General
-- YouTube
-- Pinchflat
-- Downloads
-- Automation
-- Advanced
-
-The Google OAuth credential form stays hidden while Google is connected.
-
-### Pinchflat onboarding
-
-When the app creates a Pinchflat source, it completes Pinchflat onboarding automatically so Pinchflat opens on the normal dashboard.
-
-## Google OAuth
-
-For the current Ash setup:
+The callback remains:
 
 `https://youtube.ashjohn.uk/oauth/google/callback`
 
-The Google OAuth scope is:
+## Emby Download
 
-`https://www.googleapis.com/auth/youtube.readonly`
+The app creates a private YouTube playlist named:
 
-## Storage paths
+`Emby Download`
 
-The supplied ZimaOS YAML uses:
+Add a YouTube video to this playlist from the normal YouTube website or mobile app. The app checks the playlist on its own schedule and queues unseen videos for download.
 
-- Sync data: `/media/NVME-Storage/AppData/youtube-pinchflat-sync/data`
-- Pinchflat config: `/media/NVME-Storage/AppData/pinchflat`
-- Pinchflat downloads: `/media/Storage/Media/YouTube`
+The default direct-download path is:
 
-Upgrades preserve the SQLite database and OAuth token when those paths remain unchanged.
+`/downloads/Emby Download/<channel>/<video title> [video id].mp4`
 
-## Publishing with GitHub Desktop
+With the supplied ZimaOS Compose file, `/downloads` maps to:
 
-Extract a release ZIP over your local clone of:
+`/media/Storage/Media/YouTube`
 
-`AshCooperUK/youtube-pinchflat-sync`
+The playlist item is removed after a successful download by default. This is configurable under Settings → YouTube.
 
-Then use GitHub Desktop:
+## Single Download
 
-1. Review the changed files.
-2. Enter a summary such as `Release v1.4.0`.
-3. Select `Commit to main`.
-4. Select `Push origin`.
-5. Wait for GitHub Actions to finish.
+Select `Single Download` on the main dashboard, paste a YouTube video URL and start the job.
 
-The included workflow publishes:
+The default path is:
+
+`/downloads/Single Downloads/<channel>/<video title> [video id].mp4`
+
+The popup displays download progress, speed, ETA and transferred size.
+
+## YouTube unsubscribe
+
+The subscription table contains an `Unsubscribe` action.
+
+This removes the subscription from the authenticated YouTube account after a confirmation prompt. Existing media files remain untouched. The app then applies the configured local unsubscribe policy for the Pinchflat source.
+
+## API quota statistics
+
+Settings → Advanced shows the quota cost tracked by this application.
+
+The value is an application-side estimate based on the documented costs of the YouTube Data API calls made by this service. The Google Cloud Console remains authoritative for project quota.
+
+## Storage statistics
+
+The sync container has access to the same `/downloads` directory as Pinchflat.
+
+The dashboard reports total disk usage and scans folder names to estimate usage per channel. Per-channel values work best when the Pinchflat output template includes the source/channel name as a folder.
+
+## Installation
+
+The production image is:
 
 `ghcr.io/ashcooperuk/youtube-pinchflat-sync:latest`
 
-and:
-
-`ghcr.io/ashcooperuk/youtube-pinchflat-sync:1.4.0`
-
-## ZimaOS
-
-The ZimaOS compose definition is available at:
-
-`compose.yaml`
-
-and:
+The ZimaOS application manifest is:
 
 `Apps/YouTubePinchflatSync/docker-compose.yml`
 
-The dashboard listens on port `8787`.
+The root `compose.yaml` contains the same deployment.
 
-Pinchflat listens on port `8945`.
+Persistent paths:
+
+- `/media/NVME-Storage/AppData/youtube-pinchflat-sync/data`
+- `/media/NVME-Storage/AppData/pinchflat`
+- `/media/Storage/Media/YouTube`
+
+## Updating with GitHub Desktop
+
+1. Extract the release ZIP over your local `youtube-pinchflat-sync` repository.
+2. Open GitHub Desktop.
+3. Commit with `Release v1.5.0`.
+4. Push `main`.
+5. Wait for GitHub Actions to publish the new container.
+6. Recreate or update the ZimaOS application.
+
+GitHub Actions publishes:
+
+- `ghcr.io/ashcooperuk/youtube-pinchflat-sync:latest`
+- `ghcr.io/ashcooperuk/youtube-pinchflat-sync:1.5.0`
