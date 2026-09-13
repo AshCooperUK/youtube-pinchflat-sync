@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.3.3"
+VERSION = "2.3.4"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1703,10 +1703,18 @@ def personalised_discovery_query(kind):
     if not seeds:
         seeds = [random.choice(DISCOVERY_TERMS)]
 
-    query = "|".join(seeds)
-
     if kind == "shorts":
-        query = f"{query} #shorts"
+        # Searching only for subscribed channel names often returns videos
+        # from those exact channels. We deliberately exclude subscribed
+        # channels from Discover, which could leave an empty Shorts batch.
+        #
+        # Keep the personal interest seeds, but add a broad topic as another
+        # OR branch so the same search also has room to find related creators.
+        broad_topic = random.choice(DISCOVERY_TERMS)
+        personal = "|".join(seeds[:2])
+        query = f"{personal}|{broad_topic} #shorts"
+    else:
+        query = "|".join(seeds)
 
     return query, seeds
 

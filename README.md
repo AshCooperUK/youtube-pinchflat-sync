@@ -2,6 +2,19 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.3.4
+
+Random Shorts empty-player regression fix.
+
+- Fixes the black Random Shorts panel introduced after personalised Discover searches were added.
+- Personalised Shorts searches previously used subscribed channel names too narrowly. Because Discover excludes channels you already subscribe to, a valid search could be filtered down to zero videos.
+- Shorts searches now keep the user's personal interest seeds and add a broader English interest branch in the same search.
+- If YouTube still returns no suitable Shorts, the player now shows a clear `No Shorts found` message instead of an empty black rectangle.
+- The Shorts player host is rebuilt safely when the YouTube iframe has been destroyed or replaced.
+- If YouTube reports an individual Short as unplayable, the app automatically advances to another Short in the batch.
+- The v2.3.3 YouTube Like CSRF fix remains included.
+- The v2.3.2 popup layout and v2.3.1 embedded-player referrer fixes remain included.
+
 ## Version 2.3.3
 
 YouTube Like CSRF fix.

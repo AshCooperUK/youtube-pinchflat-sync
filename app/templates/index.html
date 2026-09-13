@@ -2367,8 +2367,14 @@ async function loadDiscover(mode, force=false) {
             ? `This batch is influenced by your subscriptions and favourites, including: ${interests.join(" · ")}.`
             : "This batch is influenced by your current YouTube subscriptions and favourites.";
         }
+
         shortsIndex = 0;
-        await playRandomShort(0);
+
+        if (!discoverResults.shorts.length) {
+          showEmptyShortsState();
+        } else {
+          await playRandomShort(0);
+        }
       }
     }
   } catch (err) {
@@ -2483,9 +2489,62 @@ function renderTop100Tiles(items) {
   });
 }
 
+function showEmptyShortsState() {
+  try {
+    shortsPlayer?.stopVideo();
+    shortsPlayer?.destroy();
+  } catch (_) {}
+  shortsPlayer = null;
+
+  const frame = document.querySelector(".shorts-player-frame");
+  if (frame) {
+    frame.replaceChildren();
+    const playerHost = document.createElement("div");
+    playerHost.id = "youtube-shorts-player";
+    playerHost.style.width = "100%";
+    playerHost.style.height = "100%";
+    playerHost.style.display = "grid";
+    playerHost.style.placeItems = "center";
+    playerHost.style.padding = "24px";
+    playerHost.style.textAlign = "center";
+    playerHost.style.color = "var(--muted)";
+    playerHost.textContent =
+      "No matching Shorts were returned. Press Refresh for another personalised batch.";
+    frame.appendChild(playerHost);
+  }
+
+  document.getElementById("shorts-title").textContent =
+    "No Shorts found in this batch";
+  document.getElementById("shorts-channel").textContent = "";
+  document.getElementById("shorts-description").textContent =
+    "Press Refresh to search again using another mix of your subscriptions, favourites and liked videos.";
+}
+
+function ensureShortsPlayerHost() {
+  let host = document.getElementById("youtube-shorts-player");
+
+  // YT.Player replaces the original DIV with an IFRAME. If the player was
+  // destroyed or the empty state rebuilt the frame, recreate the DIV before
+  // constructing another player.
+  if (!host || host.tagName === "IFRAME") {
+    const frame = document.querySelector(".shorts-player-frame");
+    if (!frame) return null;
+    frame.replaceChildren();
+    host = document.createElement("div");
+    host.id = "youtube-shorts-player";
+    frame.appendChild(host);
+  }
+
+  return host;
+}
+
+
 async function playRandomShort(index) {
   const items = discoverResults.shorts || [];
-  if (!items.length) return;
+  if (!items.length) {
+    showEmptyShortsState();
+    return;
+  }
   shortsIndex = ((index % items.length) + items.length) % items.length;
   const item = items[shortsIndex];
 
@@ -2509,6 +2568,12 @@ async function playRandomShort(index) {
   await ensureYouTubeIframeApi();
 
   if (!shortsPlayer) {
+    const playerHost = ensureShortsPlayerHost();
+    if (!playerHost) {
+      showEmptyShortsState();
+      return;
+    }
+
     shortsPlayer = new YT.Player("youtube-shorts-player", {
       width: "100%",
       height: "100%",
@@ -2537,6 +2602,14 @@ async function playRandomShort(index) {
             document.getElementById("shorts-auto-next")?.checked
           ) {
             nextRandomShort();
+          }
+        },
+        onError: () => {
+          const items = discoverResults.shorts || [];
+          if (items.length > 1) {
+            window.setTimeout(() => nextRandomShort(), 250);
+          } else {
+            showEmptyShortsState();
           }
         }
       }
