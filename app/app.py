@@ -30,7 +30,13 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.8.2"
+VERSION = "1.8.5"
+
+ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
+CANONICAL_REDIRECT = os.getenv(
+    "CANONICAL_REDIRECT",
+    "false",
+).strip().lower() in ("1", "true", "yes", "on")
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -142,6 +148,7 @@ app.secret_key = persistent_flask_secret()
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=ENV_APP_URL.lower().startswith("https://"),
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
@@ -1702,7 +1709,12 @@ def unsubscribe_policy():
 
 
 def effective_app_url():
-    value = get_setting("app_url", os.getenv("APP_URL", "")).strip()
+    # APP_URL from Docker/YAML wins when supplied. This keeps Google OAuth
+    # tied to the intended public hostname rather than the ZimaOS local tile.
+    if ENV_APP_URL:
+        return ENV_APP_URL
+
+    value = get_setting("app_url", "").strip()
     return value.rstrip("/")
 
 
@@ -2027,8 +2039,6 @@ def refresh_subscriptions():
             if row["channel_id"] not in current_ids
         ]
 
-        conn.execute("UPDATE subscriptions SET active = 0")
-
         for sub in subs:
             existing = conn.execute(
                 """
@@ -2075,7 +2085,10 @@ def refresh_subscriptions():
                     ),
                 )
             else:
-                was_inactive = not bool(existing["active"])
+                was_inactive = (
+                    not bool(existing["active"])
+                    and bool(existing["removed_at"])
+                )
 
                 if was_inactive:
                     reactivated_count += 1
@@ -2358,10 +2371,9 @@ def refresh_subscriptions():
     if reactivated_count:
         log_activity(
             "youtube_refresh",
-            "Restored YouTube subscriptions",
+            "Re-subscribed YouTube channels",
             (
-                f"Found {reactivated_count} channel(s) which were subscribed "
-                "to again."
+                f"Detected {reactivated_count} genuinely re-subscribed channel(s)."
             ),
             "success",
         )
@@ -3681,6 +3693,36 @@ ADMIN_ONLY_GET_ENDPOINTS = {
 
 
 @app.before_request
+def redirect_to_canonical_app_url():
+    if not CANONICAL_REDIRECT or not ENV_APP_URL:
+        return None
+
+    if request.method not in {"GET", "HEAD"}:
+        return None
+
+    if request.endpoint in {"health", "static"}:
+        return None
+
+    canonical = urlparse(ENV_APP_URL)
+    current_scheme = (request.scheme or "").lower()
+    current_host = (request.host or "").lower()
+    canonical_scheme = (canonical.scheme or "").lower()
+    canonical_host = (canonical.netloc or "").lower()
+
+    if (
+        current_scheme == canonical_scheme
+        and current_host == canonical_host
+    ):
+        return None
+
+    target = f"{ENV_APP_URL}{request.path}"
+    if request.query_string:
+        target += "?" + request.query_string.decode("utf-8", "replace")
+
+    return redirect(target, code=302)
+
+
+@app.before_request
 def require_authentication():
     endpoint = request.endpoint
     if endpoint is None:
@@ -4278,6 +4320,8 @@ def index():
         google_write_ready=google_write_ready,
         callback_uri=google_redirect_uri(),
         app_url=effective_app_url(),
+        app_url_from_yaml=bool(ENV_APP_URL),
+        canonical_redirect=CANONICAL_REDIRECT,
         media_profile_id=effective_media_profile_id(),
         profiles=profiles,
         media_profile_settings=profile_settings,
@@ -4359,7 +4403,7 @@ def save_configuration():
         "1",
     ).strip()
 
-    if app_url:
+    if app_url and not ENV_APP_URL:
         set_setting("app_url", app_url)
 
     if client_id:
@@ -4444,6 +4488,167 @@ def save_default_history():
         "success",
     )
     return redirect(url_for("index") + "#downloads")
+
+
+@app.post("/subscriptions/<channel_id>/save")
+def save_subscription_row(channel_id):
+    """Save all editable settings for one subscription in a single action."""
+    mode = request.form.get("history_mode", "default").strip()
+    custom_date = request.form.get("history_custom_date", "").strip()
+    profile_id = request.form.get("media_profile_id", "").strip()
+    enabled = "1" in request.form.getlist("download_enabled")
+    approve = request.form.get("approve", "0") == "1"
+
+    if mode not in HISTORY_MODES:
+        flash("Unknown source download range.", "error")
+        return redirect(url_for("index") + "#subscriptions")
+
+    if mode == "custom_date":
+        try:
+            parsed = date.fromisoformat(custom_date)
+            if parsed > date.today():
+                raise ValueError
+        except ValueError:
+            flash(
+                "Choose a valid custom date which is not in the future.",
+                "error",
+            )
+            return redirect(url_for("index") + "#subscriptions")
+
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ?",
+            (channel_id,),
+        ).fetchone()
+
+    if not row:
+        flash("The YouTube subscription was not found.", "error")
+        return redirect(url_for("index") + "#subscriptions")
+
+    current = dict(row)
+    needs_review = bool(current.get("needs_review"))
+
+    # Approve is deliberately staged in the browser. Nothing changes until
+    # this Save request arrives. Approval always enables the source.
+    if approve and needs_review:
+        needs_review = False
+        enabled = True
+
+    prospective = dict(current)
+    prospective.update(
+        {
+            "download_enabled": 1 if enabled else 0,
+            "history_mode": mode,
+            "history_custom_date": custom_date,
+            "media_profile_id": profile_id or None,
+            "needs_review": 1 if needs_review else 0,
+        }
+    )
+
+    # Save the chosen settings locally as one transaction. Pinchflat is then
+    # brought into line with those saved choices below.
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET download_enabled = ?,
+                history_mode = ?,
+                history_custom_date = ?,
+                media_profile_id = ?,
+                needs_review = ?,
+                last_error = NULL
+            WHERE channel_id = ?
+            """,
+            (
+                1 if enabled else 0,
+                mode,
+                custom_date,
+                profile_id or None,
+                1 if needs_review else 0,
+                channel_id,
+            ),
+        )
+
+    try:
+        source_added = bool(prospective.get("pinchflat_added"))
+        source_id = prospective.get("pinchflat_source_id")
+
+        if source_added and source_id and not pinchflat_source_exists(source_id):
+            clear_stale_pinchflat_link(channel_id)
+            source_added = False
+            source_id = None
+            prospective["pinchflat_added"] = 0
+            prospective["pinchflat_source_id"] = None
+
+        cutoff = resolve_history_cutoff(
+            subscribed_at=prospective.get("subscribed_at"),
+            mode=mode,
+            custom_date=custom_date,
+        )
+
+        if source_added and source_id:
+            update_pinchflat_source_settings(
+                source_id,
+                cutoff=cutoff,
+                download_enabled=enabled,
+                media_profile_id=(
+                    profile_id or effective_media_profile_id()
+                ),
+            )
+
+        elif prospective.get("active") and not needs_review:
+            _result, new_source_id = add_pinchflat_source(prospective)
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET pinchflat_added = 1,
+                        pinchflat_source_id = COALESCE(?, pinchflat_source_id),
+                        last_error = NULL,
+                        retry_count = 0
+                    WHERE channel_id = ?
+                    """,
+                    (new_source_id, channel_id),
+                )
+
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET last_error = NULL,
+                    retry_count = 0
+                WHERE channel_id = ?
+                """,
+                (channel_id,),
+            )
+
+        if approve and bool(current.get("needs_review")):
+            flash(
+                f"{current['title']} approved, enabled and saved.",
+                "success",
+            )
+        else:
+            flash(f"{current['title']} saved.", "success")
+
+    except Exception as exc:
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET last_error = ?,
+                    retry_count = retry_count + 1
+                WHERE channel_id = ?
+                """,
+                (str(exc)[:1000], channel_id),
+            )
+
+        flash(
+            "Your choices were saved locally, but Pinchflat could not be "
+            f"updated: {exc}",
+            "error",
+        )
+
+    return redirect(url_for("index") + "#subscriptions")
 
 
 @app.post("/subscriptions/<channel_id>/history")

@@ -2,6 +2,47 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.8.5
+
+Canonical URL and fresh-install Google OAuth fix.
+
+- `APP_URL` in Docker/ZimaOS YAML is authoritative when supplied.
+- This deployment defaults to `https://youtube.ashjohn.uk`.
+- Google OAuth therefore uses `https://youtube.ashjohn.uk/oauth/google/callback` even if the ZimaOS tile initially opens `http://butane.grovefarm:8787`.
+- Adds `CANONICAL_REDIRECT=true`. Opening the local ZimaOS tile redirects the browser to `APP_URL`.
+- `/health` remains local for ZimaOS and Docker checks.
+- The Public dashboard URL field becomes read-only while YAML manages it.
+- HTTPS canonical deployments use Secure session cookies.
+- `APP_URL` and `CANONICAL_REDIRECT` are exposed in ZimaOS environment metadata.
+
+For another server, edit `APP_URL` in the YAML before deployment.
+
+## Version 1.8.4
+
+YouTube subscription refresh accuracy fix.
+
+- Fixes false-positive `YouTube subscription restored` activity entries.
+- The refresh no longer marks every subscription inactive before processing the current YouTube list.
+- A channel is treated as genuinely re-subscribed only when it was already inactive and has a recorded `removed_at` timestamp.
+- Normal existing subscriptions remain active without generating restoration activity.
+- Genuine unsubscribe then re-subscribe recovery remains unchanged, including stale Pinchflat source repair and cancellation of delayed cleanup jobs.
+
+## Version 1.8.3
+
+Subscription row editor usability release.
+
+- Simplifies each subscription row into one staged editor.
+- Enabled is now a proper toggle and no longer saves immediately.
+- Range changes no longer save immediately.
+- Media Profile changes no longer save immediately.
+- Review sources have an Approve button. Approval is staged locally in the browser and automatically turns Enabled on.
+- Nothing in a source row is written until the far-right Save button is clicked.
+- A single Save updates Enabled, approval state, range and Media Profile together.
+- Approving and saving a review source creates it in Pinchflat immediately.
+- Stale Pinchflat source links are repaired during the same Save operation.
+- Changed rows get a small amber marker and the button changes to `Save changes` until saved.
+- Retry is no longer a separate row action. Saving the row retries the Pinchflat update with the current choices.
+
 ## Version 1.8.2
 
 Re-subscribe recovery release.

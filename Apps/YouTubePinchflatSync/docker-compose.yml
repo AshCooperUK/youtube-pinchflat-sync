@@ -45,10 +45,11 @@ services:
       TZ: Europe/London
       DATA_DIR: /data
       DOWNLOAD_ROOT: /downloads
-      APP_URL: ""
+      APP_URL: "https://youtube.ashjohn.uk"
       GOOGLE_CLIENT_ID: ""
       GOOGLE_CLIENT_SECRET: ""
       GOOGLE_REDIRECT_URI: ""
+      CANONICAL_REDIRECT: "true"
       YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube
       PINCHFLAT_URL: http://butane.grovefarm:8945
       PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
@@ -88,6 +89,12 @@ services:
           description:
             en_US: Shared YouTube media library used for storage statistics and direct downloads
       envs:
+        - container: APP_URL
+          description:
+            en_US: Canonical public URL used for Google OAuth and browser access
+        - container: CANONICAL_REDIRECT
+          description:
+            en_US: Redirect the local ZimaOS tile URL to APP_URL when true
         - container: TZ
           description:
             en_US: Time zone
@@ -127,7 +134,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.8.2"
+  version: "1.8.5"
   update_at: "2026-09-13"
   release_notes:
     en_US: Adds native username and password authentication, optional authenticator 2FA, recovery codes, user roles, session security, login throttling and account management.

@@ -83,11 +83,30 @@
     }
     .error-text { max-width:300px; color:var(--red); font-size:12px; word-break:break-word; }
     .row-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
-    .source-range { min-width:340px; }
+    .source-range { min-width:280px; }
     .source-profile { min-width:190px; }
-    .inline-range-form { display:flex; align-items:center; gap:6px; min-width:330px; }
-    .inline-range-form select { min-width:185px; flex:1; }
-    .inline-range-form .source-date { width:145px; flex:0 0 145px; }
+    .source-row.dirty { box-shadow:inset 3px 0 0 var(--amber); }
+    .source-toggle {
+      display:inline-flex; align-items:center; gap:8px; margin:0; cursor:pointer;
+      user-select:none; white-space:nowrap;
+    }
+    .source-toggle input { position:absolute; opacity:0; pointer-events:none; }
+    .toggle-track {
+      width:42px; height:23px; border-radius:999px; background:#34445d;
+      border:1px solid #4b5d78; position:relative; transition:.15s ease;
+      flex:0 0 42px;
+    }
+    .toggle-track::after {
+      content:''; position:absolute; width:17px; height:17px; border-radius:50%;
+      left:2px; top:2px; background:#dbe7f7; transition:.15s ease;
+    }
+    .source-toggle input:checked + .toggle-track { background:var(--green); border-color:var(--green); }
+    .source-toggle input:checked + .toggle-track::after { transform:translateX(19px); background:#07120b; }
+    .source-toggle-text { min-width:58px; font-size:13px; }
+    .approve-state { min-width:116px; }
+    .approve-state .btn { width:100%; }
+    .source-save-actions { min-width:126px; display:flex; flex-direction:column; gap:7px; align-items:stretch; }
+    .source-save-actions .btn { width:100%; }
     .storage-value { white-space:nowrap; font-weight:700; }
     code { background:#08111f; border-radius:5px; padding:3px 6px; overflow-wrap:anywhere; }
     .empty { padding:30px; text-align:center; color:var(--muted); }
@@ -330,17 +349,19 @@
           <tr>
             <th></th>
             <th>Channel</th>
-            <th>Status</th>
-            <th>Download</th>
+            <th>Enabled</th>
+            <th>Approval</th>
             <th>Range</th>
             <th>Media Profile</th>
             <th>Cutoff</th>
             <th>Disk usage</th>
-            <th>Error / Actions</th>
+            <th>Error</th>
+            <th>Save / Actions</th>
           </tr>
         </thead>
         <tbody id="subscription-body">
         {% for sub in subs %}
+          {% set row_form_id = "source-form-" ~ loop.index %}
           <tr
             class="source-row"
             data-title="{{ sub['title']|lower }}"
@@ -349,10 +370,18 @@
             data-error="{{ 1 if sub['last_error'] else 0 }}"
             data-first-seen="{{ sub['first_seen_at'] }}"
             data-storage="{{ sub['disk_bytes'] }}"
+            data-form-id="{{ row_form_id }}"
           >
             <td>
-              {% if is_admin %}<input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">{% endif %}
+              {% if is_admin %}
+                <input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">
+                <form id="{{ row_form_id }}" method="post" action="/subscriptions/{{ sub['channel_id'] }}/save">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                  <input type="hidden" name="approve" value="0">
+                </form>
+              {% endif %}
             </td>
+
             <td class="channel-cell">
               <div class="channel-card">
                 <a href="{{ sub['channel_url'] }}" target="_blank" title="{{ sub['title'] }}">
@@ -367,72 +396,113 @@
                 </a>
                 <a class="channel-title" title="{{ sub['title'] }}" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
                 {% if not sub["active"] %}<div class="small bad">No longer subscribed</div>{% endif %}
-                {% if sub["needs_review"] %}<div class="small warn">Waiting for approval</div>{% endif %}
               </div>
             </td>
-            <td>
-              <span class="pill {{ sub['ui_status'] }}">{{ sub['ui_status']|replace('_',' ')|title }}</span>
-              {% if sub["pinchflat_added"] %}<div class="small muted">In Pinchflat</div>{% endif %}
-            </td>
+
             <td>
               {% if is_admin %}
-              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/download"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                <select name="download_enabled" onchange="this.form.submit()">
-                  <option value="1" {% if sub["download_enabled"] %}selected{% endif %}>Enabled</option>
-                  <option value="0" {% if not sub["download_enabled"] %}selected{% endif %}>Disabled</option>
-                </select>
-              </form>
-              {% else %}<span>{{ "Enabled" if sub["download_enabled"] else "Disabled" }}</span>{% endif %}
-            </td>
-            <td class="source-range">
-              {% if is_admin %}<form method="post" action="/subscriptions/{{ sub['channel_id'] }}/history" class="inline-range-form"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                {% set current_mode = sub["history_mode"] or "default" %}
-                <select name="history_mode" class="source-history-mode" onchange="toggleSourceDate(this)">
-                  <option value="default" {% if current_mode == "default" %}selected{% endif %}>Default</option>
-                  <option value="today" {% if current_mode == "today" %}selected{% endif %}>Today</option>
-                  <option value="this_week" {% if current_mode == "this_week" %}selected{% endif %}>This week</option>
-                  <option value="this_month" {% if current_mode == "this_month" %}selected{% endif %}>This month</option>
-                  <option value="six_months" {% if current_mode == "six_months" %}selected{% endif %}>Last 6 months</option>
-                  <option value="last_year" {% if current_mode == "last_year" %}selected{% endif %}>Last year</option>
-                  {% for y in range(2, 11) %}<option value="years_{{ y }}" {% if current_mode == "years_" ~ y %}selected{% endif %}>Last {{ y }} years</option>{% endfor %}
-                  <option value="subscription_date" {% if current_mode == "subscription_date" %}selected{% endif %}>Subscription date</option>
-                  <option value="custom_date" {% if current_mode == "custom_date" %}selected{% endif %}>Custom date</option>
-                </select>
-                <input class="source-date {% if current_mode != 'custom_date' %}hidden{% endif %}" type="date" name="history_custom_date" value="{{ sub['history_custom_date'] or '' }}">
-                <button class="btn ghost smallbtn" type="submit">Save</button>
-              </form>{% else %}<span>{{ sub["history_label"] }}</span>{% endif %}
-            </td>
-            <td class="source-profile">
-              {% if is_admin %}
-              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/profile"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                <select name="media_profile_id" onchange="this.form.submit()">
-                  {% for profile in profiles %}
-                    <option value="{{ profile.id }}" {% if sub["media_profile_id"]|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
-                  {% endfor %}
-                </select>
-              </form>
+                <label class="source-toggle">
+                  <input
+                    type="checkbox"
+                    name="download_enabled"
+                    value="1"
+                    form="{{ row_form_id }}"
+                    {% if sub['download_enabled'] %}checked{% endif %}
+                    onchange="sourceToggleChanged(this)"
+                  >
+                  <span class="toggle-track"></span>
+                  <span class="source-toggle-text">{{ 'Enabled' if sub['download_enabled'] else 'Disabled' }}</span>
+                </label>
               {% else %}
-                {% for profile in profiles %}{% if sub["media_profile_id"]|string == profile.id|string %}{{ profile.name }}{% endif %}{% endfor %}
+                <span>{{ 'Enabled' if sub['download_enabled'] else 'Disabled' }}</span>
               {% endif %}
             </td>
-            <td>
-              <code>{{ sub["cutoff"] }}</code>
-              <div class="small muted">{{ sub["history_label"] }}</div>
+
+            <td class="approve-state">
+              {% if sub['needs_review'] %}
+                {% if is_admin %}
+                  <button
+                    type="button"
+                    class="btn secondary smallbtn approve-source-btn"
+                    data-form-id="{{ row_form_id }}"
+                    onclick="stageSourceApproval(this)"
+                  >Approve</button>
+                  <div class="small warn approval-note">Waiting for approval</div>
+                {% else %}
+                  <span class="pill review">Review</span>
+                {% endif %}
+              {% else %}
+                <span class="pill enabled">Approved</span>
+                <div class="small muted">{{ 'In Pinchflat' if sub['pinchflat_added'] else 'Pending' }}</div>
+              {% endif %}
             </td>
-            <td class="storage-value">{{ sub["disk_usage"] }}</td>
+
+            <td class="source-range">
+              {% set current_mode = sub['history_mode'] or 'default' %}
+              {% if is_admin %}
+                <select name="history_mode" class="source-history-mode" form="{{ row_form_id }}" onchange="toggleSourceDate(this); markSourceRowDirty(this)">
+                  <option value="default" {% if current_mode == 'default' %}selected{% endif %}>Default</option>
+                  <option value="today" {% if current_mode == 'today' %}selected{% endif %}>Today</option>
+                  <option value="this_week" {% if current_mode == 'this_week' %}selected{% endif %}>This week</option>
+                  <option value="this_month" {% if current_mode == 'this_month' %}selected{% endif %}>This month</option>
+                  <option value="six_months" {% if current_mode == 'six_months' %}selected{% endif %}>Last 6 months</option>
+                  <option value="last_year" {% if current_mode == 'last_year' %}selected{% endif %}>Last year</option>
+                  {% for y in range(2, 11) %}<option value="years_{{ y }}" {% if current_mode == 'years_' ~ y %}selected{% endif %}>Last {{ y }} years</option>{% endfor %}
+                  <option value="subscription_date" {% if current_mode == 'subscription_date' %}selected{% endif %}>Subscription date</option>
+                  <option value="custom_date" {% if current_mode == 'custom_date' %}selected{% endif %}>Custom date</option>
+                </select>
+                <input
+                  class="source-date {% if current_mode != 'custom_date' %}hidden{% endif %}"
+                  type="date"
+                  name="history_custom_date"
+                  form="{{ row_form_id }}"
+                  value="{{ sub['history_custom_date'] or '' }}"
+                  onchange="markSourceRowDirty(this)"
+                  style="margin-top:6px"
+                >
+              {% else %}
+                <span>{{ sub['history_label'] }}</span>
+              {% endif %}
+            </td>
+
+            <td class="source-profile">
+              {% if is_admin %}
+                <select name="media_profile_id" form="{{ row_form_id }}" onchange="markSourceRowDirty(this)">
+                  {% for profile in profiles %}
+                    <option value="{{ profile.id }}" {% if sub['media_profile_id']|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
+                  {% endfor %}
+                </select>
+              {% else %}
+                {% for profile in profiles %}{% if sub['media_profile_id']|string == profile.id|string %}{{ profile.name }}{% endif %}{% endfor %}
+              {% endif %}
+            </td>
+
             <td>
-              {% if sub["last_error"] %}
-                <div class="error-text">{{ sub["last_error"] }}</div>
-                {% if is_admin %}<form method="post" action="/subscriptions/{{ sub['channel_id'] }}/retry" class="row-actions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                  <button class="btn danger smallbtn">Retry</button>
-                </form>{% endif %}
+              <code>{{ sub['cutoff'] }}</code>
+              <div class="small muted">{{ sub['history_label'] }}</div>
+            </td>
+
+            <td class="storage-value">{{ sub['disk_usage'] }}</td>
+
+            <td>
+              {% if sub['last_error'] %}
+                <div class="error-text">{{ sub['last_error'] }}</div>
               {% else %}
                 <span class="small muted">No error</span>
               {% endif %}
-              {% if is_admin and sub["active"] %}
-                <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" class="row-actions" onsubmit="return confirm('Unsubscribe from this channel on YouTube? Existing downloaded files are not deleted.')"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                  <button class="btn ghost smallbtn" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
-                </form>
+            </td>
+
+            <td>
+              {% if is_admin %}
+                <div class="source-save-actions">
+                  <button class="btn source-save-btn" type="submit" form="{{ row_form_id }}">Save</button>
+                  {% if sub['active'] %}
+                    <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" onsubmit="return confirm('Unsubscribe from this channel on YouTube? The configured unsubscribe policy will then be applied.')">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                      <button class="btn ghost smallbtn" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
+                    </form>
+                  {% endif %}
+                </div>
               {% endif %}
             </td>
           </tr>
@@ -541,8 +611,20 @@
           {% else %}
             <form method="post" action="/settings/configuration"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
               <label>Public dashboard URL
-                <input type="url" name="app_url" value="{{ app_url }}" placeholder="https://youtube.example.com">
+                <input
+                  type="url"
+                  name="app_url"
+                  value="{{ app_url }}"
+                  placeholder="https://youtube.example.com"
+                  {% if app_url_from_yaml %}readonly{% endif %}
+                >
               </label>
+              {% if app_url_from_yaml %}
+                <p class="muted small">
+                  Managed by <code>APP_URL</code> in the Docker/ZimaOS YAML.
+                  {% if canonical_redirect %}Local ZimaOS launches redirect here automatically.{% endif %}
+                </p>
+              {% endif %}
               <label>Google OAuth Client ID
                 <input type="text" name="google_client_id" placeholder="xxxxxxxx.apps.googleusercontent.com">
               </label>
@@ -1039,9 +1121,54 @@ function toggleSponsorBlockCategories() {
 toggleSponsorBlockCategories();
 
 function toggleSourceDate(select) {
-  const form = select.closest("form");
-  const input = form.querySelector(".source-date");
-  input.classList.toggle("hidden", select.value !== "custom_date");
+  const row = select.closest(".source-row");
+  const input = row?.querySelector(".source-date");
+  if (input) input.classList.toggle("hidden", select.value !== "custom_date");
+}
+
+function markSourceRowDirty(control) {
+  const row = control.closest(".source-row");
+  if (!row) return;
+  row.classList.add("dirty");
+  const save = row.querySelector(".source-save-btn");
+  if (save) save.textContent = "Save changes";
+}
+
+function sourceToggleChanged(input) {
+  const label = input.closest(".source-toggle")?.querySelector(".source-toggle-text");
+  if (label) label.textContent = input.checked ? "Enabled" : "Disabled";
+  markSourceRowDirty(input);
+}
+
+function stageSourceApproval(button) {
+  const formId = button.dataset.formId;
+  const form = document.getElementById(formId);
+  const row = button.closest(".source-row");
+  if (!form || !row) return;
+
+  const approve = form.querySelector('input[name="approve"]');
+  if (approve) approve.value = "1";
+
+  const enabled = row.querySelector('input[name="download_enabled"]');
+  if (enabled) {
+    enabled.checked = true;
+    const label = enabled.closest(".source-toggle")?.querySelector(".source-toggle-text");
+    if (label) label.textContent = "Enabled";
+  }
+
+  button.textContent = "Approved ✓";
+  button.classList.remove("secondary");
+  button.classList.add("success");
+  button.disabled = true;
+
+  const note = row.querySelector(".approval-note");
+  if (note) {
+    note.textContent = "Ready to save";
+    note.classList.remove("warn");
+    note.classList.add("ok");
+  }
+
+  markSourceRowDirty(button);
 }
 
 async function startSingleDownload(event) {
