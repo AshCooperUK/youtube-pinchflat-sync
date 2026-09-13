@@ -32,7 +32,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.9.2"
+VERSION = "1.9.3"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -3346,7 +3346,7 @@ def delete_pinchflat_source_direct(
     )
 
     output = docker_exec_in_pinchflat(
-        ["bin/pinchflat", "eval", expression],
+        ["bin/pinchflat", "rpc", expression],
         timeout=300,
     )
 
@@ -3422,7 +3422,7 @@ def pinchflat_source_exists_direct(
     )
 
     output = docker_exec_in_pinchflat(
-        ["bin/pinchflat", "eval", expression],
+        ["bin/pinchflat", "rpc", expression],
         timeout=60,
     )
 

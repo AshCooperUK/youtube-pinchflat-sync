@@ -2,6 +2,20 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.9.3
+
+Running-Pinchflat RPC deletion fix.
+
+- Fixes `could not lookup Ecto repo Pinchflat.Repo because it was not started`.
+- v1.9.2 used `bin/pinchflat eval` for direct source deletion and verification.
+- An Elixir release `eval` command runs in a separate VM without starting the release applications, so `Pinchflat.Repo` is unavailable there.
+- Direct deletion and source verification now use `bin/pinchflat rpc`.
+- `rpc` executes inside the already-running Pinchflat release, where `Pinchflat.Repo`, Oban and the application supervision tree are active.
+- Source deletion still uses `Pinchflat.Sources.delete_source/2`.
+- The app still verifies the live Pinchflat source list before changing the channel to `Not in Pinchflat`.
+- Existing downloaded files remain when a channel is disabled.
+- Docker power control and explicit source authorisation are unchanged.
+
 ## Version 1.9.2
 
 Verified direct source deletion release.
