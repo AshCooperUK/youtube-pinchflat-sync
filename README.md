@@ -2,6 +2,24 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.8.7
+
+Authoritative Enabled toggle release.
+
+- The per-channel Enabled toggle now controls whether the channel exists in Pinchflat.
+- Enabled and approved means the source must exist in Pinchflat.
+- Disabled means the Pinchflat source is removed while existing downloaded files are kept.
+- Waiting for approval also means no Pinchflat source is created.
+- Saving a disabled channel never creates or repairs a Pinchflat source.
+- Saving an enabled channel creates a missing source or updates the existing source.
+- The background pending importer imports enabled sources only.
+- Automatic retry follows the Enabled state and never re-adds disabled sources.
+- Bulk Enable, Disable, Approve, Retry, Range and Media Profile actions use the same source-authority rules.
+- A five-minute reconciliation job gradually removes legacy disabled sources which older releases had already added to Pinchflat.
+- Legacy reconciliation is limited to 25 Pinchflat source changes per pass.
+- The subscription table shows `Not in Pinchflat` for disabled channels and `Removing from Pinchflat` while asynchronous deletion completes.
+- Disabling a source removes only the Pinchflat source. Existing downloaded files remain. File deletion remains controlled by the separate YouTube unsubscribe policy.
+
 ## Version 1.8.6
 
 Authoritative Pinchflat source removal release.

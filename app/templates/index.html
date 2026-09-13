@@ -433,7 +433,15 @@
                 {% endif %}
               {% else %}
                 <span class="pill enabled">Approved</span>
-                <div class="small muted">{{ 'In Pinchflat' if sub['pinchflat_added'] else 'Pending' }}</div>
+                {% if not sub['download_enabled'] %}
+                  <div class="small muted">
+                    {{ 'Removing from Pinchflat' if sub['pinchflat_added'] else 'Not in Pinchflat' }}
+                  </div>
+                {% else %}
+                  <div class="small muted">
+                    {{ 'In Pinchflat' if sub['pinchflat_added'] else 'Pending' }}
+                  </div>
+                {% endif %}
               {% endif %}
             </td>
 

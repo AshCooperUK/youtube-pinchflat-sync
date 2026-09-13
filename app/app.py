@@ -30,7 +30,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.8.6"
+VERSION = "1.8.7"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1336,6 +1336,285 @@ def migrate_legacy_subscription_output_path(profile_settings):
             "error",
         )
         return profile_settings
+
+
+def remove_subscription_source_keep_files(row):
+    """
+    Disabled is authoritative.
+
+    A disabled or unapproved channel must not exist as a Pinchflat source.
+    Downloaded files are retained. Pinchflat deletion is asynchronous, so
+    retain the source link until disappearance is verified.
+    """
+    row = dict(row)
+    source_id = resolve_pinchflat_source_id(row)
+
+    if not source_id:
+        clear_subscription_pinchflat_link(row["channel_id"])
+        return {
+            "source_id": None,
+            "removed": True,
+            "pending": False,
+        }
+
+    removal_row = dict(row)
+    removal_row["pinchflat_source_id"] = str(source_id)
+    removal_row["pinchflat_added"] = 1
+
+    prepare_pinchflat_source_for_removal(removal_row)
+
+    source_gone = delete_pinchflat_source(
+        source_id,
+        delete_files=False,
+    )
+
+    if source_gone:
+        clear_subscription_pinchflat_link(
+            row["channel_id"],
+            source_id,
+        )
+        return {
+            "source_id": str(source_id),
+            "removed": True,
+            "pending": False,
+        }
+
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET pinchflat_added = 1,
+                pinchflat_source_id = ?,
+                download_enabled = 0,
+                last_error = ?
+            WHERE channel_id = ?
+            """,
+            (
+                str(source_id),
+                "Pinchflat source removal is in progress.",
+                row["channel_id"],
+            ),
+        )
+
+    return {
+        "source_id": str(source_id),
+        "removed": False,
+        "pending": True,
+    }
+
+
+def ensure_enabled_subscription_source(row, apply_settings=True):
+    """
+    Enabled is authoritative.
+
+    An active, approved and enabled subscription must exist in Pinchflat.
+    Missing or stale source links are repaired automatically.
+    """
+    row = dict(row)
+
+    if (
+        not row.get("active")
+        or row.get("needs_review")
+        or not subscription_download_enabled(row)
+    ):
+        return {
+            "created": False,
+            "source_id": resolve_pinchflat_source_id(row),
+        }
+
+    source_id = resolve_pinchflat_source_id(row)
+
+    if source_id and pinchflat_source_exists(source_id):
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET pinchflat_added = 1,
+                    pinchflat_source_id = ?,
+                    last_error = NULL,
+                    retry_count = 0
+                WHERE channel_id = ?
+                """,
+                (str(source_id), row["channel_id"]),
+            )
+
+        if apply_settings:
+            update_pinchflat_source_settings(
+                source_id,
+                cutoff=subscription_cutoff(row),
+                download_enabled=True,
+                media_profile_id=subscription_media_profile_id(row),
+            )
+
+        return {
+            "created": False,
+            "source_id": str(source_id),
+        }
+
+    clear_subscription_pinchflat_link(row["channel_id"])
+
+    _result, new_source_id = add_pinchflat_source(row)
+
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET pinchflat_added = 1,
+                pinchflat_source_id = ?,
+                last_error = NULL,
+                retry_count = 0
+            WHERE channel_id = ?
+            """,
+            (new_source_id, row["channel_id"]),
+        )
+
+    return {
+        "created": True,
+        "source_id": new_source_id,
+    }
+
+
+def apply_subscription_source_authority(row, apply_settings=True):
+    """
+    Enabled is the source-of-truth for Pinchflat membership.
+
+    Enabled + approved -> source exists.
+    Disabled or waiting for approval -> source does not exist.
+    """
+    row = dict(row)
+
+    if not row.get("active"):
+        return {"state": "inactive"}
+
+    desired_in_pinchflat = (
+        subscription_download_enabled(row)
+        and not bool(row.get("needs_review"))
+    )
+
+    if desired_in_pinchflat:
+        result = ensure_enabled_subscription_source(
+            row,
+            apply_settings=apply_settings,
+        )
+        return {
+            "state": "enabled",
+            **result,
+        }
+
+    result = remove_subscription_source_keep_files(row)
+    return {
+        "state": "disabled",
+        **result,
+    }
+
+
+def reconcile_active_source_authority(max_changes=25):
+    """
+    Repair legacy app/Pinchflat mismatches in controlled batches.
+
+    Older releases allowed disabled channels to remain as Pinchflat sources.
+    At most max_changes source mutations are performed per pass.
+    """
+    with db() as conn:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT *
+                FROM subscriptions
+                WHERE active = 1
+                ORDER BY
+                    CASE
+                        WHEN download_enabled = 0 AND pinchflat_added = 1
+                        THEN 0
+                        WHEN download_enabled = 1 AND pinchflat_added = 0
+                        THEN 1
+                        ELSE 2
+                    END,
+                    title COLLATE NOCASE ASC
+                """
+            ).fetchall()
+        ]
+
+    checked = 0
+    changed = 0
+    errors = 0
+
+    for row in rows:
+        checked += 1
+
+        desired = (
+            subscription_download_enabled(row)
+            and not bool(row.get("needs_review"))
+        )
+        source_id = resolve_pinchflat_source_id(row)
+        source_exists = bool(
+            source_id and pinchflat_source_exists(source_id)
+        )
+
+        mismatch = (
+            (desired and not source_exists)
+            or ((not desired) and source_exists)
+        )
+
+        if not mismatch:
+            if source_exists and (
+                not row.get("pinchflat_added")
+                or str(row.get("pinchflat_source_id") or "")
+                != str(source_id)
+            ):
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET pinchflat_added = 1,
+                            pinchflat_source_id = ?
+                        WHERE channel_id = ?
+                        """,
+                        (str(source_id), row["channel_id"]),
+                    )
+            elif not source_exists and row.get("pinchflat_added"):
+                clear_subscription_pinchflat_link(row["channel_id"])
+            continue
+
+        if changed >= max_changes:
+            continue
+
+        try:
+            apply_subscription_source_authority(
+                row,
+                apply_settings=False,
+            )
+            changed += 1
+        except Exception as exc:
+            errors += 1
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_error = ?,
+                        retry_count = retry_count + 1
+                    WHERE channel_id = ?
+                    """,
+                    (str(exc)[:1000], row["channel_id"]),
+                )
+
+    if changed or errors:
+        log_activity(
+            "pinchflat",
+            "Source authority reconciliation",
+            (
+                f"Checked {checked} active subscription(s). "
+                f"Changed {changed}. Errors {errors}."
+            ),
+            "success" if errors == 0 else "warning",
+        )
+
+    return {
+        "checked": checked,
+        "changed": changed,
+        "errors": errors,
+    }
 
 
 def pinchflat_stats_summary(profiles=None, storage=None):
@@ -3683,8 +3962,6 @@ def retry_failed_source_updates():
             SELECT *
             FROM subscriptions
             WHERE active = 1
-              AND pinchflat_added = 1
-              AND pinchflat_source_id IS NOT NULL
               AND TRIM(COALESCE(last_error, '')) <> ''
             ORDER BY retry_count ASC, title COLLATE NOCASE ASC
             """
@@ -3696,35 +3973,14 @@ def retry_failed_source_updates():
 
     for row in rows:
         attempted += 1
+        row_dict = dict(row)
+
         try:
-            row_dict = dict(row)
-
-            if not pinchflat_source_exists(row_dict["pinchflat_source_id"]):
-                clear_stale_pinchflat_link(row_dict["channel_id"])
-
-                if not row_dict.get("needs_review"):
-                    _result, new_source_id = add_pinchflat_source(row_dict)
-                    with db() as conn:
-                        conn.execute(
-                            """
-                            UPDATE subscriptions
-                            SET pinchflat_added = 1,
-                                pinchflat_source_id = ?,
-                                last_error = NULL,
-                                retry_count = 0
-                            WHERE channel_id = ?
-                            """,
-                            (new_source_id, row_dict["channel_id"]),
-                        )
-                fixed += 1
-                continue
-
-            update_pinchflat_source_settings(
-                row_dict["pinchflat_source_id"],
-                cutoff=subscription_cutoff(row_dict),
-                download_enabled=subscription_download_enabled(row_dict),
-                media_profile_id=subscription_media_profile_id(row_dict),
+            apply_subscription_source_authority(
+                row_dict,
+                apply_settings=True,
             )
+
             with db() as conn:
                 conn.execute(
                     """
@@ -3735,7 +3991,9 @@ def retry_failed_source_updates():
                     """,
                     (row_dict["channel_id"],),
                 )
+
             fixed += 1
+
         except Exception as exc:
             errors += 1
             with db() as conn:
@@ -3746,19 +4004,25 @@ def retry_failed_source_updates():
                         retry_count = retry_count + 1
                     WHERE channel_id = ?
                     """,
-                    (str(exc)[:1000], row["channel_id"]),
+                    (str(exc)[:1000], row_dict["channel_id"]),
                 )
 
     if attempted:
         log_activity(
             "retry",
             "Automatic retry",
-            f"Retried {attempted} source update(s). Fixed {fixed}. Errors {errors}.",
+            (
+                f"Retried {attempted} source reconciliation(s). "
+                f"Fixed {fixed}. Errors {errors}."
+            ),
             "success" if errors == 0 else "warning",
         )
 
-    return {"attempted": attempted, "fixed": fixed, "errors": errors}
-
+    return {
+        "attempted": attempted,
+        "fixed": fixed,
+        "errors": errors,
+    }
 
 
 
@@ -3771,6 +4035,7 @@ def add_pending_sources():
             WHERE active = 1
               AND pinchflat_added = 0
               AND COALESCE(needs_review, 0) = 0
+              AND COALESCE(download_enabled, 0) = 1
             ORDER BY first_seen_at ASC, title COLLATE NOCASE ASC
             """
         ).fetchall()
@@ -3865,12 +4130,14 @@ def sync_once():
             run_id = cur.lastrowid
 
         refresh = refresh_subscriptions()
+        authority = reconcile_active_source_authority()
         result = add_pending_sources()
         retry = retry_failed_source_updates()
         emby = sync_emby_download_playlist()
 
         total_errors = (
             refresh["policy_errors"]
+            + authority["errors"]
             + result["errors"]
             + retry["errors"]
             + (1 if emby.get("error") else 0)
@@ -3886,6 +4153,7 @@ def sync_once():
             f"Found {refresh['total']} subscriptions. "
             f"New {refresh['new']}. Re-subscribed {refresh.get('reactivated', 0)}. "
             f"Removed {refresh['removed']}. "
+            f"Authority changes {authority['changed']}. "
             f"Added {result['added']} Pinchflat sources. "
             f"Retry fixes {retry['fixed']}. "
             f"Emby Download queued {emby.get('queued', 0)}. "
@@ -4831,7 +5099,7 @@ def save_default_history():
 
 @app.post("/subscriptions/<channel_id>/save")
 def save_subscription_row(channel_id):
-    """Save all editable settings for one subscription in a single action."""
+    """Save one source. Enabled controls Pinchflat membership."""
     mode = request.form.get("history_mode", "default").strip()
     custom_date = request.form.get("history_custom_date", "").strip()
     profile_id = request.form.get("media_profile_id", "").strip()
@@ -4867,8 +5135,6 @@ def save_subscription_row(channel_id):
     current = dict(row)
     needs_review = bool(current.get("needs_review"))
 
-    # Approve is deliberately staged in the browser. Nothing changes until
-    # this Save request arrives. Approval always enables the source.
     if approve and needs_review:
         needs_review = False
         enabled = True
@@ -4884,8 +5150,6 @@ def save_subscription_row(channel_id):
         }
     )
 
-    # Save the chosen settings locally as one transaction. Pinchflat is then
-    # brought into line with those saved choices below.
     with db() as conn:
         conn.execute(
             """
@@ -4909,65 +5173,41 @@ def save_subscription_row(channel_id):
         )
 
     try:
-        source_added = bool(prospective.get("pinchflat_added"))
-        source_id = prospective.get("pinchflat_source_id")
-
-        if source_added and source_id and not pinchflat_source_exists(source_id):
-            clear_stale_pinchflat_link(channel_id)
-            source_added = False
-            source_id = None
-            prospective["pinchflat_added"] = 0
-            prospective["pinchflat_source_id"] = None
-
-        cutoff = resolve_history_cutoff(
-            subscribed_at=prospective.get("subscribed_at"),
-            mode=mode,
-            custom_date=custom_date,
+        result = apply_subscription_source_authority(
+            prospective,
+            apply_settings=True,
         )
-
-        if source_added and source_id:
-            update_pinchflat_source_settings(
-                source_id,
-                cutoff=cutoff,
-                download_enabled=enabled,
-                media_profile_id=(
-                    profile_id or effective_media_profile_id()
-                ),
-            )
-
-        elif prospective.get("active") and not needs_review:
-            _result, new_source_id = add_pinchflat_source(prospective)
-            with db() as conn:
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET pinchflat_added = 1,
-                        pinchflat_source_id = COALESCE(?, pinchflat_source_id),
-                        last_error = NULL,
-                        retry_count = 0
-                    WHERE channel_id = ?
-                    """,
-                    (new_source_id, channel_id),
-                )
 
         with db() as conn:
             conn.execute(
                 """
                 UPDATE subscriptions
-                SET last_error = NULL,
-                    retry_count = 0
+                SET retry_count = 0
                 WHERE channel_id = ?
                 """,
                 (channel_id,),
             )
 
-        if approve and bool(current.get("needs_review")):
+        if result["state"] == "disabled" and result.get("pending"):
             flash(
-                f"{current['title']} approved, enabled and saved.",
+                f"{current['title']} saved. Pinchflat source removal is in progress.",
+                "success",
+            )
+        elif approve and bool(current.get("needs_review")):
+            flash(
+                f"{current['title']} approved, enabled and added to Pinchflat.",
+                "success",
+            )
+        elif enabled:
+            flash(
+                f"{current['title']} saved and enabled in Pinchflat.",
                 "success",
             )
         else:
-            flash(f"{current['title']} saved.", "success")
+            flash(
+                f"{current['title']} saved and removed from Pinchflat. Existing downloaded files were kept.",
+                "success",
+            )
 
     except Exception as exc:
         with db() as conn:
@@ -4983,7 +5223,7 @@ def save_subscription_row(channel_id):
 
         flash(
             "Your choices were saved locally, but Pinchflat could not be "
-            f"updated: {exc}",
+            f"reconciled: {exc}",
             "error",
         )
 
@@ -5617,8 +5857,11 @@ def bulk_subscription_action():
 
     for row in rows:
         try:
+            prospective = dict(row)
+
             if action in {"enable", "disable"}:
                 enabled = action == "enable"
+
                 with db() as conn:
                     conn.execute(
                         """
@@ -5630,13 +5873,14 @@ def bulk_subscription_action():
                         """,
                         (1 if enabled else 0, row["channel_id"]),
                     )
-                if row["pinchflat_added"] and row["pinchflat_source_id"]:
-                    update_pinchflat_source_settings(
-                        row["pinchflat_source_id"],
-                        cutoff=subscription_cutoff(row),
-                        download_enabled=enabled,
-                        media_profile_id=subscription_media_profile_id(row),
-                    )
+
+                prospective["download_enabled"] = 1 if enabled else 0
+                prospective["needs_review"] = 0
+
+                apply_subscription_source_authority(
+                    prospective,
+                    apply_settings=True,
+                )
 
             elif action == "approve":
                 with db() as conn:
@@ -5644,17 +5888,34 @@ def bulk_subscription_action():
                         """
                         UPDATE subscriptions
                         SET needs_review = 0,
+                            download_enabled = 1,
                             last_error = NULL
                         WHERE channel_id = ?
                         """,
                         (row["channel_id"],),
                     )
 
+                prospective["needs_review"] = 0
+                prospective["download_enabled"] = 1
+
+                apply_subscription_source_authority(
+                    prospective,
+                    apply_settings=True,
+                )
+
             elif action == "range":
-                mode = request.form.get("bulk_history_mode", "default").strip()
-                custom = request.form.get("bulk_custom_date", "").strip()
+                mode = request.form.get(
+                    "bulk_history_mode",
+                    "default",
+                ).strip()
+                custom = request.form.get(
+                    "bulk_custom_date",
+                    "",
+                ).strip()
+
                 if mode not in HISTORY_MODES:
                     raise RuntimeError("Invalid bulk download range.")
+
                 with db() as conn:
                     conn.execute(
                         """
@@ -5666,22 +5927,25 @@ def bulk_subscription_action():
                         """,
                         (mode, custom, row["channel_id"]),
                     )
-                if row["pinchflat_added"] and row["pinchflat_source_id"]:
-                    update_pinchflat_source_settings(
-                        row["pinchflat_source_id"],
-                        cutoff=resolve_history_cutoff(
-                            subscribed_at=row.get("subscribed_at"),
-                            mode=mode,
-                            custom_date=custom,
-                        ),
-                        download_enabled=subscription_download_enabled(row),
-                        media_profile_id=subscription_media_profile_id(row),
+
+                prospective["history_mode"] = mode
+                prospective["history_custom_date"] = custom
+
+                if subscription_download_enabled(prospective):
+                    apply_subscription_source_authority(
+                        prospective,
+                        apply_settings=True,
                     )
 
             elif action == "profile":
-                profile_id = request.form.get("bulk_profile_id", "").strip()
+                profile_id = request.form.get(
+                    "bulk_profile_id",
+                    "",
+                ).strip()
+
                 if not profile_id:
                     raise RuntimeError("Choose a Media Profile.")
+
                 with db() as conn:
                     conn.execute(
                         """
@@ -5692,37 +5956,29 @@ def bulk_subscription_action():
                         """,
                         (profile_id, row["channel_id"]),
                     )
-                if row["pinchflat_added"] and row["pinchflat_source_id"]:
-                    update_pinchflat_source_settings(
-                        row["pinchflat_source_id"],
-                        cutoff=subscription_cutoff(row),
-                        download_enabled=subscription_download_enabled(row),
-                        media_profile_id=profile_id,
+
+                prospective["media_profile_id"] = profile_id
+
+                if subscription_download_enabled(prospective):
+                    apply_subscription_source_authority(
+                        prospective,
+                        apply_settings=True,
                     )
 
             elif action == "retry":
-                if row["pinchflat_added"] and row["pinchflat_source_id"]:
-                    update_pinchflat_source_settings(
-                        row["pinchflat_source_id"],
-                        cutoff=subscription_cutoff(row),
-                        download_enabled=subscription_download_enabled(row),
-                        media_profile_id=subscription_media_profile_id(row),
-                    )
-                elif not row["needs_review"]:
-                    _result, source_id = add_pinchflat_source(row)
-                    with db() as conn:
-                        conn.execute(
-                            """
-                            UPDATE subscriptions
-                            SET pinchflat_added = 1,
-                                pinchflat_source_id = COALESCE(?, pinchflat_source_id)
-                            WHERE channel_id = ?
-                            """,
-                            (source_id, row["channel_id"]),
-                        )
+                apply_subscription_source_authority(
+                    prospective,
+                    apply_settings=True,
+                )
+
                 with db() as conn:
                     conn.execute(
-                        "UPDATE subscriptions SET last_error = NULL, retry_count = 0 WHERE channel_id = ?",
+                        """
+                        UPDATE subscriptions
+                        SET last_error = NULL,
+                            retry_count = 0
+                        WHERE channel_id = ?
+                        """,
                         (row["channel_id"],),
                     )
 
@@ -5746,173 +6002,23 @@ def bulk_subscription_action():
 
     log_activity(
         "bulk",
-        "Bulk source action",
-        f"Action {action}. Changed {changed}. Errors {errors}.",
+        "Bulk subscription action",
+        f"{action}: changed {changed}, errors {errors}.",
         "success" if errors == 0 else "warning",
     )
-    flash(
-        f"Bulk action complete. Updated {changed} source(s). Errors {errors}.",
-        "success" if errors == 0 else "error",
-    )
-    return redirect(url_for("index") + "#subscriptions")
 
-
-@app.post("/subscriptions/<channel_id>/unsubscribe")
-def unsubscribe_from_youtube(channel_id):
-    with db() as conn:
-        row = conn.execute(
-            "SELECT * FROM subscriptions WHERE channel_id = ?",
-            (channel_id,),
-        ).fetchone()
-
-    if row is None:
-        flash("Subscription was not found.", "error")
-        return redirect(url_for("index") + "#subscriptions")
-
-    try:
-        youtube_unsubscribe(
-            channel_id,
-            row_value(row, "youtube_subscription_id", None),
+    if errors:
+        flash(
+            f"Bulk action completed with {errors} error(s).",
+            "error",
         )
-
-        with db() as conn:
-            conn.execute(
-                """
-                UPDATE subscriptions
-                SET active = 0,
-                    removed_at = ?,
-                    last_error = NULL
-                WHERE channel_id = ?
-                """,
-                (now_iso(), channel_id),
-            )
-
-        row_dict = dict(row)
-        policy = unsubscribe_policy()
-        if policy == "disable" and row_dict.get("pinchflat_added") and row_dict.get("pinchflat_source_id"):
-            update_pinchflat_source_settings(
-                row_dict["pinchflat_source_id"],
-                cutoff=subscription_cutoff(row_dict),
-                download_enabled=False,
-                media_profile_id=subscription_media_profile_id(row_dict),
-            )
-        elif policy in {"remove", "remove_delete"} and row_dict.get("pinchflat_added") and row_dict.get("pinchflat_source_id"):
-            delete_files = policy == "remove_delete"
-            output_template = media_profile_settings(
-                subscription_media_profile_id(row_dict)
-            ).get(
-                "output_path_template",
-                EMBY_OUTPUT_PATH_TEMPLATE,
-            )
-
-            source_id = resolve_pinchflat_source_id(row_dict)
-            source_gone = not source_id
-
-            if source_id:
-                row_dict["pinchflat_source_id"] = str(source_id)
-                row_dict["pinchflat_added"] = 1
-                prepare_pinchflat_source_for_removal(row_dict)
-
-                source_gone = delete_pinchflat_source(
-                    source_id,
-                    delete_files=delete_files,
-                )
-
-            if delete_files:
-                delete_subscription_download_folder(
-                    row_dict.get("title") or channel_id,
-                    output_template,
-                )
-
-            if source_gone:
-                clear_subscription_pinchflat_link(channel_id, source_id)
-            else:
-                with db() as conn:
-                    conn.execute(
-                        """
-                        UPDATE subscriptions
-                        SET pinchflat_added = 1,
-                            pinchflat_source_id = ?,
-                            download_enabled = 0,
-                            last_error = ?
-                        WHERE channel_id = ?
-                        """,
-                        (
-                            str(source_id),
-                            "Pinchflat source removal is in progress.",
-                            channel_id,
-                        ),
-                    )
-
-            schedule_unsubscribe_cleanup(
-                channel_id,
-                row_dict.get("title") or channel_id,
-                output_template,
-                source_id=source_id,
-                delete_files=delete_files,
-                delay_seconds=300,
-                checks=6,
-            )
-
-        log_activity(
-            "youtube",
-            "YouTube subscription removed",
-            f"Unsubscribed from {row_dict.get('title') or channel_id}.",
+    else:
+        flash(
+            f"Bulk action applied to {changed} source(s).",
             "success",
-            channel_id,
         )
-        flash(f"Unsubscribed from {row_dict.get('title') or channel_id} on YouTube.", "success")
-    except Exception as exc:
-        with db() as conn:
-            conn.execute(
-                "UPDATE subscriptions SET last_error = ? WHERE channel_id = ?",
-                (str(exc)[:1000], channel_id),
-            )
-        flash(str(exc), "error")
 
     return redirect(url_for("index") + "#subscriptions")
-
-
-@app.post("/single-download/start")
-def single_download_start():
-    payload = request.get_json(silent=True) or request.form
-    youtube_url = str(payload.get("youtube_url", "")).strip()
-    try:
-        job_id, _created = enqueue_download(youtube_url, source_type="single")
-        return jsonify({"ok": True, "job_id": job_id})
-    except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-
-
-@app.get("/api/downloads/<job_id>")
-def download_status(job_id):
-    row = download_job_row(job_id)
-    if not row:
-        return jsonify({"ok": False, "error": "Download job not found."}), 404
-    row["downloaded_text"] = format_bytes(row.get("downloaded_bytes"))
-    row["total_text"] = format_bytes(row.get("total_bytes"))
-    return jsonify({"ok": True, "job": row})
-
-
-@app.get("/api/downloads/recent")
-def recent_download_status():
-    with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM downloads ORDER BY id DESC LIMIT 20"
-        ).fetchall()
-    return jsonify(
-        {
-            "ok": True,
-            "jobs": [
-                {
-                    **dict(row),
-                    "downloaded_text": format_bytes(row["downloaded_bytes"]),
-                    "total_text": format_bytes(row["total_bytes"]),
-                }
-                for row in rows
-            ],
-        }
-    )
 
 
 @app.post("/settings/youtube")
@@ -6109,6 +6215,13 @@ scheduler.add_job(
     "interval",
     minutes=5,
     id="removed-source-reconcile",
+    max_instances=1,
+)
+scheduler.add_job(
+    reconcile_active_source_authority,
+    "interval",
+    minutes=5,
+    id="active-source-authority",
     max_instances=1,
 )
 scheduler.start()
