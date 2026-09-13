@@ -35,7 +35,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1248,6 +1248,7 @@ def youtube_discovery_results(kind="videos", limit=24):
             language_by_video[video.get("id")] = {
                 "default_audio_language": snippet.get("defaultAudioLanguage") or "",
                 "default_language": snippet.get("defaultLanguage") or "",
+                "description": snippet.get("description") or "",
             }
 
     candidates = []
@@ -1290,6 +1291,11 @@ def youtube_discovery_results(kind="videos", limit=24):
                 "title": snippet.get("title") or "YouTube video",
                 "channel_title": snippet.get("channelTitle") or "YouTube",
                 "published_at": snippet.get("publishedAt") or "",
+                "description": (
+                    language_info.get("description")
+                    or snippet.get("description")
+                    or ""
+                ),
                 "video_url": f"https://www.youtube.com/watch?v={video_id}",
                 "shorts_url": f"https://www.youtube.com/shorts/{video_id}",
                 "thumbnail_url": (

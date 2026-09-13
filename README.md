@@ -2,6 +2,16 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.1.1
+
+Random Shorts description display.
+
+- Adds the YouTube Short description beside the embedded Shorts player.
+- Uses the full description returned by the existing `videos.list` request, so no additional YouTube API request is required.
+- Preserves description line breaks and links as text.
+- Long descriptions use a compact scrollable panel so the Shorts popup stays within the screen.
+- If a Short has no description, the panel displays `No description provided for this Short.`
+
 ## Version 2.1.0
 
 Favourites and custom video lists.

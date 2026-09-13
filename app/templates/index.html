@@ -155,6 +155,20 @@
     .shorts-player-frame { width:min(100%,330px); aspect-ratio:9/16; background:#000; border-radius:16px; overflow:hidden; margin:0 auto; }
     .shorts-player-frame iframe { display:block; width:100%; height:100%; border:0; }
     .shorts-info { padding:16px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .shorts-description {
+      margin:12px 0 16px;
+      padding:12px 14px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:rgba(255,255,255,.025);
+      color:var(--text);
+      line-height:1.5;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+      max-height:250px;
+      overflow-y:auto;
+    }
+    .shorts-description:empty { display:none; }
     .top100-rank { font-size:13px; color:var(--accent); font-weight:800; }
     .top100-subs { color:var(--text); font-weight:800; }
     .top100-country { color:var(--muted); font-size:12px; min-height:18px; }
@@ -686,6 +700,7 @@
         <div class="shorts-info">
           <h3 id="shorts-title">Random Short</h3>
           <p id="shorts-channel" class="muted"></p>
+          <div id="shorts-description" class="shorts-description"></div>
           <div class="actions">
             <button class="btn" type="button" onclick="nextRandomShort()">Next Short</button>
             <button id="shorts-sound-btn" class="btn secondary" type="button" onclick="toggleShortsSound()">Sound on</button>
@@ -1783,6 +1798,8 @@ async function playRandomShort(index) {
 
   document.getElementById("shorts-title").textContent = item.title;
   document.getElementById("shorts-channel").textContent = item.channel_title;
+  document.getElementById("shorts-description").textContent =
+    item.description || "No description provided for this Short.";
   document.getElementById("shorts-youtube-link").href = item.shorts_url || item.video_url;
   const videoHeart = document.getElementById("shorts-video-heart");
   videoHeart.textContent = item.is_favourite_video ? "♥ Video" : "♡ Video";
