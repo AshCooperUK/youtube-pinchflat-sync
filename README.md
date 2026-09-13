@@ -2,6 +2,18 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.9.4
+
+Verification marker parsing fix.
+
+- Fixes the false `Pinchflat direct deletion did not return verification markers` error.
+- v1.9.3 successfully deleted the Pinchflat source, but the Python regex looked for a literal `\d` instead of digits.
+- Valid output such as `MATCH_COUNT=1 REMAINING_COUNT=0` is now parsed correctly.
+- The same correction is applied to `SOURCE_COUNT`.
+- After a successful delete, the app now proceeds normally and shows `Not in Pinchflat` instead of leaving a false error.
+- Direct deletion through the running Pinchflat release remains unchanged.
+- Docker power control and explicit source authorisation remain unchanged.
+
 ## Version 1.9.3
 
 Running-Pinchflat RPC deletion fix.

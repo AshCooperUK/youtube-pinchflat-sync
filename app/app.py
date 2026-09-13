@@ -32,7 +32,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.9.3"
+VERSION = "1.9.4"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -3350,8 +3350,8 @@ def delete_pinchflat_source_direct(
         timeout=300,
     )
 
-    matched = re.search(r"MATCH_COUNT=(\\d+)", output)
-    remaining = re.search(r"REMAINING_COUNT=(\\d+)", output)
+    matched = re.search(r"MATCH_COUNT=(\d+)", output)
+    remaining = re.search(r"REMAINING_COUNT=(\d+)", output)
 
     if not matched or not remaining:
         raise RuntimeError(
@@ -3426,7 +3426,7 @@ def pinchflat_source_exists_direct(
         timeout=60,
     )
 
-    match = re.search(r"SOURCE_COUNT=(\\d+)", output)
+    match = re.search(r"SOURCE_COUNT=(\d+)", output)
 
     if not match:
         raise RuntimeError(
