@@ -873,6 +873,7 @@
           src=""
           title="YouTube video player"
           allow="autoplay; encrypted-media; picture-in-picture"
+          referrerpolicy="strict-origin-when-cross-origin"
           allowfullscreen
         ></iframe>
       </div>
@@ -1800,9 +1801,11 @@ function openLatestVideo(item) {
   const youtubeLink = document.getElementById("latest-popup-youtube-link");
 
   const origin = encodeURIComponent(window.location.origin);
+  const widgetReferrer = encodeURIComponent(window.location.href);
   player.src =
     `https://www.youtube-nocookie.com/embed/${encodeURIComponent(item.video_id)}` +
-    `?autoplay=1&rel=0&playsinline=1&origin=${origin}`;
+    `?autoplay=1&rel=0&playsinline=1&origin=${origin}` +
+    `&widget_referrer=${widgetReferrer}`;
 
   title.textContent = item.title || "YouTube video";
 
@@ -2427,7 +2430,8 @@ async function playRandomShort(index) {
         playsinline: 1,
         rel: 0,
         modestbranding: 1,
-        origin: window.location.origin
+        origin: window.location.origin,
+        widget_referrer: window.location.href
       },
       events: {
         onReady: event => {

@@ -2,6 +2,19 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.3.1
+
+YouTube embedded-player identity fix.
+
+- Fixes YouTube player `Error 153` in the Latest from your subscriptions popup.
+- The app previously sent `Referrer-Policy: same-origin`, which stripped the HTTP Referer when the browser loaded `youtube-nocookie.com`.
+- The global referrer policy is now `strict-origin-when-cross-origin`.
+- The latest-video iframe explicitly uses `referrerpolicy="strict-origin-when-cross-origin"`.
+- The embedded player URL includes both `origin` and `widget_referrer`.
+- The Shorts player now also supplies `widget_referrer`.
+- Privacy-enhanced `youtube-nocookie.com` playback remains enabled.
+- No database migration or clean installation is required.
+
 ## Version 2.3.0
 
 Expanded latest-subscriptions player.
