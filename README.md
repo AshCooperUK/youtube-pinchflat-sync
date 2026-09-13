@@ -2,6 +2,38 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.1.0
+
+Favourites and custom video lists.
+
+- Adds a Favourites button beside Discover.
+- Favourite Channels, Favourite Videos and My Lists are stored per signed-in app user in SQLite.
+- Adds a heart control to every subscribed channel image.
+- Adds channel hearts to Random Videos, Random Shorts and Top 100.
+- Adds video hearts to Random Videos and Random Shorts.
+- Favourite channels which are not currently subscribed show a Subscribe button.
+- Adds custom named video lists. A saved video can belong to multiple lists.
+- Adds Save to list actions from Discover, Random Shorts and Favourite Videos.
+- Adds Download List, which queues every video in a custom list through the existing download engine.
+- Adds individual Download buttons for Favourite Videos.
+- Adds a Favourites filter to the main subscription list.
+- Adds a General setting to pin favourite subscribed channels to the top of the channel list.
+- Existing Google, Pinchflat, discovery, download and authentication behaviour remains unchanged.
+
+## Version 2.0.2
+
+English-first Discover and Top 100 channel images.
+
+- Random Videos and Random Shorts remain restricted to the GB content region with `relevanceLanguage=en`.
+- Discovery now also checks `videos.list` language metadata. Videos explicitly marked with a non-English default language are excluded.
+- When YouTube does not provide language metadata, titles using predominantly non-Latin scripts are excluded as a fallback.
+- Top 100 now filters Wikipedia's global Top 100 table using its explicit `Primary language` column and keeps entries containing English.
+- Top 100 channel icons are loaded from the live YouTube channel resource.
+- `/channel/`, `/@handle`, and `/user/` Top 100 links are resolved through `channels.list`.
+- Top 100 channel details are cached with the existing six-hour Top 100 cache.
+- Top 100 tiles display the channel avatar, English-language label and country.
+- The Top 100 panel description now makes clear it is the English-language subset of the current global Top 100 ranking.
+
 ## Version 2.0.1
 
 Discover and unsubscribe fixes.

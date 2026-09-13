@@ -82,6 +82,17 @@
       overflow:hidden; text-overflow:ellipsis; text-align:center;
       font-weight:750; font-size:13px; line-height:1.25;
     }
+    .channel-image-wrap { position:relative; width:72px; height:72px; }
+    .heart-btn {
+      width:31px; height:31px; border-radius:50%; border:1px solid #49607f;
+      background:#0b1626e8; color:#dbe7f7; cursor:pointer; font-size:19px; line-height:1;
+      display:inline-flex; align-items:center; justify-content:center; padding:0;
+      box-shadow:0 2px 8px rgba(0,0,0,.35);
+    }
+    .heart-btn:hover { border-color:#ff7aa5; color:#ff8bb0; }
+    .heart-btn.active { color:#ff5b8a; border-color:#ff5b8a; background:#321120; }
+    .channel-heart { position:absolute; top:-7px; right:-10px; z-index:3; }
+    .discover-heart { position:absolute; top:8px; right:8px; z-index:3; }
     .error-text { max-width:300px; color:var(--red); font-size:12px; word-break:break-word; }
     .row-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
     .source-range { min-width:280px; }
@@ -133,7 +144,9 @@
     #discover-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
     .discover-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
     .discover-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; }
-    .discover-tile { display:flex; flex-direction:column; align-items:center; text-align:center; gap:8px; padding:16px 10px; border:1px solid var(--line); border-radius:14px; background:var(--panel); text-decoration:none; min-height:220px; }
+    .discover-tile { position:relative; display:flex; flex-direction:column; align-items:center; text-align:center; gap:8px; padding:16px 10px; border:1px solid var(--line); border-radius:14px; background:var(--panel); text-decoration:none; min-height:220px; }
+    .discover-main-link { display:flex; flex-direction:column; align-items:center; gap:8px; width:100%; text-decoration:none; }
+    .discover-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:auto; }
     .discover-tile:hover { border-color:#4f79ba; background:#132139; }
     .discover-avatar { width:104px; height:104px; border-radius:50%; object-fit:cover; border:2px solid #415575; background:#08111f; }
     .discover-video-title { color:var(--text); font-weight:700; line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
@@ -145,6 +158,20 @@
     .top100-rank { font-size:13px; color:var(--accent); font-weight:800; }
     .top100-subs { color:var(--text); font-weight:800; }
     .top100-country { color:var(--muted); font-size:12px; min-height:18px; }
+    #favourites-dialog { width:min(1220px,96vw); height:min(850px,92vh); }
+    #favourites-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
+    .favourites-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
+    .favourite-card { position:relative; border:1px solid var(--line); border-radius:14px; padding:14px; background:var(--panel); display:flex; flex-direction:column; gap:9px; min-height:220px; }
+    .favourite-card .channel-avatar { width:82px; height:82px; margin:0 auto; }
+    .favourite-video-thumb { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:10px; background:#08111f; }
+    .favourite-card-title { color:var(--text); font-weight:750; line-height:1.25; }
+    .favourite-list-layout { display:grid; grid-template-columns:260px 1fr; gap:16px; }
+    .favourite-list-nav { display:flex; flex-direction:column; gap:8px; }
+    .favourite-list-nav button { text-align:left; width:100%; }
+    .favourite-list-nav button.active { background:var(--blue); }
+    .favourite-list-toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+    #list-picker-dialog { width:min(520px,92vw); }
+    @media (max-width:760px) { .favourite-list-layout { grid-template-columns:1fr; } }
     @media (max-width:760px) {
       .shorts-shell { grid-template-columns:1fr; }
       .shorts-player-frame { width:min(100%,290px); }
@@ -223,6 +250,7 @@
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
       {% if is_admin %}<a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>{% endif %}
       <button class="btn ghost" type="button" onclick="openDiscover()" {% if not google_connected %}disabled{% endif %}>Discover</button>
+      <button class="btn ghost" type="button" onclick="openFavourites()">Favourites</button>
       <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out {{ current_user.username }}</button></form>
     </div>
   </div>
@@ -339,6 +367,7 @@
           <option value="review">Needs review</option>
           <option value="error">Errors</option>
           <option value="removed">Removed</option>
+          <option value="favourites">Favourites</option>
           <option value="all">Everything</option>
         </select>
       </div>
@@ -423,6 +452,7 @@
             data-error="{{ 1 if sub['last_error'] else 0 }}"
             data-first-seen="{{ sub['first_seen_at'] }}"
             data-storage="{{ sub['disk_bytes'] }}"
+            data-favourite="{{ 1 if sub['is_favourite'] else 0 }}"
             data-form-id="{{ row_form_id }}"
           >
             <td>
@@ -437,16 +467,29 @@
 
             <td class="channel-cell">
               <div class="channel-card">
-                <a href="{{ sub['channel_url'] }}" target="_blank" title="{{ sub['title'] }}">
-                  <img
-                    class="channel-avatar"
-                    src="{{ sub['thumbnail_url'] or url_for('static', filename='channel-placeholder.svg') }}"
-                    alt="{{ sub['title'] }} channel image"
-                    loading="lazy"
-                    referrerpolicy="no-referrer"
-                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}';"
-                  >
-                </a>
+                <div class="channel-image-wrap">
+                  <a href="{{ sub['channel_url'] }}" target="_blank" title="{{ sub['title'] }}">
+                    <img
+                      class="channel-avatar"
+                      src="{{ sub['thumbnail_url'] or url_for('static', filename='channel-placeholder.svg') }}"
+                      alt="{{ sub['title'] }} channel image"
+                      loading="lazy"
+                      referrerpolicy="no-referrer"
+                      onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}';"
+                    >
+                  </a>
+                  <button
+                    type="button"
+                    class="heart-btn channel-heart {% if sub['is_favourite'] %}active{% endif %}"
+                    aria-label="Favourite {{ sub['title'] }}"
+                    title="{{ 'Remove from favourites' if sub['is_favourite'] else 'Add to favourites' }}"
+                    data-channel-id="{{ sub['channel_id'] }}"
+                    data-channel-title="{{ sub['title']|e }}"
+                    data-channel-url="{{ sub['channel_url']|e }}"
+                    data-thumbnail-url="{{ (sub['thumbnail_url'] or '')|e }}"
+                    onclick="toggleChannelFavouriteFromButton(this)"
+                  >{{ '♥' if sub['is_favourite'] else '♡' }}</button>
+                </div>
                 <a class="channel-title" title="{{ sub['title'] }}" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
                 {% if not sub["active"] %}<div class="small bad">No longer subscribed</div>{% endif %}
               </div>
@@ -634,7 +677,7 @@
       <div id="discover-grid" class="discover-grid"></div>
     </div>
     <div id="discover-top100-panel" class="hidden">
-      <p class="muted small">Current public ranking of the 100 most-subscribed YouTube channels. Click a tile to open the channel on YouTube.</p>
+      <p class="muted small">English-language channels from the current global Top 100 subscriber ranking. Channel images come from YouTube. Click a tile to open the channel.</p>
       <div id="discover-top100-grid" class="discover-grid"></div>
     </div>
     <div id="discover-shorts-panel" class="hidden">
@@ -646,6 +689,9 @@
           <div class="actions">
             <button class="btn" type="button" onclick="nextRandomShort()">Next Short</button>
             <button id="shorts-sound-btn" class="btn secondary" type="button" onclick="toggleShortsSound()">Sound on</button>
+            <button id="shorts-video-heart" class="btn secondary" type="button" onclick="toggleCurrentShortVideoFavourite()">♡ Video</button>
+            <button id="shorts-channel-heart" class="btn secondary" type="button" onclick="toggleCurrentShortChannelFavourite()">♡ Channel</button>
+            <button class="btn secondary" type="button" onclick="saveCurrentShortToList()">Save to list</button>
             <a id="shorts-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank">Open on YouTube</a>
           </div>
           <label style="margin-top:16px"><input id="shorts-auto-next" type="checkbox" checked> Automatically play the next Short when the current video finishes</label>
@@ -653,6 +699,57 @@
         </div>
       </div>
     </div>
+  </div>
+</dialog>
+
+<dialog id="favourites-dialog">
+  <div class="modal-head">
+    <div><h2 style="margin:0">Favourites</h2><div class="muted small">Your favourite channels, saved videos and custom video lists.</div></div>
+    <button class="modal-close" onclick="closeFavourites()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="tabs">
+      <button id="fav-tab-channels" class="tab-btn active" type="button" onclick="showFavouriteTab('channels')">Favourite Channels</button>
+      <button id="fav-tab-videos" class="tab-btn" type="button" onclick="showFavouriteTab('videos')">Favourite Videos</button>
+      <button id="fav-tab-lists" class="tab-btn" type="button" onclick="showFavouriteTab('lists')">My Lists</button>
+    </div>
+    <div id="favourites-loading" class="empty hidden">Loading favourites…</div>
+    <div id="favourites-error" class="flash error hidden"></div>
+    <section id="fav-panel-channels"><div id="favourite-channels-grid" class="favourites-grid"></div></section>
+    <section id="fav-panel-videos" class="hidden"><div id="favourite-videos-grid" class="favourites-grid"></div></section>
+    <section id="fav-panel-lists" class="hidden">
+      <div class="favourite-list-toolbar">
+        <input id="new-favourite-list-name" type="text" placeholder="New list name" style="max-width:320px">
+        <button class="btn" type="button" onclick="createFavouriteList()">Create list</button>
+      </div>
+      <div class="favourite-list-layout">
+        <div id="favourite-list-nav" class="favourite-list-nav"></div>
+        <div>
+          <div id="favourite-list-actions" class="favourite-list-toolbar hidden">
+            <button class="btn" type="button" onclick="downloadSelectedFavouriteList()">Download List</button>
+            <button class="btn danger" type="button" onclick="deleteSelectedFavouriteList()">Delete List</button>
+          </div>
+          <div id="favourite-list-videos" class="favourites-grid"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</dialog>
+
+<dialog id="list-picker-dialog">
+  <div class="modal-head">
+    <div><h2 style="margin:0">Save video to list</h2><div class="muted small">Choose an existing list or create a new one.</div></div>
+    <button class="modal-close" onclick="closeListPicker()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <label>List
+      <select id="list-picker-select"></select>
+    </label>
+    <div class="actions">
+      <button class="btn" type="button" onclick="confirmSaveVideoToList()">Save to list</button>
+      <button class="btn secondary" type="button" onclick="createListFromPicker()">New list</button>
+    </div>
+    <div id="list-picker-error" class="bad small" style="margin-top:10px"></div>
   </div>
 </dialog>
 
@@ -696,6 +793,7 @@
               </select>
             </label>
             <label><input type="checkbox" name="show_removed" value="1" {% if show_removed %}checked{% endif %}> Include removed subscriptions by default</label>
+            <label><input type="checkbox" name="pin_favourites_to_top" value="1" {% if pin_favourites_to_top %}checked{% endif %}> Pin favourite channels to the top of the subscription list</label>
             <button class="btn">Save General</button>
           </form>
         </div>
@@ -1201,9 +1299,16 @@ const settingsDialog = document.getElementById("settings-dialog");
 const activityDialog = document.getElementById("activity-dialog");
 const singleDownloadDialog = document.getElementById("single-download-dialog");
 const discoverDialog = document.getElementById("discover-dialog");
+const favouritesDialog = document.getElementById("favourites-dialog");
+const listPickerDialog = document.getElementById("list-picker-dialog");
 let singleDownloadTimer = null;
 let discoverMode = "videos";
 let discoverResults = {videos: [], shorts: [], top100: []};
+let favouritesState = {channels: [], videos: [], lists: []};
+let favouriteTab = "channels";
+let selectedFavouriteListId = null;
+let pendingListVideo = null;
+const pinFavouritesToTop = {{ 'true' if pin_favourites_to_top else 'false' }};
 let shortsIndex = 0;
 let shortsPlayer = null;
 let shortsMuted = true;
@@ -1220,6 +1325,264 @@ function openSingleDownload() { singleDownloadDialog.showModal(); }
 function closeSingleDownload() {
   singleDownloadDialog.close();
   if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+}
+
+function csrfHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content
+  };
+}
+
+async function apiPost(url, payload={}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: csrfHeaders(),
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => ({ok:false, error:`HTTP ${response.status}`}));
+  if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+function setHeartButton(button, active, label="") {
+  if (!button) return;
+  button.classList.toggle("active", !!active);
+  button.textContent = active ? "♥" : "♡";
+  button.title = active ? `Remove ${label} from favourites` : `Add ${label} to favourites`;
+}
+
+function toggleChannelFavouriteFromButton(button) {
+  return toggleChannelFavourite(
+    button,
+    button.dataset.channelId || "",
+    button.dataset.channelTitle || "YouTube channel",
+    button.dataset.channelUrl || "",
+    button.dataset.thumbnailUrl || ""
+  );
+}
+
+async function toggleChannelFavourite(button, channelId, channelTitle, channelUrl, thumbnailUrl) {
+  try {
+    const data = await apiPost("/api/favourites/channel/toggle", {
+      channel_id: channelId,
+      channel_title: channelTitle,
+      channel_url: channelUrl,
+      thumbnail_url: thumbnailUrl
+    });
+    setHeartButton(button, data.favourite, "channel");
+    document.querySelectorAll(`.source-row .heart-btn[data-channel-id="${CSS.escape(channelId)}"]`).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
+    document.querySelectorAll(`.source-row`).forEach(row => {
+      const heart = row.querySelector(`.heart-btn[data-channel-id="${CSS.escape(channelId)}"]`);
+      if (heart) row.dataset.favourite = data.favourite ? "1" : "0";
+    });
+    discoverResults.videos.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
+    discoverResults.shorts.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
+    discoverResults.top100.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
+    if (favouritesDialog?.open) await loadFavourites();
+    applyFilters();
+  } catch (err) {
+    window.alert(err.message || String(err));
+  }
+}
+
+async function toggleVideoFavourite(button, item) {
+  try {
+    const data = await apiPost("/api/favourites/video/toggle", item);
+    if (button) {
+      button.classList.toggle("active", !!data.favourite);
+      button.textContent = data.favourite ? "♥ Video" : "♡ Video";
+    }
+    [discoverResults.videos, discoverResults.shorts].forEach(items => items.forEach(v => {
+      if (v.video_id === item.video_id) v.is_favourite_video = data.favourite;
+    }));
+    if (favouritesDialog?.open) await loadFavourites();
+  } catch (err) {
+    window.alert(err.message || String(err));
+  }
+}
+
+async function openFavourites(tab="channels") {
+  favouriteTab = tab;
+  if (!favouritesDialog.open) favouritesDialog.showModal();
+  await loadFavourites();
+  showFavouriteTab(tab);
+}
+
+function closeFavourites() { favouritesDialog.close(); }
+
+function showFavouriteTab(tab) {
+  favouriteTab = ["channels","videos","lists"].includes(tab) ? tab : "channels";
+  ["channels","videos","lists"].forEach(name => {
+    document.getElementById(`fav-tab-${name}`)?.classList.toggle("active", name === favouriteTab);
+    document.getElementById(`fav-panel-${name}`)?.classList.toggle("hidden", name !== favouriteTab);
+  });
+  if (favouriteTab === "lists") renderFavouriteLists();
+}
+
+async function loadFavourites() {
+  const loading = document.getElementById("favourites-loading");
+  const error = document.getElementById("favourites-error");
+  loading.classList.remove("hidden");
+  error.classList.add("hidden");
+  try {
+    const response = await fetch("/api/favourites");
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not load favourites.");
+    favouritesState = data;
+    renderFavouriteChannels();
+    renderFavouriteVideos();
+    renderFavouriteLists();
+    refreshListPickerOptions();
+  } catch (err) {
+    error.textContent = err.message || String(err);
+    error.classList.remove("hidden");
+  } finally {
+    loading.classList.add("hidden");
+  }
+}
+
+function emptyMessage(text) {
+  const div = document.createElement("div");
+  div.className = "empty";
+  div.textContent = text;
+  return div;
+}
+
+function renderFavouriteChannels() {
+  const grid = document.getElementById("favourite-channels-grid");
+  grid.replaceChildren();
+  if (!favouritesState.channels.length) {
+    grid.appendChild(emptyMessage("No favourite channels yet. Press the heart on any channel image."));
+    return;
+  }
+  favouritesState.channels.forEach(item => {
+    const card = document.createElement("div"); card.className = "favourite-card";
+    const heart = document.createElement("button"); heart.className = "heart-btn active discover-heart"; heart.textContent = "♥";
+    heart.onclick = () => toggleChannelFavourite(heart, item.channel_id, item.channel_title, item.channel_url, item.thumbnail_url || "");
+    const img = document.createElement("img"); img.className = "channel-avatar"; img.src = item.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}"; img.onerror = () => { img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
+    const title = document.createElement("div"); title.className = "favourite-card-title"; title.textContent = item.channel_title;
+    const actions = document.createElement("div"); actions.className = "actions";
+    const open = document.createElement("a"); open.className = "btn ghost smallbtn"; open.href = item.channel_url; open.target = "_blank"; open.textContent = "YouTube";
+    actions.appendChild(open);
+    if (!item.subscribed) {
+      const subscribe = document.createElement("button"); subscribe.className = "btn smallbtn"; subscribe.textContent = "Subscribe";
+      subscribe.onclick = async () => {
+        subscribe.disabled = true;
+        try { await apiPost("/api/youtube/subscribe", {channel_id:item.channel_id}); subscribe.textContent = "Subscribed ✓"; await loadFavourites(); }
+        catch (err) { window.alert(err.message || String(err)); subscribe.disabled = false; }
+      };
+      actions.appendChild(subscribe);
+    }
+    card.append(heart, img, title, actions); grid.appendChild(card);
+  });
+}
+
+function savedVideoCard(item, options={}) {
+  const card = document.createElement("div"); card.className = "favourite-card";
+  const img = document.createElement("img"); img.className = "favourite-video-thumb"; img.src = item.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}"; img.onerror = () => { img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
+  const title = document.createElement("div"); title.className = "favourite-card-title"; title.textContent = item.title || "YouTube video";
+  const channel = document.createElement("div"); channel.className = "muted small"; channel.textContent = item.channel_title || "YouTube";
+  const actions = document.createElement("div"); actions.className = "actions";
+  const open = document.createElement("a"); open.className = "btn ghost smallbtn"; open.href = item.video_url; open.target = "_blank"; open.textContent = "YouTube";
+  const dl = document.createElement("button"); dl.className = "btn smallbtn"; dl.textContent = "Download"; dl.onclick = () => downloadFavouriteVideo(item.video_id, dl);
+  const list = document.createElement("button"); list.className = "btn secondary smallbtn"; list.textContent = "Save to list"; list.onclick = () => openListPicker(item);
+  actions.append(open, dl, list);
+  if (options.listId) {
+    const remove = document.createElement("button"); remove.className = "btn danger smallbtn"; remove.textContent = "Remove"; remove.onclick = () => removeVideoFromList(options.listId, item.video_id);
+    actions.appendChild(remove);
+  } else {
+    const fav = document.createElement("button"); fav.className = "btn secondary smallbtn"; fav.textContent = "♥ Favourite"; fav.onclick = () => toggleVideoFavourite(fav, item);
+    actions.appendChild(fav);
+  }
+  card.append(img, title, channel, actions); return card;
+}
+
+function renderFavouriteVideos() {
+  const grid = document.getElementById("favourite-videos-grid");
+  grid.replaceChildren();
+  if (!favouritesState.videos.length) {
+    grid.appendChild(emptyMessage("No favourite videos yet. Heart videos from Discover or Random Shorts."));
+    return;
+  }
+  favouritesState.videos.forEach(item => grid.appendChild(savedVideoCard(item)));
+}
+
+function renderFavouriteLists() {
+  const nav = document.getElementById("favourite-list-nav");
+  nav.replaceChildren();
+  if (!favouritesState.lists.length) {
+    nav.appendChild(emptyMessage("Create your first video list."));
+    document.getElementById("favourite-list-videos").replaceChildren();
+    document.getElementById("favourite-list-actions").classList.add("hidden");
+    selectedFavouriteListId = null;
+    return;
+  }
+  if (!favouritesState.lists.some(list => Number(list.id) === Number(selectedFavouriteListId))) selectedFavouriteListId = favouritesState.lists[0].id;
+  favouritesState.lists.forEach(item => {
+    const button = document.createElement("button"); button.className = `btn secondary ${Number(item.id) === Number(selectedFavouriteListId) ? "active" : ""}`; button.textContent = `${item.name} (${item.video_count})`; button.onclick = () => { selectedFavouriteListId = item.id; renderFavouriteLists(); };
+    nav.appendChild(button);
+  });
+  const selected = favouritesState.lists.find(item => Number(item.id) === Number(selectedFavouriteListId));
+  const grid = document.getElementById("favourite-list-videos"); grid.replaceChildren();
+  document.getElementById("favourite-list-actions").classList.remove("hidden");
+  if (!selected?.videos?.length) grid.appendChild(emptyMessage("This list is empty. Save videos to it from Discover or Favourite Videos."));
+  else selected.videos.forEach(item => grid.appendChild(savedVideoCard(item, {listId:selected.id})));
+}
+
+async function createFavouriteList() {
+  const input = document.getElementById("new-favourite-list-name");
+  const name = input.value.trim(); if (!name) return;
+  try { const data = await apiPost("/api/favourites/lists/create", {name}); input.value = ""; selectedFavouriteListId = data.list.id; await loadFavourites(); showFavouriteTab("lists"); }
+  catch (err) { window.alert(err.message || String(err)); }
+}
+
+async function deleteSelectedFavouriteList() {
+  if (!selectedFavouriteListId || !window.confirm("Delete this list? Saved videos will remain in Favourite Videos if they are hearted.")) return;
+  try { await apiPost("/api/favourites/lists/delete", {list_id:selectedFavouriteListId}); selectedFavouriteListId = null; await loadFavourites(); }
+  catch (err) { window.alert(err.message || String(err)); }
+}
+
+async function downloadSelectedFavouriteList() {
+  if (!selectedFavouriteListId) return;
+  try { const data = await apiPost("/api/favourites/lists/download", {list_id:selectedFavouriteListId}); window.alert(`Queued ${data.queued} video(s). ${data.skipped} already queued/downloaded.`); }
+  catch (err) { window.alert(err.message || String(err)); }
+}
+
+async function downloadFavouriteVideo(videoId, button) {
+  button.disabled = true;
+  try { const data = await apiPost("/api/favourites/video/download", {video_id:videoId}); button.textContent = data.queued ? "Queued ✓" : "Already queued"; }
+  catch (err) { window.alert(err.message || String(err)); button.disabled = false; }
+}
+
+async function openListPicker(item) {
+  pendingListVideo = item;
+  await loadFavourites();
+  refreshListPickerOptions();
+  document.getElementById("list-picker-error").textContent = "";
+  listPickerDialog.showModal();
+}
+function closeListPicker() { listPickerDialog.close(); pendingListVideo = null; }
+function refreshListPickerOptions() {
+  const select = document.getElementById("list-picker-select"); if (!select) return;
+  select.replaceChildren();
+  favouritesState.lists.forEach(item => { const option = document.createElement("option"); option.value = item.id; option.textContent = item.name; select.appendChild(option); });
+  if (!favouritesState.lists.length) { const option = document.createElement("option"); option.value = ""; option.textContent = "Create a list first"; select.appendChild(option); }
+}
+async function confirmSaveVideoToList() {
+  const listId = document.getElementById("list-picker-select").value;
+  if (!pendingListVideo || !listId) { document.getElementById("list-picker-error").textContent = "Choose or create a list first."; return; }
+  try { await apiPost("/api/favourites/lists/add", {...pendingListVideo, list_id:listId}); closeListPicker(); await loadFavourites(); }
+  catch (err) { document.getElementById("list-picker-error").textContent = err.message || String(err); }
+}
+async function createListFromPicker() {
+  const name = window.prompt("New list name:"); if (!name?.trim()) return;
+  try { const data = await apiPost("/api/favourites/lists/create", {name:name.trim()}); await loadFavourites(); document.getElementById("list-picker-select").value = data.list.id; }
+  catch (err) { document.getElementById("list-picker-error").textContent = err.message || String(err); }
+}
+async function removeVideoFromList(listId, videoId) {
+  try { await apiPost("/api/favourites/lists/remove", {list_id:listId, video_id:videoId}); await loadFavourites(); }
+  catch (err) { window.alert(err.message || String(err)); }
 }
 
 function openDiscover() {
@@ -1314,16 +1677,22 @@ function renderDiscoverTiles(items) {
   grid.replaceChildren();
 
   if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = "No discovery results were returned. Press Shuffle to try another search.";
-    grid.appendChild(empty);
+    grid.appendChild(emptyMessage("No discovery results were returned. Press Refresh to try another search."));
     return;
   }
 
   items.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "discover-tile";
+
+    const heart = document.createElement("button");
+    heart.className = `heart-btn discover-heart ${item.is_favourite_channel ? "active" : ""}`;
+    heart.textContent = item.is_favourite_channel ? "♥" : "♡";
+    heart.title = item.is_favourite_channel ? "Remove channel from favourites" : "Favourite channel";
+    heart.onclick = () => toggleChannelFavourite(heart, item.channel_id, item.channel_title, `https://www.youtube.com/channel/${item.channel_id}`, item.channel_avatar_url || "");
+
     const link = document.createElement("a");
-    link.className = "discover-tile";
+    link.className = "discover-main-link";
     link.href = item.video_url;
     link.target = "_blank";
     link.rel = "noopener";
@@ -1345,7 +1714,21 @@ function renderDiscoverTiles(items) {
     title.textContent = item.title;
 
     link.append(img, channel, title);
-    grid.appendChild(link);
+
+    const actions = document.createElement("div");
+    actions.className = "discover-actions";
+    const videoHeart = document.createElement("button");
+    videoHeart.className = `btn secondary smallbtn ${item.is_favourite_video ? "active" : ""}`;
+    videoHeart.textContent = item.is_favourite_video ? "♥ Video" : "♡ Video";
+    videoHeart.onclick = () => toggleVideoFavourite(videoHeart, item);
+    const saveList = document.createElement("button");
+    saveList.className = "btn ghost smallbtn";
+    saveList.textContent = "Save to list";
+    saveList.onclick = () => openListPicker(item);
+    actions.append(videoHeart, saveList);
+
+    card.append(heart, link, actions);
+    grid.appendChild(card);
   });
 }
 
@@ -1354,16 +1737,21 @@ function renderTop100Tiles(items) {
   grid.replaceChildren();
 
   if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = "The Top 100 list is currently unavailable.";
-    grid.appendChild(empty);
+    grid.appendChild(emptyMessage("The Top 100 list is currently unavailable."));
     return;
   }
 
   items.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "discover-tile";
+
+    const heart = document.createElement("button");
+    heart.className = `heart-btn discover-heart ${item.is_favourite_channel ? "active" : ""}`;
+    heart.textContent = item.is_favourite_channel ? "♥" : "♡";
+    heart.onclick = () => toggleChannelFavourite(heart, item.channel_id, item.channel_title, item.channel_url, item.channel_avatar_url || "");
+
     const link = document.createElement("a");
-    link.className = "discover-tile";
+    link.className = "discover-main-link";
     link.href = item.channel_url;
     link.target = "_blank";
     link.rel = "noopener";
@@ -1371,30 +1759,21 @@ function renderTop100Tiles(items) {
 
     const img = document.createElement("img");
     img.className = "discover-avatar";
-    img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    img.src = item.channel_avatar_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
     img.alt = `${item.channel_title} channel`;
+    img.referrerPolicy = "no-referrer";
+    img.onerror = () => { img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
 
-    const rank = document.createElement("div");
-    rank.className = "top100-rank";
-    rank.textContent = `#${item.rank}`;
-
-    const channel = document.createElement("div");
-    channel.className = "discover-video-title";
-    channel.textContent = item.channel_title;
-
-    const subscribers = document.createElement("div");
-    subscribers.className = "top100-subs";
-    subscribers.textContent = `${item.subscribers}M subscribers`;
-
-    const country = document.createElement("div");
-    country.className = "top100-country";
-    country.textContent = item.country || "";
+    const rank = document.createElement("div"); rank.className = "top100-rank"; rank.textContent = `#${item.rank}`;
+    const channel = document.createElement("div"); channel.className = "discover-video-title"; channel.textContent = item.channel_title;
+    const subscribers = document.createElement("div"); subscribers.className = "top100-subs"; subscribers.textContent = `${item.subscribers}M subscribers`;
+    const country = document.createElement("div"); country.className = "top100-country"; country.textContent = [item.primary_language, item.country].filter(Boolean).join(" · ");
 
     link.append(img, rank, channel, subscribers, country);
-    grid.appendChild(link);
+    card.append(heart, link);
+    grid.appendChild(card);
   });
 }
-
 
 async function playRandomShort(index) {
   const items = discoverResults.shorts || [];
@@ -1405,6 +1784,12 @@ async function playRandomShort(index) {
   document.getElementById("shorts-title").textContent = item.title;
   document.getElementById("shorts-channel").textContent = item.channel_title;
   document.getElementById("shorts-youtube-link").href = item.shorts_url || item.video_url;
+  const videoHeart = document.getElementById("shorts-video-heart");
+  videoHeart.textContent = item.is_favourite_video ? "♥ Video" : "♡ Video";
+  videoHeart.classList.toggle("active", !!item.is_favourite_video);
+  const channelHeart = document.getElementById("shorts-channel-heart");
+  channelHeart.textContent = item.is_favourite_channel ? "♥ Channel" : "♡ Channel";
+  channelHeart.classList.toggle("active", !!item.is_favourite_channel);
 
   await ensureYouTubeIframeApi();
 
@@ -1443,6 +1828,25 @@ async function playRandomShort(index) {
   } else {
     shortsPlayer.loadVideoById(item.video_id);
   }
+}
+
+function currentShortItem() {
+  const items = discoverResults.shorts || [];
+  return items.length ? items[shortsIndex] : null;
+}
+function toggleCurrentShortVideoFavourite() {
+  const item = currentShortItem();
+  if (!item) return;
+  toggleVideoFavourite(document.getElementById("shorts-video-heart"), item).then(() => playRandomShort(shortsIndex));
+}
+function toggleCurrentShortChannelFavourite() {
+  const item = currentShortItem();
+  if (!item) return;
+  toggleChannelFavourite(document.getElementById("shorts-channel-heart"), item.channel_id, item.channel_title, `https://www.youtube.com/channel/${item.channel_id}`, item.channel_avatar_url || "").then(() => playRandomShort(shortsIndex));
+}
+function saveCurrentShortToList() {
+  const item = currentShortItem();
+  if (item) openListPicker(item);
 }
 
 function nextRandomShort() {
@@ -1621,12 +2025,16 @@ function applyFilters() {
     const titleMatch = !term || row.dataset.title.includes(term);
     let statusMatch = true;
     if (filter === "active") statusMatch = row.dataset.active === "1";
+    else if (filter === "favourites") statusMatch = row.dataset.favourite === "1";
     else if (filter !== "all") statusMatch = row.dataset.status === filter;
     row.classList.toggle("hidden-row", !(titleMatch && statusMatch));
   });
 
   const visible = rows.filter(r => !r.classList.contains("hidden-row"));
   visible.sort((a,b) => {
+    if (pinFavouritesToTop && a.dataset.favourite !== b.dataset.favourite) {
+      return a.dataset.favourite === "1" ? -1 : 1;
+    }
     if (sortFilter.value === "status") return a.dataset.status.localeCompare(b.dataset.status) || a.dataset.title.localeCompare(b.dataset.title);
     if (sortFilter.value === "newest") return b.dataset.firstSeen.localeCompare(a.dataset.firstSeen);
     if (sortFilter.value === "storage") return Number(b.dataset.storage || 0) - Number(a.dataset.storage || 0);
@@ -1674,7 +2082,7 @@ if (settingsHashTabs.has(requestedSettingsTab)) {
   openSettings(requestedSettingsTab);
 }
 
-[settingsDialog, activityDialog, singleDownloadDialog, discoverDialog].forEach(d => {
+[settingsDialog, activityDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
   d?.addEventListener("click", event => {
     if (event.target === d) d.close();
   });

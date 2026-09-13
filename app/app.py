@@ -35,7 +35,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -398,6 +398,46 @@ def init_db():
                 created_at TEXT NOT NULL,
                 finished_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS favourite_channels (
+                user_id INTEGER NOT NULL,
+                channel_id TEXT NOT NULL,
+                channel_title TEXT NOT NULL,
+                channel_url TEXT NOT NULL,
+                thumbnail_url TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, channel_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS saved_videos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                video_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                channel_id TEXT,
+                channel_title TEXT,
+                video_url TEXT NOT NULL,
+                thumbnail_url TEXT,
+                favourite INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, video_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS video_lists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (user_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS video_list_members (
+                list_id INTEGER NOT NULL,
+                saved_video_id INTEGER NOT NULL,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (list_id, saved_video_id)
+            );
             """
         )
 
@@ -428,6 +468,7 @@ def init_db():
             "new_subscription_policy": "auto_enable",
             "unsubscribe_policy": "keep",
             "show_removed": "0",
+            "pin_favourites_to_top": "1",
             "sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "youtube_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "pinchflat_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
@@ -879,6 +920,133 @@ def youtube_api_request(creds, http_method, path, quota_method, quota_cost=1, **
     return response
 
 
+def english_language_code(value):
+    value = str(value or "").strip().lower()
+    if not value:
+        return None
+    return value == "en" or value.startswith("en-")
+
+
+def has_obvious_non_latin_title(value):
+    """
+    Reject titles dominated by scripts which are clearly not English.
+
+    This is only a fallback when YouTube does not publish a default language
+    for a video. Latin-script languages are left to YouTube's
+    relevanceLanguage=en and GB-region ranking.
+    """
+    text = str(value or "")
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return False
+
+    non_latin = 0
+    for char in letters:
+        codepoint = ord(char)
+        if (
+            0x0400 <= codepoint <= 0x052F   # Cyrillic
+            or 0x0590 <= codepoint <= 0x05FF  # Hebrew
+            or 0x0600 <= codepoint <= 0x06FF  # Arabic
+            or 0x0900 <= codepoint <= 0x0D7F  # Indic scripts
+            or 0x0E00 <= codepoint <= 0x0E7F  # Thai
+            or 0x3040 <= codepoint <= 0x30FF  # Japanese
+            or 0x3400 <= codepoint <= 0x9FFF  # CJK
+            or 0xAC00 <= codepoint <= 0xD7AF  # Korean
+        ):
+            non_latin += 1
+
+    return (non_latin / max(1, len(letters))) >= 0.20
+
+
+def youtube_channel_details_from_url(creds, channel_url):
+    """
+    Resolve a YouTube channel URL to a channel resource.
+
+    Wikipedia links use a mixture of /channel/, /@handle and /user/ URLs.
+    channels.list supports each of those identities through id, forHandle or
+    forUsername.
+    """
+    parsed = urlparse(channel_url or "")
+    path = parsed.path.strip("/")
+    params = {
+        "part": "snippet",
+        "maxResults": 1,
+    }
+
+    if path.startswith("channel/"):
+        channel_id = path.split("/", 1)[1].split("/", 1)[0]
+        if not channel_id:
+            return {}
+        params["id"] = channel_id
+
+    elif path.startswith("@"):
+        handle = path.split("/", 1)[0]
+        params["forHandle"] = handle
+
+    elif path.startswith("user/"):
+        username = path.split("/", 1)[1].split("/", 1)[0]
+        if not username:
+            return {}
+        params["forUsername"] = username
+
+    else:
+        return {}
+
+    response = youtube_api_request(
+        creds,
+        "GET",
+        "channels",
+        "channels.list",
+        1,
+        params=params,
+    )
+
+    items = response.json().get("items", [])
+    if not items:
+        return {}
+
+    item = items[0]
+    snippet = item.get("snippet") or {}
+    thumbnails = snippet.get("thumbnails") or {}
+    image = (
+        thumbnails.get("high")
+        or thumbnails.get("medium")
+        or thumbnails.get("default")
+        or {}
+    )
+
+    return {
+        "channel_id": item.get("id") or "",
+        "channel_title_api": snippet.get("title") or "",
+        "channel_avatar_url": image.get("url") or "",
+    }
+
+
+def enrich_top100_channel_images(creds, rows):
+    """
+    Add live YouTube channel avatars to the English Top 100 subset.
+
+    Results are already cached by youtube_top100_channels(), so these
+    channels.list calls only occur on a Top 100 cache refresh.
+    """
+    enriched = []
+
+    for row in rows:
+        item = dict(row)
+        try:
+            details = youtube_channel_details_from_url(
+                creds,
+                item.get("channel_url", ""),
+            )
+            item.update(details)
+        except Exception:
+            item.setdefault("channel_avatar_url", "")
+            item.setdefault("channel_id", "")
+        enriched.append(item)
+
+    return enriched
+
+
 def youtube_top100_channels(force=False):
     now_ts = time.time()
 
@@ -891,7 +1059,7 @@ def youtube_top100_channels(force=False):
             "kind": "top100",
             "results": TOP100_CACHE["results"],
             "retrieved_at": TOP100_CACHE["retrieved_at"],
-            "source": "Wikipedia",
+            "source": "Wikipedia + YouTube",
         }
 
     response = requests.get(
@@ -917,7 +1085,7 @@ def youtube_top100_channels(force=False):
                 cell.get_text(" ", strip=True)
                 for cell in candidate.find_all("th")
             ).lower()
-            if "subscribers" in headers and "link" in headers:
+            if "subscribers" in headers and "primary" in headers and "language" in headers:
                 table = candidate
                 break
 
@@ -926,11 +1094,11 @@ def youtube_top100_channels(force=False):
             "The Top 100 YouTube channel table could not be found."
         )
 
-    results = []
+    rows = []
 
     for row in table.find_all("tr"):
         cells = row.find_all(["th", "td"])
-        if len(cells) < 3:
+        if len(cells) < 7:
             continue
 
         name = cells[0].get_text(" ", strip=True)
@@ -953,37 +1121,54 @@ def youtube_top100_channels(force=False):
             youtube_link = "https://www.youtube.com" + youtube_link
 
         subscribers = cells[2].get_text(" ", strip=True)
-        country = cells[-1].get_text(" ", strip=True) if len(cells) >= 7 else ""
+        primary_language = cells[3].get_text(" ", strip=True)
+        category = cells[4].get_text(" ", strip=True)
+        country = cells[6].get_text(" ", strip=True)
 
-        results.append(
+        # The global Top 100 table explicitly lists each channel's primary
+        # language. Keep English and multilingual entries containing English.
+        if "english" not in primary_language.lower():
+            continue
+
+        rows.append(
             {
-                "rank": len(results) + 1,
+                "global_rank": len(rows) + 1,
                 "channel_title": name,
                 "channel_url": youtube_link,
                 "subscribers": subscribers,
+                "primary_language": primary_language,
+                "category": category,
                 "country": country,
             }
         )
 
-        if len(results) >= 100:
-            break
-
-    if not results:
+    if not rows:
         raise RuntimeError(
-            "The Top 100 YouTube channel table returned no channels."
+            "The Top 100 table returned no English-language channels."
         )
+
+    creds = load_credentials()
+    if creds:
+        rows = enrich_top100_channel_images(creds, rows)
+
+    # Rank the English-language subset in the order it appears in the global
+    # subscriber ranking.
+    for index, row in enumerate(rows, start=1):
+        row["rank"] = index
 
     retrieved_at = now_iso()
     TOP100_CACHE["expires_at"] = now_ts + TOP100_CACHE_SECONDS
-    TOP100_CACHE["results"] = results
+    TOP100_CACHE["results"] = rows
     TOP100_CACHE["retrieved_at"] = retrieved_at
 
     return {
         "kind": "top100",
-        "results": results,
+        "results": rows,
         "retrieved_at": retrieved_at,
-        "source": "Wikipedia",
+        "source": "Wikipedia + YouTube",
     }
+
+
 
 
 def youtube_discovery_results(kind="videos", limit=24):
@@ -1036,9 +1221,38 @@ def youtube_discovery_results(kind="videos", limit=24):
     )
     payload = response.json()
 
+    search_items = payload.get("items", [])
+    video_ids = [
+        (item.get("id") or {}).get("videoId")
+        for item in search_items
+        if (item.get("id") or {}).get("videoId")
+    ]
+
+    language_by_video = {}
+    if video_ids:
+        details_response = youtube_api_request(
+            creds,
+            "GET",
+            "videos",
+            "videos.list",
+            1,
+            params={
+                "part": "snippet",
+                "id": ",".join(video_ids[:50]),
+                "maxResults": 50,
+            },
+        )
+
+        for video in details_response.json().get("items", []):
+            snippet = video.get("snippet") or {}
+            language_by_video[video.get("id")] = {
+                "default_audio_language": snippet.get("defaultAudioLanguage") or "",
+                "default_language": snippet.get("defaultLanguage") or "",
+            }
+
     candidates = []
     channel_ids = []
-    for item in payload.get("items", []):
+    for item in search_items:
         snippet = item.get("snippet") or {}
         video_id = (item.get("id") or {}).get("videoId")
         channel_id = snippet.get("channelId")
@@ -1046,6 +1260,29 @@ def youtube_discovery_results(kind="videos", limit=24):
             continue
         if channel_id in subscribed_ids:
             continue
+
+        language_info = language_by_video.get(video_id, {})
+        explicit_language = (
+            language_info.get("default_audio_language")
+            or language_info.get("default_language")
+            or ""
+        )
+
+        # When YouTube publishes an explicit language, require English.
+        if explicit_language and not english_language_code(explicit_language):
+            continue
+
+        # When no language metadata exists, reject obviously non-Latin titles.
+        # Remaining results are already ranked by relevanceLanguage=en and GB.
+        if (
+            not explicit_language
+            and (
+                has_obvious_non_latin_title(snippet.get("title"))
+                or has_obvious_non_latin_title(snippet.get("channelTitle"))
+            )
+        ):
+            continue
+
         candidates.append(
             {
                 "video_id": video_id,
@@ -2637,6 +2874,136 @@ def sync_emby_download_playlist():
         )
 
     return result
+
+
+def current_user_id():
+    user = current_user_record()
+    if not user:
+        return None
+    return int(user["id"])
+
+
+def favourite_channel_ids(user_id=None):
+    user_id = user_id or current_user_id()
+    if not user_id:
+        return set()
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT channel_id FROM favourite_channels WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    return {row["channel_id"] for row in rows}
+
+
+def favourite_video_ids(user_id=None):
+    user_id = user_id or current_user_id()
+    if not user_id:
+        return set()
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT video_id FROM saved_videos WHERE user_id = ? AND favourite = 1",
+            (user_id,),
+        ).fetchall()
+    return {row["video_id"] for row in rows}
+
+
+def annotate_favourites(items, user_id=None):
+    user_id = user_id or current_user_id()
+    channel_ids = favourite_channel_ids(user_id)
+    video_ids = favourite_video_ids(user_id)
+    annotated = []
+    for item in items or []:
+        row = dict(item)
+        row["is_favourite_channel"] = row.get("channel_id") in channel_ids
+        row["is_favourite_video"] = row.get("video_id") in video_ids
+        annotated.append(row)
+    return annotated
+
+
+def normalise_saved_video(payload):
+    video_id = str(payload.get("video_id") or "").strip()
+    if not video_id:
+        raise RuntimeError("A YouTube video ID is required.")
+    video_url = str(payload.get("video_url") or "").strip()
+    if not video_url:
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+    return {
+        "video_id": video_id,
+        "title": str(payload.get("title") or "YouTube video").strip()[:500],
+        "channel_id": str(payload.get("channel_id") or "").strip(),
+        "channel_title": str(payload.get("channel_title") or "YouTube").strip()[:300],
+        "video_url": video_url,
+        "thumbnail_url": str(payload.get("thumbnail_url") or "").strip(),
+    }
+
+
+def upsert_saved_video(user_id, payload, favourite=None):
+    item = normalise_saved_video(payload)
+    now = now_iso()
+    with db() as conn:
+        existing = conn.execute(
+            "SELECT * FROM saved_videos WHERE user_id = ? AND video_id = ?",
+            (user_id, item["video_id"]),
+        ).fetchone()
+        if existing:
+            new_favourite = int(existing["favourite"] or 0) if favourite is None else (1 if favourite else 0)
+            conn.execute(
+                """
+                UPDATE saved_videos
+                SET title = ?, channel_id = ?, channel_title = ?, video_url = ?,
+                    thumbnail_url = ?, favourite = ?, updated_at = ?
+                WHERE user_id = ? AND video_id = ?
+                """,
+                (
+                    item["title"], item["channel_id"], item["channel_title"],
+                    item["video_url"], item["thumbnail_url"], new_favourite,
+                    now, user_id, item["video_id"],
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO saved_videos (
+                    user_id, video_id, title, channel_id, channel_title,
+                    video_url, thumbnail_url, favourite, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id, item["video_id"], item["title"], item["channel_id"],
+                    item["channel_title"], item["video_url"], item["thumbnail_url"],
+                    1 if favourite is not False else 0, now, now,
+                ),
+            )
+        saved = conn.execute(
+            "SELECT * FROM saved_videos WHERE user_id = ? AND video_id = ?",
+            (user_id, item["video_id"]),
+        ).fetchone()
+    return dict(saved)
+
+
+def youtube_subscribe(channel_id):
+    creds = load_credentials()
+    if not creds:
+        raise RuntimeError("Google account is not connected.")
+    if not google_write_scope_ready(creds):
+        raise RuntimeError("Reconnect Google to grant permission to subscribe to channels.")
+    response = youtube_api_request(
+        creds,
+        "POST",
+        "subscriptions",
+        "subscriptions.insert",
+        50,
+        params={"part": "snippet"},
+        json={
+            "snippet": {
+                "resourceId": {
+                    "kind": "youtube#channel",
+                    "channelId": channel_id,
+                }
+            }
+        },
+    )
+    return response.json()
 
 
 def youtube_unsubscribe(channel_id, youtube_subscription_id=None):
@@ -5454,6 +5821,12 @@ VIEWER_POST_ENDPOINTS = {
     "two_factor_disable",
     "regenerate_recovery_codes",
     "logout_all_sessions",
+    "toggle_favourite_channel",
+    "toggle_favourite_video",
+    "create_favourite_list",
+    "delete_favourite_list",
+    "add_video_to_favourite_list",
+    "remove_video_from_favourite_list",
 }
 ADMIN_ONLY_GET_ENDPOINTS = {
     "google_login",
@@ -6026,6 +6399,19 @@ def index():
         ).fetchone()
 
     subs = [subscription_view(row) for row in rows]
+    fav_channel_ids = favourite_channel_ids()
+    for sub in subs:
+        sub["is_favourite"] = sub.get("channel_id") in fav_channel_ids
+
+    if setting_bool("pin_favourites_to_top", True):
+        subs.sort(
+            key=lambda sub: (
+                0 if sub.get("active") else 1,
+                0 if sub.get("is_favourite") else 1,
+                str(sub.get("title") or "").lower(),
+            )
+        )
+
     defaults = default_history_settings()
     pinchflat_container = pinchflat_container_status()
     profile_status = pinchflat_profile_status()
@@ -6131,6 +6517,7 @@ def index():
         new_subscription_policy=new_subscription_policy(),
         unsubscribe_policy=unsubscribe_policy(),
         show_removed=setting_bool("show_removed", False),
+        pin_favourites_to_top=setting_bool("pin_favourites_to_top", True),
         auto_retry=setting_bool("auto_retry", True),
         auto_create_media_profile=setting_bool("auto_create_media_profile", True),
         api_stats=api_stats,
@@ -6743,6 +7130,10 @@ def save_general_settings():
     set_setting(
         "show_removed",
         "1" if request.form.get("show_removed") == "1" else "0",
+    )
+    set_setting(
+        "pin_favourites_to_top",
+        "1" if request.form.get("pin_favourites_to_top") == "1" else "0",
     )
 
     log_activity(
@@ -7520,6 +7911,305 @@ def download_status(job_id):
     return jsonify({"ok": True, "job": job})
 
 
+@app.get("/api/favourites")
+def get_favourites():
+    user_id = current_user_id()
+    if not user_id:
+        return jsonify({"ok": False, "error": "Sign in first."}), 401
+
+    with db() as conn:
+        channels = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT fc.*,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM subscriptions s
+                           WHERE s.channel_id = fc.channel_id AND s.active = 1
+                       ) THEN 1 ELSE 0 END AS subscribed
+                FROM favourite_channels fc
+                WHERE fc.user_id = ?
+                ORDER BY fc.channel_title COLLATE NOCASE
+                """,
+                (user_id,),
+            ).fetchall()
+        ]
+        videos = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM saved_videos
+                WHERE user_id = ? AND favourite = 1
+                ORDER BY updated_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        ]
+        lists = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT vl.*, COUNT(vlm.saved_video_id) AS video_count
+                FROM video_lists vl
+                LEFT JOIN video_list_members vlm ON vlm.list_id = vl.id
+                WHERE vl.user_id = ?
+                GROUP BY vl.id
+                ORDER BY vl.name COLLATE NOCASE
+                """,
+                (user_id,),
+            ).fetchall()
+        ]
+        members = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT vlm.list_id, sv.*
+                FROM video_list_members vlm
+                JOIN video_lists vl ON vl.id = vlm.list_id
+                JOIN saved_videos sv ON sv.id = vlm.saved_video_id
+                WHERE vl.user_id = ?
+                ORDER BY vlm.added_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        ]
+
+    by_list = {}
+    for row in members:
+        by_list.setdefault(str(row["list_id"]), []).append(row)
+    for item in lists:
+        item["videos"] = by_list.get(str(item["id"]), [])
+
+    return jsonify(
+        {
+            "ok": True,
+            "channels": channels,
+            "videos": videos,
+            "lists": lists,
+        }
+    )
+
+
+@app.post("/api/favourites/channel/toggle")
+def toggle_favourite_channel():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    channel_id = str(payload.get("channel_id") or "").strip()
+    if not user_id or not channel_id:
+        return jsonify({"ok": False, "error": "Channel information is missing."}), 400
+
+    with db() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM favourite_channels WHERE user_id = ? AND channel_id = ?",
+            (user_id, channel_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "DELETE FROM favourite_channels WHERE user_id = ? AND channel_id = ?",
+                (user_id, channel_id),
+            )
+            favourite = False
+        else:
+            sub = conn.execute(
+                "SELECT title, channel_url, thumbnail_url FROM subscriptions WHERE channel_id = ?",
+                (channel_id,),
+            ).fetchone()
+            title = str(payload.get("channel_title") or (sub["title"] if sub else "YouTube channel")).strip()
+            url = str(payload.get("channel_url") or (sub["channel_url"] if sub else f"https://www.youtube.com/channel/{channel_id}")).strip()
+            thumb = str(payload.get("thumbnail_url") or (sub["thumbnail_url"] if sub else "")).strip()
+            conn.execute(
+                """
+                INSERT INTO favourite_channels (
+                    user_id, channel_id, channel_title, channel_url,
+                    thumbnail_url, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, channel_id, title[:300], url, thumb, now_iso()),
+            )
+            favourite = True
+
+    return jsonify({"ok": True, "favourite": favourite, "channel_id": channel_id})
+
+
+@app.post("/api/favourites/video/toggle")
+def toggle_favourite_video():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    if not user_id:
+        return jsonify({"ok": False, "error": "Sign in first."}), 401
+
+    item = normalise_saved_video(payload)
+    with db() as conn:
+        existing = conn.execute(
+            "SELECT * FROM saved_videos WHERE user_id = ? AND video_id = ?",
+            (user_id, item["video_id"]),
+        ).fetchone()
+    new_state = not bool(existing and existing["favourite"])
+    saved = upsert_saved_video(user_id, item, favourite=new_state)
+    return jsonify({"ok": True, "favourite": bool(saved["favourite"]), "video_id": item["video_id"]})
+
+
+@app.post("/api/favourites/lists/create")
+def create_favourite_list():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name") or "").strip()
+    if not user_id or not name:
+        return jsonify({"ok": False, "error": "Enter a list name."}), 400
+    if len(name) > 80:
+        return jsonify({"ok": False, "error": "List names are limited to 80 characters."}), 400
+    try:
+        with db() as conn:
+            cur = conn.execute(
+                "INSERT INTO video_lists (user_id, name, created_at) VALUES (?, ?, ?)",
+                (user_id, name, now_iso()),
+            )
+            list_id = cur.lastrowid
+    except sqlite3.IntegrityError:
+        return jsonify({"ok": False, "error": "A list with that name already exists."}), 400
+    return jsonify({"ok": True, "list": {"id": list_id, "name": name, "video_count": 0, "videos": []}})
+
+
+@app.post("/api/favourites/lists/delete")
+def delete_favourite_list():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    try:
+        list_id = int(payload.get("list_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid list."}), 400
+    with db() as conn:
+        owned = conn.execute(
+            "SELECT id FROM video_lists WHERE id = ? AND user_id = ?",
+            (list_id, user_id),
+        ).fetchone()
+        if not owned:
+            return jsonify({"ok": False, "error": "List not found."}), 404
+        conn.execute("DELETE FROM video_list_members WHERE list_id = ?", (list_id,))
+        conn.execute("DELETE FROM video_lists WHERE id = ?", (list_id,))
+    return jsonify({"ok": True})
+
+
+@app.post("/api/favourites/lists/add")
+def add_video_to_favourite_list():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    try:
+        list_id = int(payload.get("list_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Choose a list."}), 400
+    with db() as conn:
+        owned = conn.execute(
+            "SELECT id FROM video_lists WHERE id = ? AND user_id = ?",
+            (list_id, user_id),
+        ).fetchone()
+    if not owned:
+        return jsonify({"ok": False, "error": "List not found."}), 404
+    saved = upsert_saved_video(user_id, payload, favourite=None)
+    with db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO video_list_members (list_id, saved_video_id, added_at) VALUES (?, ?, ?)",
+            (list_id, saved["id"], now_iso()),
+        )
+    return jsonify({"ok": True})
+
+
+@app.post("/api/favourites/lists/remove")
+def remove_video_from_favourite_list():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    try:
+        list_id = int(payload.get("list_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid list."}), 400
+    video_id = str(payload.get("video_id") or "").strip()
+    with db() as conn:
+        row = conn.execute(
+            """
+            SELECT sv.id
+            FROM saved_videos sv
+            JOIN video_lists vl ON vl.user_id = sv.user_id
+            WHERE sv.user_id = ? AND sv.video_id = ? AND vl.id = ?
+            """,
+            (user_id, video_id, list_id),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "DELETE FROM video_list_members WHERE list_id = ? AND saved_video_id = ?",
+                (list_id, row["id"]),
+            )
+    return jsonify({"ok": True})
+
+
+@app.post("/api/favourites/video/download")
+def download_favourite_video():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    video_id = str(payload.get("video_id") or "").strip()
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM saved_videos WHERE user_id = ? AND video_id = ?",
+            (user_id, video_id),
+        ).fetchone()
+    if not row:
+        return jsonify({"ok": False, "error": "Saved video not found."}), 404
+    job_id, created = enqueue_download(
+        row["video_url"], source_type="favourite", video_id=row["video_id"],
+        title=row["title"], channel_title=row["channel_title"],
+    )
+    return jsonify({"ok": True, "job_id": job_id, "queued": created})
+
+
+@app.post("/api/favourites/lists/download")
+def download_favourite_list():
+    user_id = current_user_id()
+    payload = request.get_json(silent=True) or {}
+    try:
+        list_id = int(payload.get("list_id"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid list."}), 400
+    with db() as conn:
+        list_row = conn.execute(
+            "SELECT * FROM video_lists WHERE id = ? AND user_id = ?",
+            (list_id, user_id),
+        ).fetchone()
+        videos = conn.execute(
+            """
+            SELECT sv.* FROM video_list_members vlm
+            JOIN saved_videos sv ON sv.id = vlm.saved_video_id
+            WHERE vlm.list_id = ? AND sv.user_id = ?
+            ORDER BY vlm.added_at ASC
+            """,
+            (list_id, user_id),
+        ).fetchall()
+    if not list_row:
+        return jsonify({"ok": False, "error": "List not found."}), 404
+    queued = 0
+    skipped = 0
+    for row in videos:
+        _job_id, created = enqueue_download(
+            row["video_url"], source_type=f"favourite_list:{list_row['name']}",
+            video_id=row["video_id"], title=row["title"], channel_title=row["channel_title"],
+        )
+        queued += 1 if created else 0
+        skipped += 0 if created else 1
+    return jsonify({"ok": True, "queued": queued, "skipped": skipped})
+
+
+@app.post("/api/youtube/subscribe")
+def subscribe_to_youtube_channel():
+    payload = request.get_json(silent=True) or {}
+    channel_id = str(payload.get("channel_id") or "").strip()
+    if not channel_id:
+        return jsonify({"ok": False, "error": "Channel ID is missing."}), 400
+    try:
+        youtube_subscribe(channel_id)
+        refresh_subscriptions()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
 @app.get("/api/discover")
 def discover_videos():
     kind = request.args.get("kind", "videos").strip().lower()
@@ -7531,6 +8221,7 @@ def discover_videos():
     try:
         if kind == "top100":
             result = youtube_top100_channels(force=refresh)
+            result["results"] = annotate_favourites(result.get("results", []))
             stats = api_usage_stats()
             return jsonify(
                 {
@@ -7541,6 +8232,7 @@ def discover_videos():
             )
 
         result = youtube_discovery_results(kind=kind, limit=24)
+        result["results"] = annotate_favourites(result.get("results", []))
         return jsonify({"ok": True, **result})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
