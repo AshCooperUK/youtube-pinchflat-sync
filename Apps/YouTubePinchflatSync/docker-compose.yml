@@ -49,7 +49,7 @@ services:
       GOOGLE_CLIENT_SECRET: ""
       GOOGLE_REDIRECT_URI: ""
       YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube.readonly
-      PINCHFLAT_URL: http://pinchflat:8945
+      PINCHFLAT_URL: http://butane.grovefarm:8945
       PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
       PINCHFLAT_MEDIA_PROFILE_ID: "1"
       PINCHFLAT_BASIC_AUTH_USERNAME: ""
@@ -113,17 +113,17 @@ x-casaos:
   tagline:
     en_US: Sync your YouTube subscriptions into Pinchflat automatically.
   description:
-    en_US: Reads your YouTube subscriptions with Google OAuth, creates Pinchflat sources and lets you choose how far back Pinchflat should download videos.
+    en_US: Reads your YouTube subscriptions with Google OAuth and lets each source have its own Pinchflat download cutoff.
   author: AshCooperUK
   developer: AshCooperUK
   category: Media
   architectures:
     - amd64
     - arm64
-  version: "1.1.0"
+  version: "1.2.0"
   update_at: "2026-09-13"
   release_notes:
-    en_US: Adds ZimaOS tile metadata, GitHub container publishing and dashboard-based download history selection.
+    en_US: Adds per-source download ranges, a refresh-only workflow and hides OAuth configuration after Google connects.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
