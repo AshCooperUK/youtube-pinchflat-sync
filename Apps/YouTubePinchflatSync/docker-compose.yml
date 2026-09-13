@@ -53,6 +53,7 @@ services:
       YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube
       PINCHFLAT_URL: http://butane.grovefarm:8945
       PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
+      PINCHFLAT_DB_PATH: /pinchflat-config/pinchflat.db
       PINCHFLAT_MEDIA_PROFILE_ID: "1"
       PINCHFLAT_BASIC_AUTH_USERNAME: ""
       PINCHFLAT_BASIC_AUTH_PASSWORD: ""
@@ -74,6 +75,10 @@ services:
       - type: bind
         source: /media/Storage/Media/YouTube
         target: /downloads
+      - type: bind
+        source: /media/NVME-Storage/AppData/pinchflat
+        target: /pinchflat-config
+        read_only: true
     labels:
       icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
     x-casaos:
@@ -88,6 +93,9 @@ services:
         - container: /downloads
           description:
             en_US: Shared YouTube media library used for storage statistics and direct downloads
+        - container: /pinchflat-config
+          description:
+            en_US: Read-only Pinchflat database used to reconcile removed sources
       envs:
         - container: APP_URL
           description:
@@ -134,7 +142,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.8.5"
+  version: "1.8.6"
   update_at: "2026-09-13"
   release_notes:
     en_US: Adds native username and password authentication, optional authenticator 2FA, recovery codes, user roles, session security, login throttling and account management.

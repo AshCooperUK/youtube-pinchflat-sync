@@ -30,7 +30,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.8.5"
+VERSION = "1.8.6"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -63,6 +63,9 @@ PINCHFLAT_PUBLIC_URL = os.getenv(
     "PINCHFLAT_PUBLIC_URL",
     "http://localhost:8945",
 ).rstrip("/")
+PINCHFLAT_DB_PATH = Path(
+    os.getenv("PINCHFLAT_DB_PATH", "/pinchflat-config/pinchflat.db")
+)
 PINCHFLAT_USER = os.getenv("PINCHFLAT_BASIC_AUTH_USERNAME", "")
 PINCHFLAT_PASS = os.getenv("PINCHFLAT_BASIC_AUTH_PASSWORD", "")
 
@@ -327,6 +330,20 @@ def init_db():
                 finished_at TEXT
             );
             """
+        )
+
+        ensure_column(conn, "cleanup_jobs", "source_id", "TEXT")
+        ensure_column(
+            conn,
+            "cleanup_jobs",
+            "delete_files",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        ensure_column(
+            conn,
+            "cleanup_jobs",
+            "source_deleted",
+            "INTEGER NOT NULL DEFAULT 0",
         )
 
         defaults = {
@@ -886,6 +903,8 @@ def schedule_unsubscribe_cleanup(
     channel_id,
     channel_title,
     output_template=None,
+    source_id=None,
+    delete_files=True,
     delay_seconds=300,
     checks=6,
 ):
@@ -903,23 +922,42 @@ def schedule_unsubscribe_cleanup(
                 channel_id,
                 channel_title,
                 output_template,
+                source_id,
+                delete_files,
+                source_deleted,
                 due_at,
                 checks_remaining,
                 interval_seconds,
                 status,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, 300, 'pending', ?)
             """,
             (
                 channel_id,
                 channel_title,
                 output_template or EMBY_OUTPUT_PATH_TEMPLATE,
+                str(source_id) if source_id else None,
+                1 if delete_files else 0,
                 time.time() + max(1, int(delay_seconds)),
                 max(1, int(checks)),
-                300,
                 now_iso(),
             ),
+        )
+
+
+def clear_subscription_pinchflat_link(channel_id, source_id=None):
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET pinchflat_added = 0,
+                pinchflat_source_id = NULL,
+                last_error = NULL,
+                retry_count = 0
+            WHERE channel_id = ?
+            """,
+            (channel_id,),
         )
 
 
@@ -940,107 +978,296 @@ def process_deferred_unsubscribe_cleanups():
         ).fetchall()
 
     processed = 0
-    for row in rows:
-        processed += 1
-        row = dict(row)
-        try:
-            deleted_folder = delete_subscription_download_folder(
-                row["channel_title"],
-                row.get("output_template"),
-            )
 
-            remaining = max(0, int(row["checks_remaining"] or 1) - 1)
-            if remaining > 0:
+    for job in rows:
+        processed += 1
+        job = dict(job)
+
+        try:
+            with db() as conn:
+                sub = conn.execute(
+                    "SELECT * FROM subscriptions WHERE channel_id = ?",
+                    (job["channel_id"],),
+                ).fetchone()
+
+            sub = dict(sub) if sub else None
+
+            if sub and sub.get("active"):
                 with db() as conn:
                     conn.execute(
                         """
                         UPDATE cleanup_jobs
-                        SET due_at = ?,
-                            checks_remaining = ?,
+                        SET status = 'cancelled',
+                            finished_at = ?,
                             last_error = NULL
                         WHERE id = ?
                         """,
-                        (
-                            time.time() + int(row["interval_seconds"] or 300),
-                            remaining,
-                            row["id"],
-                        ),
+                        (now_iso(), job["id"]),
                     )
-            else:
+                continue
+
+            source_id = job.get("source_id")
+            if not source_id and sub:
+                source_id = resolve_pinchflat_source_id(sub)
+
+            delete_files = bool(job.get("delete_files"))
+            source_gone = not source_id
+
+            if source_id:
+                if pinchflat_source_exists(source_id):
+                    if sub:
+                        removal_row = dict(sub)
+                        removal_row["pinchflat_source_id"] = str(source_id)
+                        removal_row["pinchflat_added"] = 1
+                        prepare_pinchflat_source_for_removal(removal_row)
+
+                    delete_pinchflat_source(
+                        source_id,
+                        delete_files=delete_files,
+                    )
+
+                source_gone = not pinchflat_source_exists(source_id)
+
+            if source_gone:
+                clear_subscription_pinchflat_link(
+                    job["channel_id"],
+                    source_id,
+                )
+
+            deleted_folder = None
+            if delete_files:
+                deleted_folder = delete_subscription_download_folder(
+                    job["channel_title"],
+                    job.get("output_template"),
+                )
+
+            remaining = max(0, int(job["checks_remaining"] or 1) - 1)
+
+            # Keep source reconciliation alive until Pinchflat really deletes
+            # the source. File follow-up remains limited to the 30-minute
+            # cleanup window.
+            if not source_gone:
+                next_remaining = max(1, remaining)
                 with db() as conn:
                     conn.execute(
                         """
                         UPDATE cleanup_jobs
-                        SET status = 'complete',
-                            checks_remaining = 0,
-                            last_error = NULL,
-                            finished_at = ?
-                        WHERE id = ?
-                        """,
-                        (now_iso(), row["id"]),
-                    )
-
-            log_activity(
-                "cleanup",
-                "Post-unsubscribe cleanup check",
-                (
-                    f"{row['channel_title']}: "
-                    + (
-                        f"removed leftover folder {deleted_folder}."
-                        if deleted_folder
-                        else "no leftover files found."
-                    )
-                    + (
-                        f" {remaining} follow-up check(s) remain."
-                        if remaining
-                        else " Cleanup window complete."
-                    )
-                ),
-                "success",
-                row["channel_id"],
-            )
-
-        except Exception as exc:
-            remaining = max(0, int(row["checks_remaining"] or 1) - 1)
-            with db() as conn:
-                if remaining > 0:
-                    conn.execute(
-                        """
-                        UPDATE cleanup_jobs
-                        SET due_at = ?,
+                        SET source_id = ?,
+                            source_deleted = 0,
+                            due_at = ?,
                             checks_remaining = ?,
                             last_error = ?
                         WHERE id = ?
                         """,
                         (
-                            time.time() + int(row["interval_seconds"] or 300),
-                            remaining,
-                            str(exc)[:1000],
-                            row["id"],
+                            str(source_id),
+                            time.time() + 300,
+                            next_remaining,
+                            "Pinchflat source removal is still in progress.",
+                            job["id"],
                         ),
                     )
-                else:
+
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET pinchflat_added = 1,
+                            pinchflat_source_id = ?,
+                            download_enabled = 0,
+                            last_error = ?
+                        WHERE channel_id = ?
+                        """,
+                        (
+                            str(source_id),
+                            "Pinchflat source removal is still in progress.",
+                            job["channel_id"],
+                        ),
+                    )
+
+            elif remaining > 0:
+                with db() as conn:
                     conn.execute(
                         """
                         UPDATE cleanup_jobs
-                        SET status = 'failed',
+                        SET source_id = ?,
+                            source_deleted = 1,
+                            due_at = ?,
+                            checks_remaining = ?,
+                            last_error = NULL
+                        WHERE id = ?
+                        """,
+                        (
+                            str(source_id) if source_id else None,
+                            time.time() + 300,
+                            remaining,
+                            job["id"],
+                        ),
+                    )
+
+            else:
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE cleanup_jobs
+                        SET source_id = ?,
+                            source_deleted = 1,
+                            status = 'complete',
                             checks_remaining = 0,
-                            last_error = ?,
+                            last_error = NULL,
                             finished_at = ?
                         WHERE id = ?
                         """,
-                        (str(exc)[:1000], now_iso(), row["id"]),
+                        (
+                            str(source_id) if source_id else None,
+                            now_iso(),
+                            job["id"],
+                        ),
                     )
 
             log_activity(
                 "cleanup",
-                "Post-unsubscribe cleanup error",
-                f"{row['channel_title']}: {exc}",
+                "Unsubscribe reconciliation",
+                (
+                    f"{job['channel_title']}: Pinchflat source "
+                    f"{'removed' if source_gone else 'still pending removal'}."
+                    + (
+                        f" Removed leftover folder {deleted_folder}."
+                        if deleted_folder
+                        else ""
+                    )
+                ),
+                "success" if source_gone else "warning",
+                job["channel_id"],
+            )
+
+        except Exception as exc:
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE cleanup_jobs
+                    SET due_at = ?,
+                        last_error = ?
+                    WHERE id = ?
+                    """,
+                    (time.time() + 300, str(exc)[:1000], job["id"]),
+                )
+
+            log_activity(
+                "cleanup",
+                "Unsubscribe reconciliation error",
+                f"{job['channel_title']}: {exc}",
                 "error",
-                row["channel_id"],
+                job["channel_id"],
             )
 
     return {"processed": processed}
+
+
+def reconcile_removed_pinchflat_sources():
+    """
+    Ensure inactive YouTube subscriptions do not remain Pinchflat sources.
+
+    The read-only Pinchflat DB fallback also finds orphan sources left by older
+    app versions which cleared pinchflat_source_id before deletion completed.
+    """
+    policy = unsubscribe_policy()
+    if policy not in {"remove", "remove_delete"}:
+        return {"checked": 0, "scheduled": 0}
+
+    delete_files = policy == "remove_delete"
+
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM subscriptions
+            WHERE active = 0
+              AND removed_at IS NOT NULL
+            ORDER BY removed_at DESC
+            LIMIT 500
+            """
+        ).fetchall()
+
+    checked = 0
+    scheduled = 0
+
+    for row in rows:
+        checked += 1
+        row = dict(row)
+        source_id = resolve_pinchflat_source_id(row)
+
+        if not source_id:
+            clear_subscription_pinchflat_link(row["channel_id"])
+            continue
+
+        with db() as conn:
+            pending = conn.execute(
+                """
+                SELECT id
+                FROM cleanup_jobs
+                WHERE channel_id = ?
+                  AND status = 'pending'
+                LIMIT 1
+                """,
+                (row["channel_id"],),
+            ).fetchone()
+
+        if pending:
+            continue
+
+        output_template = media_profile_settings(
+            subscription_media_profile_id(row)
+        ).get(
+            "output_path_template",
+            EMBY_OUTPUT_PATH_TEMPLATE,
+        )
+
+        removal_row = dict(row)
+        removal_row["pinchflat_source_id"] = str(source_id)
+        removal_row["pinchflat_added"] = 1
+
+        prepare_pinchflat_source_for_removal(removal_row)
+        source_gone = delete_pinchflat_source(
+            source_id,
+            delete_files=delete_files,
+        )
+
+        if source_gone:
+            clear_subscription_pinchflat_link(
+                row["channel_id"],
+                source_id,
+            )
+        else:
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET pinchflat_added = 1,
+                        pinchflat_source_id = ?,
+                        download_enabled = 0,
+                        last_error = ?
+                    WHERE channel_id = ?
+                    """,
+                    (
+                        str(source_id),
+                        "Pinchflat source removal is in progress.",
+                        row["channel_id"],
+                    ),
+                )
+
+        schedule_unsubscribe_cleanup(
+            row["channel_id"],
+            row.get("title") or row["channel_id"],
+            output_template,
+            source_id=source_id,
+            delete_files=delete_files,
+            delay_seconds=300,
+            checks=6,
+        )
+        scheduled += 1
+
+    return {"checked": checked, "scheduled": scheduled}
+
 
 
 def prepare_pinchflat_source_for_removal(row):
@@ -1049,7 +1276,7 @@ def prepare_pinchflat_source_for_removal(row):
     remove it. Existing work already queued inside Pinchflat is handled by the
     delayed cleanup window.
     """
-    source_id = row.get("pinchflat_source_id")
+    source_id = resolve_pinchflat_source_id(row)
     if not source_id:
         return
 
@@ -2293,12 +2520,17 @@ def refresh_subscriptions():
                     EMBY_OUTPUT_PATH_TEMPLATE,
                 )
 
-                if row.get("pinchflat_added") and row.get("pinchflat_source_id"):
-                    if delete_files:
-                        prepare_pinchflat_source_for_removal(row)
+                source_id = resolve_pinchflat_source_id(row)
+                source_gone = not source_id
 
-                    delete_pinchflat_source(
-                        row["pinchflat_source_id"],
+                if source_id:
+                    removal_row = dict(row)
+                    removal_row["pinchflat_source_id"] = str(source_id)
+                    removal_row["pinchflat_added"] = 1
+
+                    prepare_pinchflat_source_for_removal(removal_row)
+                    source_gone = delete_pinchflat_source(
+                        source_id,
                         delete_files=delete_files,
                     )
 
@@ -2308,27 +2540,39 @@ def refresh_subscriptions():
                         row.get("title") or row["channel_id"],
                         output_template,
                     )
-                    schedule_unsubscribe_cleanup(
-                        row["channel_id"],
-                        row.get("title") or row["channel_id"],
-                        output_template,
-                    )
 
-                with db() as conn:
-                    conn.execute(
-                        """
-                        UPDATE subscriptions
-                        SET pinchflat_added = 0,
-                            pinchflat_source_id = NULL,
-                            download_enabled = CASE
-                                WHEN ? = 1 THEN 0
-                                ELSE download_enabled
-                            END,
-                            last_error = NULL
-                        WHERE channel_id = ?
-                        """,
-                        (1 if delete_files else 0, row["channel_id"]),
+                if source_gone:
+                    clear_subscription_pinchflat_link(
+                        row["channel_id"],
+                        source_id,
                     )
+                else:
+                    with db() as conn:
+                        conn.execute(
+                            """
+                            UPDATE subscriptions
+                            SET pinchflat_added = 1,
+                                pinchflat_source_id = ?,
+                                download_enabled = 0,
+                                last_error = ?
+                            WHERE channel_id = ?
+                            """,
+                            (
+                                str(source_id),
+                                "Pinchflat source removal is in progress.",
+                                row["channel_id"],
+                            ),
+                        )
+
+                schedule_unsubscribe_cleanup(
+                    row["channel_id"],
+                    row.get("title") or row["channel_id"],
+                    output_template,
+                    source_id=source_id,
+                    delete_files=delete_files,
+                    delay_seconds=300,
+                    checks=6,
+                )
 
                 if delete_files:
                     log_activity(
@@ -2398,6 +2642,79 @@ def refresh_subscriptions():
     }
 
 
+def pinchflat_db_readonly():
+    if not PINCHFLAT_DB_PATH.exists():
+        return None
+
+    try:
+        conn = sqlite3.connect(
+            f"file:{PINCHFLAT_DB_PATH}?mode=ro",
+            uri=True,
+            timeout=5,
+        )
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception:
+        return None
+
+
+def find_pinchflat_source_id(channel_id, channel_url=None):
+    conn = pinchflat_db_readonly()
+    if conn is None:
+        return None
+
+    try:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM sources
+            WHERE collection_id = ?
+               OR original_url = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (channel_id, channel_url or ""),
+        ).fetchone()
+        return str(row["id"]) if row else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def pinchflat_source_exists_in_db(source_id):
+    if not source_id:
+        return False
+
+    conn = pinchflat_db_readonly()
+    if conn is None:
+        return None
+
+    try:
+        row = conn.execute(
+            "SELECT id FROM sources WHERE id = ? LIMIT 1",
+            (str(source_id),),
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def resolve_pinchflat_source_id(row):
+    source_id = row.get("pinchflat_source_id")
+    if source_id:
+        state = pinchflat_source_exists_in_db(source_id)
+        if state is not False:
+            return str(source_id)
+
+    return find_pinchflat_source_id(
+        row.get("channel_id"),
+        row.get("channel_url"),
+    )
+
+
 def pinchflat_session():
     session_obj = requests.Session()
 
@@ -2415,6 +2732,10 @@ def pinchflat_source_exists(source_id):
     if not source_id:
         return False
 
+    db_state = pinchflat_source_exists_in_db(source_id)
+    if db_state is not None:
+        return db_state
+
     response = pinchflat_session().get(
         f"{PINCHFLAT_URL}/sources/{source_id}/edit",
         timeout=30,
@@ -2425,7 +2746,6 @@ def pinchflat_source_exists(source_id):
         return False
 
     if response.status_code in (301, 302, 303):
-        # A normal auth or canonical redirect still means the route exists.
         return True
 
     response.raise_for_status()
@@ -3261,10 +3581,25 @@ def update_pinchflat_source_settings(
 
 
 def delete_pinchflat_source(source_id, delete_files=False):
-    """Delete a Pinchflat source through its normal HTML form."""
+    """
+    Start Pinchflat's normal asynchronous source deletion.
+
+    True means the source is already gone. False means Pinchflat accepted the
+    deletion request but its background SourceDeletionWorker still owns it.
+    """
+    if not source_id or not pinchflat_source_exists(source_id):
+        return True
+
     session_obj = pinchflat_session()
     source_url = f"{PINCHFLAT_URL}/sources/{source_id}"
-    response = session_obj.get(source_url, timeout=30)
+    response = session_obj.get(
+        source_url,
+        timeout=30,
+        allow_redirects=False,
+    )
+
+    if response.status_code == 404:
+        return True
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -3282,10 +3617,10 @@ def delete_pinchflat_source(source_id, delete_files=False):
             delete_form = form
             break
 
+    # When Pinchflat has already marked a source for deletion its delete form
+    # can disappear while the background worker is still running.
     if delete_form is None:
-        raise RuntimeError(
-            "Pinchflat delete form was not found for this source."
-        )
+        return not pinchflat_source_exists(source_id)
 
     payload = scrape_form_payload(delete_form)
     payload["_method"] = "delete"
@@ -3298,24 +3633,28 @@ def delete_pinchflat_source(source_id, delete_files=False):
         else f"{PINCHFLAT_URL}{action if action.startswith('/') else '/' + action}"
     )
 
-    delete_response = session_obj.post(
+    result = session_obj.post(
         target,
         data=payload,
         timeout=180,
         allow_redirects=False,
     )
 
-    if delete_response.status_code in (301, 302, 303):
+    if result.status_code == 404:
         return True
 
-    text = " ".join(
-        BeautifulSoup(delete_response.text, "html.parser").stripped_strings
+    if result.status_code in (301, 302, 303):
+        return not pinchflat_source_exists(source_id)
+
+    body = " ".join(
+        BeautifulSoup(result.text, "html.parser").stripped_strings
     )
     raise RuntimeError(
         f"Pinchflat could not remove source {source_id}. "
-        f"HTTP {delete_response.status_code}. "
-        f"Response: {text[:300] or 'No error text returned.'}"
+        f"HTTP {result.status_code}. "
+        f"Response: {body[:300] or 'No error text returned.'}"
     )
+
 
 
 def pinchflat_profiles():
@@ -5466,38 +5805,54 @@ def unsubscribe_from_youtube(channel_id):
                 EMBY_OUTPUT_PATH_TEMPLATE,
             )
 
-            if delete_files:
+            source_id = resolve_pinchflat_source_id(row_dict)
+            source_gone = not source_id
+
+            if source_id:
+                row_dict["pinchflat_source_id"] = str(source_id)
+                row_dict["pinchflat_added"] = 1
                 prepare_pinchflat_source_for_removal(row_dict)
 
-            delete_pinchflat_source(
-                row_dict["pinchflat_source_id"],
-                delete_files=delete_files,
-            )
+                source_gone = delete_pinchflat_source(
+                    source_id,
+                    delete_files=delete_files,
+                )
 
             if delete_files:
                 delete_subscription_download_folder(
                     row_dict.get("title") or channel_id,
                     output_template,
                 )
-                schedule_unsubscribe_cleanup(
-                    channel_id,
-                    row_dict.get("title") or channel_id,
-                    output_template,
-                )
-            with db() as conn:
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET pinchflat_added = 0,
-                        pinchflat_source_id = NULL,
-                        download_enabled = CASE
-                            WHEN ? = 1 THEN 0
-                            ELSE download_enabled
-                        END
-                    WHERE channel_id = ?
-                    """,
-                    (1 if delete_files else 0, channel_id),
-                )
+
+            if source_gone:
+                clear_subscription_pinchflat_link(channel_id, source_id)
+            else:
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET pinchflat_added = 1,
+                            pinchflat_source_id = ?,
+                            download_enabled = 0,
+                            last_error = ?
+                        WHERE channel_id = ?
+                        """,
+                        (
+                            str(source_id),
+                            "Pinchflat source removal is in progress.",
+                            channel_id,
+                        ),
+                    )
+
+            schedule_unsubscribe_cleanup(
+                channel_id,
+                row_dict.get("title") or channel_id,
+                output_template,
+                source_id=source_id,
+                delete_files=delete_files,
+                delay_seconds=300,
+                checks=6,
+            )
 
         log_activity(
             "youtube",
@@ -5747,6 +6102,13 @@ scheduler.add_job(
     "interval",
     minutes=1,
     id="unsubscribe-cleanup",
+    max_instances=1,
+)
+scheduler.add_job(
+    reconcile_removed_pinchflat_sources,
+    "interval",
+    minutes=5,
+    id="removed-source-reconcile",
     max_instances=1,
 )
 scheduler.start()

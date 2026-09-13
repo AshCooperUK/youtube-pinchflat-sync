@@ -2,6 +2,20 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.8.6
+
+Authoritative Pinchflat source removal release.
+
+- Unsubscribing from YouTube now keeps the Pinchflat source link until Pinchflat has really removed the source.
+- Before deletion, the app disables Download Media on the source so Pinchflat dequeues pending download tasks.
+- The app then starts Pinchflat's normal asynchronous source deletion.
+- Source deletion is verified rather than treating Pinchflat's initial redirect as completion.
+- Removed subscriptions are reconciled with Pinchflat every five minutes until the source disappears.
+- Follow-up cleanup continues removing files which reappear after an already-running download completes.
+- Adds a read-only Pinchflat database mount so the app can recover orphaned source IDs left by older releases.
+- Older orphaned Pinchflat sources are matched by YouTube channel ID and removed automatically when the selected unsubscribe policy removes sources.
+- The app does not write directly to Pinchflat's database.
+
 ## Version 1.8.5
 
 Canonical URL and fresh-install Google OAuth fix.
