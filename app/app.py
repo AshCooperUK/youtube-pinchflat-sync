@@ -30,7 +30,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -2008,6 +2008,8 @@ def refresh_subscriptions():
     policy = new_subscription_policy()
 
     new_count = 0
+    reactivated_count = 0
+    reactivated_rows = []
     removed_rows = []
 
     with db() as conn:
@@ -2030,7 +2032,7 @@ def refresh_subscriptions():
         for sub in subs:
             existing = conn.execute(
                 """
-                SELECT channel_id
+                SELECT *
                 FROM subscriptions
                 WHERE channel_id = ?
                 """,
@@ -2073,27 +2075,97 @@ def refresh_subscriptions():
                     ),
                 )
             else:
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET title = ?,
-                        channel_url = ?,
-                        subscribed_at = ?,
-                        youtube_subscription_id = ?,
-                        thumbnail_url = ?,
-                        active = 1,
-                        removed_at = NULL
-                    WHERE channel_id = ?
-                    """,
-                    (
-                        sub["title"],
-                        sub["channel_url"],
-                        sub["subscribed_at"],
-                        sub.get("youtube_subscription_id"),
-                        sub.get("thumbnail_url", ""),
-                        sub["channel_id"],
-                    ),
-                )
+                was_inactive = not bool(existing["active"])
+
+                if was_inactive:
+                    reactivated_count += 1
+                    enabled = 1 if policy == "auto_enable" else 0
+                    needs_review = 1 if policy == "review" else 0
+
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET title = ?,
+                            channel_url = ?,
+                            subscribed_at = ?,
+                            youtube_subscription_id = ?,
+                            thumbnail_url = ?,
+                            active = 1,
+                            removed_at = NULL,
+                            download_enabled = ?,
+                            needs_review = ?,
+                            last_error = NULL,
+                            retry_count = 0
+                        WHERE channel_id = ?
+                        """,
+                        (
+                            sub["title"],
+                            sub["channel_url"],
+                            sub["subscribed_at"],
+                            sub.get("youtube_subscription_id"),
+                            sub.get("thumbnail_url", ""),
+                            enabled,
+                            needs_review,
+                            sub["channel_id"],
+                        ),
+                    )
+
+                    # A re-subscribe must cancel the delayed cleanup window
+                    # created by a previous remove+delete action.
+                    conn.execute(
+                        """
+                        UPDATE cleanup_jobs
+                        SET status = 'cancelled',
+                            finished_at = ?,
+                            last_error = NULL
+                        WHERE channel_id = ?
+                          AND status = 'pending'
+                        """,
+                        (now_iso(), sub["channel_id"]),
+                    )
+
+                    restored = dict(existing)
+                    restored.update(
+                        {
+                            "title": sub["title"],
+                            "channel_url": sub["channel_url"],
+                            "subscribed_at": sub["subscribed_at"],
+                            "youtube_subscription_id": sub.get(
+                                "youtube_subscription_id"
+                            ),
+                            "thumbnail_url": sub.get("thumbnail_url", ""),
+                            "active": 1,
+                            "removed_at": None,
+                            "download_enabled": enabled,
+                            "needs_review": needs_review,
+                            "last_error": None,
+                            "retry_count": 0,
+                        }
+                    )
+                    reactivated_rows.append(restored)
+
+                else:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET title = ?,
+                            channel_url = ?,
+                            subscribed_at = ?,
+                            youtube_subscription_id = ?,
+                            thumbnail_url = ?,
+                            active = 1,
+                            removed_at = NULL
+                        WHERE channel_id = ?
+                        """,
+                        (
+                            sub["title"],
+                            sub["channel_url"],
+                            sub["subscribed_at"],
+                            sub.get("youtube_subscription_id"),
+                            sub.get("thumbnail_url", ""),
+                            sub["channel_id"],
+                        ),
+                    )
 
         for row in removed_rows:
             conn.execute(
@@ -2107,6 +2179,74 @@ def refresh_subscriptions():
             )
 
     policy_errors = 0
+
+    # Reconcile channels which have been subscribed to again. A source which
+    # was previously deleted from Pinchflat can leave a stale source ID in an
+    # older app database. If the source no longer exists, clear the stale link
+    # so the normal pending-source importer creates a fresh source.
+    for row in reactivated_rows:
+        try:
+            source_id = row.get("pinchflat_source_id")
+            source_added = bool(row.get("pinchflat_added"))
+
+            if source_added and source_id:
+                if pinchflat_source_exists(source_id):
+                    update_pinchflat_source_settings(
+                        source_id,
+                        cutoff=subscription_cutoff(row),
+                        download_enabled=bool(row["download_enabled"]),
+                        media_profile_id=subscription_media_profile_id(row),
+                    )
+                else:
+                    with db() as conn:
+                        conn.execute(
+                            """
+                            UPDATE subscriptions
+                            SET pinchflat_added = 0,
+                                pinchflat_source_id = NULL,
+                                last_error = NULL,
+                                retry_count = 0
+                            WHERE channel_id = ?
+                            """,
+                            (row["channel_id"],),
+                        )
+
+            elif source_added and not source_id:
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET pinchflat_added = 0,
+                            last_error = NULL,
+                            retry_count = 0
+                        WHERE channel_id = ?
+                        """,
+                        (row["channel_id"],),
+                    )
+
+            log_activity(
+                "youtube_refresh",
+                "YouTube subscription restored",
+                (
+                    f"{row.get('title') or row['channel_id']} was subscribed "
+                    "to again. Any previous cleanup job was cancelled."
+                ),
+                "success",
+                row["channel_id"],
+            )
+
+        except Exception as exc:
+            policy_errors += 1
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET last_error = ?,
+                        retry_count = retry_count + 1
+                    WHERE channel_id = ?
+                    """,
+                    (str(exc)[:1000], row["channel_id"]),
+                )
 
     for row in removed_rows:
         try:
@@ -2215,6 +2355,17 @@ def refresh_subscriptions():
             "success",
         )
 
+    if reactivated_count:
+        log_activity(
+            "youtube_refresh",
+            "Restored YouTube subscriptions",
+            (
+                f"Found {reactivated_count} channel(s) which were subscribed "
+                "to again."
+            ),
+            "success",
+        )
+
     if removed_rows:
         log_activity(
             "youtube_refresh",
@@ -2229,6 +2380,7 @@ def refresh_subscriptions():
     return {
         "total": len(subs),
         "new": new_count,
+        "reactivated": reactivated_count,
         "removed": len(removed_rows),
         "policy_errors": policy_errors,
     }
@@ -2245,6 +2397,42 @@ def pinchflat_session():
     )
 
     return session_obj
+
+
+def pinchflat_source_exists(source_id):
+    if not source_id:
+        return False
+
+    response = pinchflat_session().get(
+        f"{PINCHFLAT_URL}/sources/{source_id}/edit",
+        timeout=30,
+        allow_redirects=False,
+    )
+
+    if response.status_code == 404:
+        return False
+
+    if response.status_code in (301, 302, 303):
+        # A normal auth or canonical redirect still means the route exists.
+        return True
+
+    response.raise_for_status()
+    return True
+
+
+def clear_stale_pinchflat_link(channel_id):
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET pinchflat_added = 0,
+                pinchflat_source_id = NULL,
+                last_error = NULL,
+                retry_count = 0
+            WHERE channel_id = ?
+            """,
+            (channel_id,),
+        )
 
 
 def pinchflat_health():
@@ -3158,11 +3346,33 @@ def retry_failed_source_updates():
     for row in rows:
         attempted += 1
         try:
+            row_dict = dict(row)
+
+            if not pinchflat_source_exists(row_dict["pinchflat_source_id"]):
+                clear_stale_pinchflat_link(row_dict["channel_id"])
+
+                if not row_dict.get("needs_review"):
+                    _result, new_source_id = add_pinchflat_source(row_dict)
+                    with db() as conn:
+                        conn.execute(
+                            """
+                            UPDATE subscriptions
+                            SET pinchflat_added = 1,
+                                pinchflat_source_id = ?,
+                                last_error = NULL,
+                                retry_count = 0
+                            WHERE channel_id = ?
+                            """,
+                            (new_source_id, row_dict["channel_id"]),
+                        )
+                fixed += 1
+                continue
+
             update_pinchflat_source_settings(
-                row["pinchflat_source_id"],
-                cutoff=subscription_cutoff(row),
-                download_enabled=subscription_download_enabled(row),
-                media_profile_id=subscription_media_profile_id(row),
+                row_dict["pinchflat_source_id"],
+                cutoff=subscription_cutoff(row_dict),
+                download_enabled=subscription_download_enabled(row_dict),
+                media_profile_id=subscription_media_profile_id(row_dict),
             )
             with db() as conn:
                 conn.execute(
@@ -3172,7 +3382,7 @@ def retry_failed_source_updates():
                         retry_count = 0
                     WHERE channel_id = ?
                     """,
-                    (row["channel_id"],),
+                    (row_dict["channel_id"],),
                 )
             fixed += 1
         except Exception as exc:
@@ -3323,7 +3533,8 @@ def sync_once():
 
         message = (
             f"Found {refresh['total']} subscriptions. "
-            f"New {refresh['new']}. Removed {refresh['removed']}. "
+            f"New {refresh['new']}. Re-subscribed {refresh.get('reactivated', 0)}. "
+            f"Removed {refresh['removed']}. "
             f"Added {result['added']} Pinchflat sources. "
             f"Retry fixes {retry['fixed']}. "
             f"Emby Download queued {emby.get('queued', 0)}. "
@@ -4783,21 +4994,31 @@ def retry_subscription(channel_id):
         return redirect(url_for("index") + "#subscriptions")
 
     try:
-        if row["pinchflat_added"] and row["pinchflat_source_id"]:
+        row_dict = dict(row)
+
+        if row_dict["pinchflat_added"] and row_dict["pinchflat_source_id"]:
+            if not pinchflat_source_exists(row_dict["pinchflat_source_id"]):
+                clear_stale_pinchflat_link(channel_id)
+                row_dict["pinchflat_added"] = 0
+                row_dict["pinchflat_source_id"] = None
+
+        if row_dict["pinchflat_added"] and row_dict["pinchflat_source_id"]:
             update_pinchflat_source_settings(
-                row["pinchflat_source_id"],
-                cutoff=subscription_cutoff(row),
-                download_enabled=subscription_download_enabled(row),
-                media_profile_id=subscription_media_profile_id(row),
+                row_dict["pinchflat_source_id"],
+                cutoff=subscription_cutoff(row_dict),
+                download_enabled=subscription_download_enabled(row_dict),
+                media_profile_id=subscription_media_profile_id(row_dict),
             )
-        elif not row["needs_review"]:
-            _result, source_id = add_pinchflat_source(row)
+        elif not row_dict["needs_review"]:
+            _result, source_id = add_pinchflat_source(row_dict)
             with db() as conn:
                 conn.execute(
                     """
                     UPDATE subscriptions
                     SET pinchflat_added = 1,
-                        pinchflat_source_id = COALESCE(?, pinchflat_source_id)
+                        pinchflat_source_id = ?,
+                        last_error = NULL,
+                        retry_count = 0
                     WHERE channel_id = ?
                     """,
                     (source_id, channel_id),

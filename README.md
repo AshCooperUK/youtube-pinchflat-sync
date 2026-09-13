@@ -2,6 +2,19 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.8.2
+
+Re-subscribe recovery release.
+
+- Channels which were previously removed can now be subscribed to again cleanly.
+- Re-subscribing cancels any outstanding delayed file-cleanup job for that channel.
+- The app checks whether the previously stored Pinchflat source ID still exists.
+- A stale Pinchflat source ID is cleared automatically rather than producing `/sources/<id>/edit` 404 errors.
+- The next full sync recreates a fresh Pinchflat source when the old source was deleted.
+- The per-channel Retry button also detects a stale source ID and recreates the source immediately.
+- Automatic retry has the same stale-source recovery behaviour.
+- Re-subscribed channels follow the current New Subscription Behaviour setting.
+
 ## Version 1.8.1
 
 Unsubscribe cleanup and media-path maintenance release.
