@@ -17,7 +17,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -861,9 +861,34 @@ def update_pinchflat_source_settings(
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
-    form = soup.find("form")
-    if not form:
-        raise RuntimeError("Pinchflat edit form was not found.")
+
+    # Pinchflat pages can contain several forms, including the global search
+    # form. Select the actual Source edit form rather than the first form on
+    # the page. Posting the search form caused updates to be sent to /search.
+    forms = soup.find_all("form")
+    form = None
+
+    for candidate in forms:
+        action = candidate.get("action") or ""
+        has_source_fields = (
+            candidate.find(attrs={"name": "source[download_cutoff_date]"})
+            or candidate.find(attrs={"name": "source[download_media]"})
+            or candidate.find(attrs={"name": "source[original_url]"})
+        )
+        action_matches_source = (
+            f"/sources/{source_id}" in action
+            and "/search" not in action
+        )
+
+        if has_source_fields or action_matches_source:
+            form = candidate
+            break
+
+    if form is None:
+        raise RuntimeError(
+            "Pinchflat Source edit form was not found. "
+            "The page contained no form with Source settings."
+        )
 
     payload = scrape_form_payload(form)
 
@@ -902,6 +927,13 @@ def update_pinchflat_source_settings(
         raise RuntimeError(
             "Pinchflat did not accept the source update. "
             f"Response: {text[:300]}"
+        )
+
+    if update_response.status_code >= 500:
+        raise RuntimeError(
+            f"Pinchflat returned HTTP {update_response.status_code} while "
+            f"updating source {source_id}. Target: {target}. "
+            f"Response: {text[:300] or 'No error text returned.'}"
         )
 
     update_response.raise_for_status()

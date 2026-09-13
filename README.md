@@ -1,5 +1,15 @@
 # YouTube Pinchflat Sync
 
+## Version 1.3.1
+
+This maintenance release fixes editing existing Pinchflat sources:
+
+- The app now selects Pinchflat's actual Source edit form.
+- It ignores the global `/search` form on Pinchflat pages.
+- Per-source download-range changes now post back to the Source route.
+- Per-source Enabled/Disabled changes use the same corrected edit form.
+- Pinchflat HTTP 500 update errors now show the target route for easier diagnosis.
+
 ## Version 1.3.0
 
 This version adds:
