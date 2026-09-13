@@ -127,10 +127,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.5.2"
+  version: "1.6.0"
   update_at: "2026-09-13"
   release_notes:
-    en_US: Adds Emby Download playlist automation, one-off downloads with live progress, YouTube unsubscribe controls, API quota statistics, disk usage reporting and interface refinements.
+    en_US: Adds native username and password authentication, optional authenticator 2FA, recovery codes, user roles, session security, login throttling and account management.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

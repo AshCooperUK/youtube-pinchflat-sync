@@ -2,6 +2,45 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.6.0
+
+Native authentication and security release.
+
+- First-run administrator setup.
+- Username and password login before the dashboard loads.
+- Passwords use Argon2id hashing.
+- Optional TOTP two-factor authentication for Microsoft Authenticator, Google Authenticator, Authy and compatible apps.
+- Ten one-time recovery codes when 2FA is enabled or regenerated.
+- Administrator and Viewer roles. Viewer accounts have read-only dashboard access.
+- User management under Settings → Security.
+- Password changes invalidate other active sessions.
+- Log out all devices.
+- Failed-login throttling and temporary account lockout.
+- Configurable inactivity session timeout.
+- Login and security activity history including IP address.
+- CSRF protection for all browser POST actions.
+- Security response headers on every response.
+- The public `/health` endpoint exposes only status and version.
+- Standalone account recovery utility at `app/manage_user.py` for password resets, account unlocks and emergency 2FA removal.
+- All v1.5.2 channel artwork, Emby Download, single downloads, quota statistics and storage reporting are retained.
+
+### First start after upgrading
+
+Existing v1.5.x installations have no local dashboard users. The first request to the dashboard is redirected to `/setup`, where you create the first Administrator account. Existing YouTube, Pinchflat and subscription data remains in place.
+
+For a WAN-facing installation, enable authenticator 2FA on the administrator account from Settings → Security.
+
+### Emergency account recovery
+
+From inside the running container:
+
+```bash
+docker exec -it youtube-pinchflat-sync python /app/manage_user.py list
+docker exec -it youtube-pinchflat-sync python /app/manage_user.py reset-password USERNAME
+docker exec -it youtube-pinchflat-sync python /app/manage_user.py unlock USERNAME
+docker exec -it youtube-pinchflat-sync python /app/manage_user.py disable-2fa USERNAME
+```
+
 ## Version 1.5.2
 
 Channel artwork update.

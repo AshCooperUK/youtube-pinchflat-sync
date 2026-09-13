@@ -1,27 +1,35 @@
+import base64
+import hashlib
+import hmac
+import io
 import json
 import os
 import queue
 import re
 import secrets
 import sqlite3
+import struct
 import threading
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
+import qrcode
 import requests
 import yt_dlp
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from apscheduler.schedulers.background import BackgroundScheduler
 from bs4 import BeautifulSoup
 from dateutil.relativedelta import relativedelta
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.5.2"
+VERSION = "1.6.0"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -79,6 +87,19 @@ HISTORY_MODES = {
     "custom_date",
     "subscription_date",
 }
+
+PASSWORD_MIN_LENGTH = 12
+PASSWORD_HASHER = PasswordHasher(
+    time_cost=3,
+    memory_cost=65536,
+    parallelism=2,
+    hash_len=32,
+    salt_len=16,
+)
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
+RECOVERY_CODE_COUNT = 10
+TOTP_ISSUER = "YouTube Pinchflat Sync"
+
 
 
 def persistent_flask_secret():
@@ -237,6 +258,35 @@ def init_db():
                 started_at TEXT,
                 finished_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                display_name TEXT,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'viewer',
+                active INTEGER NOT NULL DEFAULT 1,
+                totp_secret TEXT,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                recovery_code_hashes TEXT NOT NULL DEFAULT '[]',
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until REAL,
+                session_version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                last_login_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS auth_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                user_id INTEGER,
+                username TEXT,
+                event_type TEXT NOT NULL,
+                success INTEGER NOT NULL DEFAULT 1,
+                ip_address TEXT,
+                user_agent TEXT,
+                message TEXT
+            );
             """
         )
 
@@ -263,6 +313,9 @@ def init_db():
             "youtube_daily_quota": "10000",
             "single_download_folder": "Single Downloads",
             "emby_download_folder": "Emby Download",
+            "auth_session_timeout_minutes": "720",
+            "auth_lockout_attempts": "5",
+            "auth_lockout_minutes": "15",
         }
         for key, value in defaults.items():
             if value:
@@ -313,6 +366,265 @@ def setting_int(key, default, minimum=None, maximum=None):
     if maximum is not None:
         value = min(maximum, value)
     return value
+
+
+def csrf_token():
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+def users_exist():
+    with db() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()
+    return bool(row and int(row["count"] or 0) > 0)
+
+
+def normalise_username(value):
+    return (value or "").strip().lower()
+
+
+def valid_username(value):
+    return bool(USERNAME_RE.fullmatch((value or "").strip()))
+
+
+def valid_password(value):
+    value = value or ""
+    return PASSWORD_MIN_LENGTH <= len(value) <= 200
+
+
+def hash_password(value):
+    return PASSWORD_HASHER.hash(value)
+
+
+def verify_password(password_hash, value):
+    try:
+        return bool(PASSWORD_HASHER.verify(password_hash, value or ""))
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return False
+
+
+def maybe_rehash_password(user_id, password_hash, value):
+    try:
+        if PASSWORD_HASHER.check_needs_rehash(password_hash):
+            with db() as conn:
+                conn.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?",
+                    (hash_password(value), user_id),
+                )
+    except Exception:
+        pass
+
+
+def client_ip():
+    return (
+        request.headers.get("CF-Connecting-IP")
+        or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.remote_addr
+        or ""
+    )
+
+
+def record_auth_event(event_type, success=True, user=None, username=None, message=""):
+    user_id = None
+    if user is not None:
+        try:
+            user_id = user["id"]
+            username = username or user["username"]
+        except Exception:
+            pass
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_events (
+                created_at, user_id, username, event_type, success,
+                ip_address, user_agent, message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                now_iso(),
+                user_id,
+                username,
+                event_type,
+                1 if success else 0,
+                client_ip(),
+                (request.headers.get("User-Agent") or "")[:500],
+                (message or "")[:1000],
+            ),
+        )
+
+
+def login_ip_blocked():
+    ip = client_ip()
+    if not ip:
+        return False
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    with db() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM auth_events
+            WHERE event_type = 'login_failed'
+              AND success = 0
+              AND ip_address = ?
+              AND created_at >= ?
+            """,
+            (ip, cutoff),
+        ).fetchone()
+    return int(row["count"] or 0) >= 20
+
+
+def get_user_by_id(user_id):
+    if not user_id:
+        return None
+    with db() as conn:
+        return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+
+def get_user_by_username(username):
+    username = normalise_username(username)
+    if not username:
+        return None
+    with db() as conn:
+        return conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+
+
+def current_user_record():
+    return get_user_by_id(session.get("auth_user_id"))
+
+
+def current_user_is_admin():
+    user = current_user_record()
+    return bool(user and user["role"] == "admin" and user["active"])
+
+
+def session_timeout_minutes():
+    return setting_int("auth_session_timeout_minutes", 720, 5, 10080)
+
+
+def lockout_attempt_limit():
+    return setting_int("auth_lockout_attempts", 5, 3, 50)
+
+
+def lockout_minutes():
+    return setting_int("auth_lockout_minutes", 15, 1, 1440)
+
+
+def generate_totp_secret():
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def _totp_key(secret):
+    secret = (secret or "").strip().replace(" ", "").upper()
+    padding = "=" * ((8 - len(secret) % 8) % 8)
+    return base64.b32decode(secret + padding, casefold=True)
+
+
+def totp_code(secret, at_time=None):
+    timestamp = int(at_time if at_time is not None else time.time())
+    counter = timestamp // 30
+    digest = hmac.new(_totp_key(secret), struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    number = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f"{number % 1000000:06d}"
+
+
+def verify_totp(secret, code, window=1):
+    code = re.sub(r"\D", "", code or "")
+    if len(code) != 6:
+        return False
+    now = int(time.time())
+    for offset in range(-window, window + 1):
+        expected = totp_code(secret, now + offset * 30)
+        if hmac.compare_digest(expected, code):
+            return True
+    return False
+
+
+def totp_provisioning_uri(username, secret):
+    label = quote(f"{TOTP_ISSUER}:{username}")
+    issuer = quote(TOTP_ISSUER)
+    return f"otpauth://totp/{label}?secret={secret}&issuer={issuer}&digits=6&period=30"
+
+
+def totp_qr_data_uri(username, secret):
+    image = qrcode.make(totp_provisioning_uri(username, secret))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def recovery_code_hash(value):
+    normalised = re.sub(r"[^A-Za-z0-9]", "", value or "").upper()
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+
+
+def generate_recovery_codes():
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    codes = []
+    for _ in range(RECOVERY_CODE_COUNT):
+        raw = "".join(secrets.choice(alphabet) for _ in range(12))
+        codes.append(f"{raw[:4]}-{raw[4:8]}-{raw[8:]}")
+    return codes
+
+
+def consume_recovery_code(user, code):
+    try:
+        hashes = json.loads(user["recovery_code_hashes"] or "[]")
+    except Exception:
+        hashes = []
+    candidate = recovery_code_hash(code)
+    if candidate not in hashes:
+        return False
+    hashes.remove(candidate)
+    with db() as conn:
+        conn.execute(
+            "UPDATE users SET recovery_code_hashes = ? WHERE id = ?",
+            (json.dumps(hashes), user["id"]),
+        )
+    return True
+
+
+def verify_user_second_factor(user, value):
+    if user["totp_enabled"] and user["totp_secret"] and verify_totp(user["totp_secret"], value):
+        return True, "totp"
+    if consume_recovery_code(user, value):
+        return True, "recovery"
+    return False, None
+
+
+def complete_login(user, method="password"):
+    session.clear()
+    session["auth_user_id"] = int(user["id"])
+    session["auth_session_version"] = int(user["session_version"] or 1)
+    session["auth_authenticated_at"] = time.time()
+    session["auth_last_seen"] = time.time()
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET failed_attempts = 0, locked_until = NULL, last_login_at = ?
+            WHERE id = ?
+            """,
+            (now_iso(), user["id"]),
+        )
+    record_auth_event("login_success", True, user=user, message=f"Signed in using {method}.")
+
+
+def auth_context():
+    user = current_user_record()
+    if not user:
+        return {"current_user": None, "is_admin": False}
+    return {
+        "current_user": dict(user),
+        "is_admin": bool(user["role"] == "admin"),
+    }
 
 
 def log_activity(event_type, title, message, severity="info", channel_id=None):
@@ -2268,6 +2580,478 @@ def subscription_view(row):
     return item
 
 
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' https: data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+    )
+    return response
+
+
+PUBLIC_ENDPOINTS = {
+    "health",
+    "static",
+    "setup_admin",
+    "login",
+    "login_2fa",
+}
+VIEWER_POST_ENDPOINTS = {
+    "logout",
+    "change_password",
+    "two_factor_setup",
+    "two_factor_disable",
+    "regenerate_recovery_codes",
+    "logout_all_sessions",
+}
+ADMIN_ONLY_GET_ENDPOINTS = {
+    "google_login",
+    "google_callback",
+}
+
+
+@app.before_request
+def require_authentication():
+    endpoint = request.endpoint
+    if endpoint is None:
+        return None
+
+    if request.method == "POST":
+        expected = session.get("_csrf_token")
+        supplied = request.form.get("_csrf") or request.headers.get("X-CSRF-Token")
+        if not expected or not supplied or not hmac.compare_digest(str(expected), str(supplied)):
+            abort(400, description="Invalid or missing CSRF token.")
+
+    if endpoint in {"health", "static"}:
+        return None
+
+    has_users = users_exist()
+    if not has_users:
+        if endpoint != "setup_admin":
+            return redirect(url_for("setup_admin"))
+        return None
+
+    if endpoint == "setup_admin":
+        if session.get("auth_user_id"):
+            return redirect(url_for("index"))
+        return redirect(url_for("login"))
+
+    if endpoint in {"login", "login_2fa"}:
+        if session.get("auth_user_id") and endpoint == "login":
+            return redirect(url_for("index"))
+        return None
+
+    user = current_user_record()
+    if not user or not user["active"]:
+        session.clear()
+        return redirect(url_for("login"))
+
+    if int(session.get("auth_session_version") or 0) != int(user["session_version"] or 1):
+        session.clear()
+        flash("Your session has expired. Sign in again.", "error")
+        return redirect(url_for("login"))
+
+    last_seen = float(session.get("auth_last_seen") or 0)
+    timeout_seconds = session_timeout_minutes() * 60
+    if last_seen and time.time() - last_seen > timeout_seconds:
+        record_auth_event("session_timeout", True, user=user, message="Session expired due to inactivity.")
+        session.clear()
+        flash("Your session expired due to inactivity.", "error")
+        return redirect(url_for("login"))
+
+    session["auth_last_seen"] = time.time()
+
+    if user["role"] != "admin":
+        if endpoint in ADMIN_ONLY_GET_ENDPOINTS:
+            flash("Administrator access is required.", "error")
+            return redirect(url_for("index"))
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and endpoint not in VIEWER_POST_ENDPOINTS:
+            flash("Your account has read-only access.", "error")
+            return redirect(url_for("index"))
+
+    return None
+
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup_admin():
+    if users_exist():
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        username_raw = request.form.get("username", "").strip()
+        username = normalise_username(username_raw)
+        display_name = request.form.get("display_name", "").strip()
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+        enable_2fa = request.form.get("enable_2fa") == "1"
+
+        if not valid_username(username_raw):
+            flash("Use 3 to 64 letters, numbers, dots, dashes or underscores for the username.", "error")
+        elif not valid_password(password):
+            flash(f"Use a password of at least {PASSWORD_MIN_LENGTH} characters.", "error")
+        elif password != confirm:
+            flash("The passwords do not match.", "error")
+        else:
+            with db() as conn:
+                cur = conn.execute(
+                    """
+                    INSERT INTO users (
+                        username, display_name, password_hash, role, active,
+                        created_at, session_version
+                    ) VALUES (?, ?, ?, 'admin', 1, ?, 1)
+                    """,
+                    (username, display_name or username_raw, hash_password(password), now_iso()),
+                )
+                user_id = cur.lastrowid
+            user = get_user_by_id(user_id)
+            complete_login(user, "first-run setup")
+            record_auth_event("admin_created", True, user=user, message="Initial administrator account created.")
+            if enable_2fa:
+                return redirect(url_for("two_factor_setup"))
+            return redirect(url_for("index"))
+
+    return render_template("setup.html", version=VERSION, password_min=PASSWORD_MIN_LENGTH)
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        if login_ip_blocked():
+            record_auth_event("login_rate_limited", False, username="", message="Too many failed sign-in attempts from this IP address.")
+            flash("Too many failed sign-in attempts from this address. Try again in a few minutes.", "error")
+            return render_template("login.html", version=VERSION)
+
+        username = normalise_username(request.form.get("username", ""))
+        password = request.form.get("password", "")
+        user = get_user_by_username(username)
+        generic_error = "The username or password is incorrect."
+
+        if not user or not user["active"]:
+            record_auth_event("login_failed", False, username=username, message="Unknown or inactive account.")
+            flash(generic_error, "error")
+            return render_template("login.html", version=VERSION)
+
+        now = time.time()
+        locked_until = float(user["locked_until"] or 0)
+        if locked_until > now:
+            remaining = max(1, int((locked_until - now + 59) // 60))
+            record_auth_event("login_locked", False, user=user, message="Login attempted during lockout.")
+            flash(f"Too many failed attempts. Try again in about {remaining} minute(s).", "error")
+            return render_template("login.html", version=VERSION)
+
+        if not verify_password(user["password_hash"], password):
+            attempts = int(user["failed_attempts"] or 0) + 1
+            lock_until = None
+            if attempts >= lockout_attempt_limit():
+                lock_until = now + lockout_minutes() * 60
+                attempts = 0
+            with db() as conn:
+                conn.execute(
+                    "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?",
+                    (attempts, lock_until, user["id"]),
+                )
+            record_auth_event("login_failed", False, user=user, message="Incorrect password.")
+            flash(generic_error, "error")
+            return render_template("login.html", version=VERSION)
+
+        maybe_rehash_password(user["id"], user["password_hash"], password)
+        with db() as conn:
+            conn.execute("UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?", (user["id"],))
+
+        if user["totp_enabled"]:
+            session.clear()
+            session["pending_2fa_user_id"] = int(user["id"])
+            session["pending_2fa_started"] = time.time()
+            return redirect(url_for("login_2fa"))
+
+        complete_login(user)
+        return redirect(url_for("index"))
+
+    return render_template("login.html", version=VERSION)
+
+
+@app.route("/login/2fa", methods=["GET", "POST"])
+def login_2fa():
+    user_id = session.get("pending_2fa_user_id")
+    started = float(session.get("pending_2fa_started") or 0)
+    if not user_id or not started or time.time() - started > 600:
+        session.clear()
+        flash("The two-factor sign-in expired. Start again.", "error")
+        return redirect(url_for("login"))
+
+    user = get_user_by_id(user_id)
+    if not user or not user["active"]:
+        session.clear()
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        code = request.form.get("code", "")
+        ok, method = verify_user_second_factor(user, code)
+        if ok:
+            complete_login(user, method or "two-factor authentication")
+            return redirect(url_for("index"))
+        record_auth_event("2fa_failed", False, user=user, message="Incorrect authenticator or recovery code.")
+        flash("The authenticator or recovery code is incorrect.", "error")
+
+    return render_template("two_factor_login.html", version=VERSION, username=user["username"])
+
+
+@app.post("/logout")
+def logout():
+    user = current_user_record()
+    if user:
+        record_auth_event("logout", True, user=user, message="Signed out.")
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.post("/account/password")
+def change_password():
+    user = current_user_record()
+    current = request.form.get("current_password", "")
+    new = request.form.get("new_password", "")
+    confirm = request.form.get("confirm_password", "")
+
+    if not user or not verify_password(user["password_hash"], current):
+        flash("The current password is incorrect.", "error")
+    elif not valid_password(new):
+        flash(f"Use a new password of at least {PASSWORD_MIN_LENGTH} characters.", "error")
+    elif new != confirm:
+        flash("The new passwords do not match.", "error")
+    else:
+        new_version = int(user["session_version"] or 1) + 1
+        with db() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ?, session_version = ? WHERE id = ?",
+                (hash_password(new), new_version, user["id"]),
+            )
+        session["auth_session_version"] = new_version
+        record_auth_event("password_changed", True, user=user, message="Password changed.")
+        flash("Password changed. Other signed-in sessions were invalidated.", "success")
+    return redirect(url_for("index") + "#security")
+
+
+@app.route("/account/2fa/setup", methods=["GET", "POST"])
+def two_factor_setup():
+    user = current_user_record()
+    if not user:
+        return redirect(url_for("login"))
+    if user["totp_enabled"]:
+        flash("Two-factor authentication is already enabled.", "success")
+        return redirect(url_for("index") + "#security")
+
+    secret = session.get("totp_setup_secret")
+    if not secret:
+        secret = generate_totp_secret()
+        session["totp_setup_secret"] = secret
+
+    if request.method == "POST":
+        code = request.form.get("code", "")
+        if not verify_totp(secret, code):
+            flash("The authenticator code is incorrect. Try the current six-digit code.", "error")
+        else:
+            codes = generate_recovery_codes()
+            hashes = [recovery_code_hash(code) for code in codes]
+            new_version = int(user["session_version"] or 1) + 1
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET totp_secret = ?, totp_enabled = 1,
+                        recovery_code_hashes = ?, session_version = ?
+                    WHERE id = ?
+                    """,
+                    (secret, json.dumps(hashes), new_version, user["id"]),
+                )
+            session["auth_session_version"] = new_version
+            session.pop("totp_setup_secret", None)
+            session["new_recovery_codes"] = codes
+            record_auth_event("2fa_enabled", True, user=user, message="TOTP two-factor authentication enabled.")
+            return redirect(url_for("show_recovery_codes"))
+
+    return render_template(
+        "two_factor_setup.html",
+        version=VERSION,
+        username=user["username"],
+        secret=secret,
+        qr_data=totp_qr_data_uri(user["username"], secret),
+        provisioning_uri=totp_provisioning_uri(user["username"], secret),
+    )
+
+
+@app.get("/account/2fa/recovery-codes")
+def show_recovery_codes():
+    codes = session.get("new_recovery_codes")
+    if not codes:
+        return redirect(url_for("index") + "#security")
+    return render_template("recovery_codes.html", version=VERSION, recovery_codes=codes)
+
+
+@app.post("/account/2fa/recovery-codes/ack")
+def acknowledge_recovery_codes():
+    session.pop("new_recovery_codes", None)
+    return redirect(url_for("index") + "#security")
+
+
+@app.post("/account/2fa/disable")
+def two_factor_disable():
+    user = current_user_record()
+    password = request.form.get("current_password", "")
+    code = request.form.get("code", "")
+    if not user or not user["totp_enabled"]:
+        flash("Two-factor authentication is not enabled.", "error")
+    elif not verify_password(user["password_hash"], password):
+        flash("The current password is incorrect.", "error")
+    else:
+        ok, _ = verify_user_second_factor(user, code)
+        if not ok:
+            flash("The authenticator or recovery code is incorrect.", "error")
+        else:
+            new_version = int(user["session_version"] or 1) + 1
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET totp_secret = NULL, totp_enabled = 0,
+                        recovery_code_hashes = '[]', session_version = ?
+                    WHERE id = ?
+                    """,
+                    (new_version, user["id"]),
+                )
+            session["auth_session_version"] = new_version
+            record_auth_event("2fa_disabled", True, user=user, message="Two-factor authentication disabled.")
+            flash("Two-factor authentication disabled.", "success")
+    return redirect(url_for("index") + "#security")
+
+
+@app.post("/account/2fa/recovery-codes/regenerate")
+def regenerate_recovery_codes():
+    user = current_user_record()
+    password = request.form.get("current_password", "")
+    code = request.form.get("code", "")
+    if not user or not user["totp_enabled"]:
+        flash("Enable two-factor authentication first.", "error")
+    elif not verify_password(user["password_hash"], password):
+        flash("The current password is incorrect.", "error")
+    elif not verify_totp(user["totp_secret"], code):
+        flash("The authenticator code is incorrect.", "error")
+    else:
+        codes = generate_recovery_codes()
+        hashes = [recovery_code_hash(value) for value in codes]
+        with db() as conn:
+            conn.execute(
+                "UPDATE users SET recovery_code_hashes = ? WHERE id = ?",
+                (json.dumps(hashes), user["id"]),
+            )
+        session["new_recovery_codes"] = codes
+        record_auth_event("recovery_codes_regenerated", True, user=user, message="Recovery codes regenerated.")
+        return redirect(url_for("show_recovery_codes"))
+    return redirect(url_for("index") + "#security")
+
+
+@app.post("/account/logout-all")
+def logout_all_sessions():
+    user = current_user_record()
+    if user:
+        with db() as conn:
+            conn.execute(
+                "UPDATE users SET session_version = session_version + 1 WHERE id = ?",
+                (user["id"],),
+            )
+        record_auth_event("logout_all", True, user=user, message="All sessions invalidated.")
+    session.clear()
+    flash("All sessions were signed out. Sign in again.", "success")
+    return redirect(url_for("login"))
+
+
+@app.post("/settings/security")
+def save_security_settings():
+    try:
+        timeout = int(request.form.get("session_timeout_minutes", "720") or 720)
+        attempts = int(request.form.get("lockout_attempts", "5") or 5)
+        duration = int(request.form.get("lockout_minutes", "15") or 15)
+    except ValueError:
+        flash("Security settings must be whole numbers.", "error")
+        return redirect(url_for("index") + "#security")
+
+    set_setting("auth_session_timeout_minutes", str(max(5, min(10080, timeout))))
+    set_setting("auth_lockout_attempts", str(max(3, min(50, attempts))))
+    set_setting("auth_lockout_minutes", str(max(1, min(1440, duration))))
+    user = current_user_record()
+    record_auth_event("security_settings", True, user=user, message="Authentication settings updated.")
+    flash("Security settings saved.", "success")
+    return redirect(url_for("index") + "#security")
+
+
+@app.post("/users/create")
+def create_user():
+    username_raw = request.form.get("username", "").strip()
+    username = normalise_username(username_raw)
+    display_name = request.form.get("display_name", "").strip()
+    password = request.form.get("password", "")
+    role = request.form.get("role", "viewer")
+    if role not in {"admin", "viewer"}:
+        role = "viewer"
+
+    if not valid_username(username_raw):
+        flash("Use 3 to 64 letters, numbers, dots, dashes or underscores for the username.", "error")
+    elif not valid_password(password):
+        flash(f"Use a password of at least {PASSWORD_MIN_LENGTH} characters.", "error")
+    else:
+        try:
+            with db() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO users (
+                        username, display_name, password_hash, role, active,
+                        created_at, session_version
+                    ) VALUES (?, ?, ?, ?, 1, ?, 1)
+                    """,
+                    (username, display_name or username_raw, hash_password(password), role, now_iso()),
+                )
+            admin = current_user_record()
+            record_auth_event("user_created", True, user=admin, username=username, message=f"Created {role} user {username}.")
+            flash(f"User {username} created.", "success")
+        except sqlite3.IntegrityError:
+            flash("That username already exists.", "error")
+    return redirect(url_for("index") + "#security")
+
+
+@app.post("/users/<int:user_id>/toggle")
+def toggle_user(user_id):
+    admin = current_user_record()
+    target = get_user_by_id(user_id)
+    if not target:
+        flash("User not found.", "error")
+    elif admin and int(admin["id"]) == int(user_id):
+        flash("You cannot disable your own account.", "error")
+    else:
+        new_active = 0 if target["active"] else 1
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET active = ?, session_version = session_version + 1
+                WHERE id = ?
+                """,
+                (new_active, user_id),
+            )
+        record_auth_event(
+            "user_status",
+            True,
+            user=admin,
+            username=target["username"],
+            message=f"Set {target['username']} active={bool(new_active)}.",
+        )
+        flash(f"User {target['username']} {'enabled' if new_active else 'disabled'}.", "success")
+    return redirect(url_for("index") + "#security")
+
+
 @app.route("/")
 def index():
     google_connected = False
@@ -2335,6 +3119,14 @@ def index():
     }
     api_stats = api_usage_stats()
     emby_playlist_id = get_setting("emby_download_playlist_id", "")
+    auth = auth_context()
+    with db() as conn:
+        security_users = conn.execute(
+            "SELECT id, username, display_name, role, active, totp_enabled, created_at, last_login_at FROM users ORDER BY username"
+        ).fetchall()
+        auth_events = conn.execute(
+            "SELECT * FROM auth_events ORDER BY id DESC LIMIT 40"
+        ).fetchall()
 
     counts = {
         "active": sum(1 for sub in subs if sub["active"]),
@@ -2401,6 +3193,14 @@ def index():
         emby_download_playlist_id=emby_playlist_id,
         emby_download_remove_after_success=setting_bool("emby_download_remove_after_success", True),
         youtube_daily_quota=setting_int("youtube_daily_quota", 10000, 100, 100000000),
+        current_user=auth["current_user"],
+        is_admin=auth["is_admin"],
+        security_users=security_users,
+        auth_events=auth_events,
+        session_timeout_minutes=session_timeout_minutes(),
+        lockout_attempts=lockout_attempt_limit(),
+        lockout_minutes=lockout_minutes(),
+        password_min=PASSWORD_MIN_LENGTH,
     )
 
 
@@ -3400,17 +4200,7 @@ def sync_now():
 
 @app.route("/health")
 def health():
-    return jsonify(
-        {
-            "status": "ok",
-            "version": VERSION,
-            "google_configured": google_configured(),
-            "pinchflat": pinchflat_health(),
-            "google_write_ready": google_write_scope_ready(),
-            "default_cutoff": resolve_history_cutoff(),
-            "download_storage_bytes": storage_snapshot()["total"],
-        }
-    )
+    return jsonify({"status": "ok", "version": VERSION})
 
 
 init_db()

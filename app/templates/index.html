@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>YouTube → Pinchflat Sync</title>
   <style>
     :root {
@@ -117,6 +118,11 @@
     .quota-fill { height:100%; background:var(--blue); }
     .compact-table { min-width:0; }
     .compact-table th,.compact-table td { padding:7px; }
+    .account-badge { display:flex; align-items:center; gap:7px; }
+    .role-badge { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+    .user-table td,.user-table th { vertical-align:middle; }
+    .auth-event { border-bottom:1px solid var(--line); padding:9px 0; }
+    .auth-event:last-child { border-bottom:0; }
 
     @media (max-width:1100px) {
       .grid { grid-template-columns:repeat(2,minmax(180px,1fr)); }
@@ -140,13 +146,19 @@
       <div class="version">v{{ version }}</div>
     </div>
     <div class="header-actions">
-      <form method="post" action="/sync">
+      {% if is_admin %}
+      <form method="post" action="/sync"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn" {% if not google_connected %}disabled{% endif %}>Sync now</button>
       </form>
       <button class="btn secondary" type="button" onclick="openSingleDownload()">Single Download</button>
+      {% endif %}
       <button class="btn secondary" type="button" onclick="openActivity()">Activity</button>
-      <button class="btn secondary" type="button" onclick="openSettings()">Settings</button>
-      <a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
+      {% if is_admin %}<button class="btn secondary" type="button" onclick="openSettings('general')">Settings</button>{% endif %}
+      <button class="btn secondary account-badge" type="button" onclick="openSettings('security')">
+        {{ current_user.display_name or current_user.username }} <span class="role-badge">{{ current_user.role }}</span>
+      </button>
+      {% if is_admin %}<a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>{% endif %}
+      <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out</button></form>
     </div>
   </div>
 
@@ -215,14 +227,16 @@
         <h2>Subscriptions</h2>
         <div class="muted small">New subscriptions auto-download by default. Filters and sorting are remembered in this browser.</div>
       </div>
+      {% if is_admin %}
       <div class="actions">
-        <form method="post" action="/refresh-subscriptions">
+        <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <button class="btn secondary smallbtn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
         </form>
-        <form method="post" action="/add-pending">
+        <form method="post" action="/add-pending"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <button class="btn smallbtn" {% if not google_connected or not pinchflat_online %}disabled{% endif %}>Add pending</button>
         </form>
       </div>
+      {% endif %}
     </div>
 
     <div class="toolbar">
@@ -253,7 +267,8 @@
     </div>
 
     {% if subs %}
-    <form id="bulk-form" method="post" action="/subscriptions/bulk" onsubmit="return confirmBulkAction()"></form>
+    {% if is_admin %}
+    <form id="bulk-form" method="post" action="/subscriptions/bulk" onsubmit="return confirmBulkAction()"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"></form>
     <div class="toolbar">
       <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(true)">Select visible</button>
       <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(false)">Clear</button>
@@ -291,6 +306,7 @@
 
       <button class="btn smallbtn" type="submit" form="bulk-form">Apply</button>
     </div>
+    {% endif %}
 
     <div class="table-wrap">
       <table id="subscriptions-table">
@@ -319,7 +335,7 @@
             data-storage="{{ sub['disk_bytes'] }}"
           >
             <td>
-              <input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">
+              {% if is_admin %}<input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">{% endif %}
             </td>
             <td class="channel-cell">
               <div class="channel-card">
@@ -343,15 +359,17 @@
               {% if sub["pinchflat_added"] %}<div class="small muted">In Pinchflat</div>{% endif %}
             </td>
             <td>
-              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/download">
+              {% if is_admin %}
+              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/download"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 <select name="download_enabled" onchange="this.form.submit()">
                   <option value="1" {% if sub["download_enabled"] %}selected{% endif %}>Enabled</option>
                   <option value="0" {% if not sub["download_enabled"] %}selected{% endif %}>Disabled</option>
                 </select>
               </form>
+              {% else %}<span>{{ "Enabled" if sub["download_enabled"] else "Disabled" }}</span>{% endif %}
             </td>
             <td class="source-range">
-              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/history" class="inline-range-form">
+              {% if is_admin %}<form method="post" action="/subscriptions/{{ sub['channel_id'] }}/history" class="inline-range-form"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 {% set current_mode = sub["history_mode"] or "default" %}
                 <select name="history_mode" class="source-history-mode" onchange="toggleSourceDate(this)">
                   <option value="default" {% if current_mode == "default" %}selected{% endif %}>Default</option>
@@ -366,16 +384,20 @@
                 </select>
                 <input class="source-date {% if current_mode != 'custom_date' %}hidden{% endif %}" type="date" name="history_custom_date" value="{{ sub['history_custom_date'] or '' }}">
                 <button class="btn ghost smallbtn" type="submit">Save</button>
-              </form>
+              </form>{% else %}<span>{{ sub["history_label"] }}</span>{% endif %}
             </td>
             <td class="source-profile">
-              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/profile">
+              {% if is_admin %}
+              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/profile"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 <select name="media_profile_id" onchange="this.form.submit()">
                   {% for profile in profiles %}
                     <option value="{{ profile.id }}" {% if sub["media_profile_id"]|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
                   {% endfor %}
                 </select>
               </form>
+              {% else %}
+                {% for profile in profiles %}{% if sub["media_profile_id"]|string == profile.id|string %}{{ profile.name }}{% endif %}{% endfor %}
+              {% endif %}
             </td>
             <td>
               <code>{{ sub["cutoff"] }}</code>
@@ -385,14 +407,14 @@
             <td>
               {% if sub["last_error"] %}
                 <div class="error-text">{{ sub["last_error"] }}</div>
-                <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/retry" class="row-actions">
+                {% if is_admin %}<form method="post" action="/subscriptions/{{ sub['channel_id'] }}/retry" class="row-actions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                   <button class="btn danger smallbtn">Retry</button>
-                </form>
+                </form>{% endif %}
               {% else %}
                 <span class="small muted">No error</span>
               {% endif %}
-              {% if sub["active"] %}
-                <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" class="row-actions" onsubmit="return confirm('Unsubscribe from this channel on YouTube? Existing downloaded files are not deleted.')">
+              {% if is_admin and sub["active"] %}
+                <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" class="row-actions" onsubmit="return confirm('Unsubscribe from this channel on YouTube? Existing downloaded files are not deleted.')"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                   <button class="btn ghost smallbtn" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
                 </form>
               {% endif %}
@@ -441,19 +463,23 @@
   </div>
   <div class="modal-body">
     <div class="tabs">
+      {% if is_admin %}
       <button class="tab-btn active" data-tab="general" onclick="showTab('general')">General</button>
       <button class="tab-btn" data-tab="youtube" onclick="showTab('youtube')">YouTube</button>
       <button class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')">Pinchflat</button>
       <button class="tab-btn" data-tab="downloads" onclick="showTab('downloads')">Downloads</button>
       <button class="tab-btn" data-tab="automation" onclick="showTab('automation')">Automation</button>
       <button class="tab-btn" data-tab="advanced" onclick="showTab('advanced')">Advanced</button>
+      {% endif %}
+      <button class="tab-btn {% if not is_admin %}active{% endif %}" data-tab="security" onclick="showTab('security')">Security</button>
     </div>
 
+    {% if is_admin %}
     <section class="tab-panel active" data-panel="general">
       <div class="settings-grid">
         <div class="setting-box">
           <h3>Subscription behaviour</h3>
-          <form method="post" action="/settings/general">
+          <form method="post" action="/settings/general"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>When a new YouTube subscription appears
               <select name="new_subscription_policy">
                 <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable and download</option>
@@ -492,11 +518,11 @@
             {% if not google_write_ready %}
               <p><a class="btn" href="/oauth/google/login">Reconnect Google</a></p>
             {% endif %}
-            <form method="post" action="/oauth/google/disconnect">
+            <form method="post" action="/oauth/google/disconnect"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
               <button class="btn danger">Disconnect Google</button>
             </form>
           {% else %}
-            <form method="post" action="/settings/configuration">
+            <form method="post" action="/settings/configuration"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
               <label>Public dashboard URL
                 <input type="url" name="app_url" value="{{ app_url }}" placeholder="https://youtube.example.com">
               </label>
@@ -516,7 +542,7 @@
 
         <div class="setting-box">
           <h3>Emby Download playlist</h3>
-          <form method="post" action="/settings/youtube">
+          <form method="post" action="/settings/youtube"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label><input type="checkbox" name="emby_download_enabled" value="1" {% if emby_download_enabled %}checked{% endif %}> Monitor the private “Emby Download” playlist</label>
             <label>Playlist name
               <input type="text" value="Emby Download" disabled>
@@ -532,7 +558,7 @@
             <button class="btn">Save YouTube</button>
           </form>
           <div class="actions" style="margin-top:10px">
-            <form method="post" action="/emby-download/ensure">
+            <form method="post" action="/emby-download/ensure"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
               <button class="btn secondary smallbtn" {% if not google_write_ready %}disabled{% endif %}>Ensure playlist exists</button>
             </form>
           </div>
@@ -545,7 +571,7 @@
       <div class="settings-grid">
         <div class="setting-box">
           <h3>Default Media Profile</h3>
-          <form method="post" action="/settings/pinchflat">
+          <form method="post" action="/settings/pinchflat"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Profile
               <select name="pinchflat_media_profile_id">
                 {% for profile in profiles %}
@@ -569,7 +595,7 @@
       <div class="settings-grid">
         <div class="setting-box">
           <h3>Default download history</h3>
-          <form method="post" action="/settings/history">
+          <form method="post" action="/settings/history"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Default range
               <select name="history_mode" id="default-history-mode" onchange="toggleDefaultHistory()">
                 <option value="today" {% if default_history_mode == "today" %}selected{% endif %}>Today</option>
@@ -608,7 +634,7 @@
       <div class="settings-grid">
         <div class="setting-box">
           <h3>Scheduled sync</h3>
-          <form method="post" action="/settings/automation">
+          <form method="post" action="/settings/automation"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Subscription sync interval in minutes
               <input type="number" min="5" max="1440" name="sync_interval_minutes" value="{{ interval }}">
             </label>
@@ -653,6 +679,86 @@
           <p>Download storage: <strong>{{ storage_total }}</strong></p>
           <p><a href="/health" target="_blank">Health endpoint</a></p>
           <p><a href="https://github.com/AshCooperUK/youtube-pinchflat-sync" target="_blank">GitHub repository</a></p>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="tab-panel {% if not is_admin %}active{% endif %}" data-panel="security" id="security">
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>Your account</h3>
+          <p><strong>{{ current_user.display_name or current_user.username }}</strong><br><span class="muted small">{{ current_user.username }} · {{ current_user.role|title }}</span></p>
+          <p>Two-factor authentication: <strong class="{{ 'ok' if current_user.totp_enabled else 'warn' }}">{{ 'Enabled' if current_user.totp_enabled else 'Not enabled' }}</strong></p>
+          {% if current_user.last_login_at %}<p class="small muted">Last login: {{ current_user.last_login_at }}</p>{% endif %}
+          {% if not current_user.totp_enabled %}
+            <a class="btn" href="/account/2fa/setup">Enable authenticator 2FA</a>
+          {% else %}
+            <form method="post" action="/account/2fa/disable"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+              <label>Authenticator or recovery code<input name="code" autocomplete="one-time-code" required></label>
+              <button class="btn danger" onclick="return confirm('Disable two-factor authentication?')">Disable 2FA</button>
+            </form>
+            <form method="post" action="/account/2fa/recovery-codes/regenerate" style="margin-top:12px"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+              <label>Authenticator code<input name="code" autocomplete="one-time-code" required></label>
+              <button class="btn secondary">Generate new recovery codes</button>
+            </form>
+          {% endif %}
+        </div>
+
+        <div class="setting-box">
+          <h3>Change password</h3>
+          <form method="post" action="/account/password"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+            <label>New password<input type="password" name="new_password" autocomplete="new-password" minlength="{{ password_min }}" required></label>
+            <label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" minlength="{{ password_min }}" required></label>
+            <button class="btn">Change password</button>
+          </form>
+          <form method="post" action="/account/logout-all" style="margin-top:16px" onsubmit="return confirm('Sign out every active session, including this one?')"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <button class="btn danger">Log out all devices</button>
+          </form>
+        </div>
+
+        {% if is_admin %}
+        <div class="setting-box">
+          <h3>Authentication policy</h3>
+          <form method="post" action="/settings/security"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <label>Session timeout after inactivity (minutes)<input type="number" min="5" max="10080" name="session_timeout_minutes" value="{{ session_timeout_minutes }}"></label>
+            <label>Failed attempts before lockout<input type="number" min="3" max="50" name="lockout_attempts" value="{{ lockout_attempts }}"></label>
+            <label>Lockout duration (minutes)<input type="number" min="1" max="1440" name="lockout_minutes" value="{{ lockout_minutes }}"></label>
+            <button class="btn">Save security policy</button>
+          </form>
+        </div>
+
+        <div class="setting-box">
+          <h3>Create user</h3>
+          <form method="post" action="/users/create"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <label>Username<input name="username" minlength="3" maxlength="64" required></label>
+            <label>Display name<input name="display_name"></label>
+            <label>Temporary password<input type="password" name="password" minlength="{{ password_min }}" required></label>
+            <label>Role<select name="role"><option value="viewer">Viewer · read only</option><option value="admin">Administrator · full access</option></select></label>
+            <button class="btn">Create user</button>
+          </form>
+        </div>
+
+        <div class="setting-box" style="grid-column:1/-1">
+          <h3>Users</h3>
+          <div class="table-wrap"><table class="compact-table user-table"><thead><tr><th>User</th><th>Role</th><th>2FA</th><th>Status</th><th>Last login</th><th></th></tr></thead><tbody>
+          {% for user in security_users %}
+            <tr><td><strong>{{ user.display_name or user.username }}</strong><div class="small muted">{{ user.username }}</div></td><td>{{ user.role|title }}</td><td>{{ 'Enabled' if user.totp_enabled else 'Off' }}</td><td>{{ 'Active' if user.active else 'Disabled' }}</td><td>{{ user.last_login_at or 'Never' }}</td><td>{% if user.id != current_user.id %}<form method="post" action="/users/{{ user.id }}/toggle"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost smallbtn">{{ 'Disable' if user.active else 'Enable' }}</button></form>{% endif %}</td></tr>
+          {% endfor %}
+          </tbody></table></div>
+        </div>
+        {% endif %}
+
+        <div class="setting-box" style="grid-column:1/-1">
+          <h3>Login activity</h3>
+          {% if auth_events %}
+            {% for event in auth_events %}
+            <div class="auth-event"><strong class="{{ 'ok' if event.success else 'bad' }}">{{ event.event_type|replace('_',' ')|title }}</strong> · {{ event.username or 'Unknown' }}<div class="small">{{ event.message or '' }}</div><div class="small muted">{{ event.created_at }} · {{ event.ip_address or 'No IP' }}</div></div>
+            {% endfor %}
+          {% else %}<div class="muted small">No login activity recorded yet.</div>{% endif %}
         </div>
       </div>
     </section>
@@ -710,7 +816,7 @@ const activityDialog = document.getElementById("activity-dialog");
 const singleDownloadDialog = document.getElementById("single-download-dialog");
 let singleDownloadTimer = null;
 
-function openSettings(tab="general") { showTab(tab); settingsDialog.showModal(); }
+function openSettings(tab="{{ 'general' if is_admin else 'security' }}") { showTab(tab); settingsDialog.showModal(); }
 function closeSettings() { settingsDialog.close(); }
 function openActivity() { activityDialog.showModal(); }
 function closeActivity() { activityDialog.close(); }
@@ -746,7 +852,10 @@ async function startSingleDownload(event) {
 
   const response = await fetch("/single-download/start", {
     method: "POST",
-    headers: {"Content-Type":"application/json"},
+    headers: {
+      "Content-Type":"application/json",
+      "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content
+    },
     body: JSON.stringify({youtube_url:url})
   });
   const data = await response.json();
@@ -836,7 +945,8 @@ function setAllVisible(checked) {
 
 function updateSelectedCount() {
   const n = document.querySelectorAll(".source-select:checked").length;
-  document.getElementById("selected-count").textContent = `${n} selected`;
+  const target = document.getElementById("selected-count");
+  if (target) target.textContent = `${n} selected`;
 }
 
 function toggleBulkOptions() {
@@ -859,6 +969,7 @@ function confirmBulkAction() {
 initialFilter();
 applyFilters();
 toggleBulkOptions();
+if (window.location.hash === "#security") openSettings("security");
 
 [settingsDialog, activityDialog, singleDownloadDialog].forEach(d => {
   d?.addEventListener("click", event => {
