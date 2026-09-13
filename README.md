@@ -2,6 +2,20 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.8.1
+
+Unsubscribe cleanup and media-path maintenance release.
+
+- Restores the default subscription output template to:
+  `/shows/{{ source_custom_name }}/{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}`
+- Automatically migrates the exact v1.7/v1.8 generated template without `/shows/` to the corrected template. Custom templates are left unchanged.
+- When the unsubscribe policy is `Remove Pinchflat source and delete downloaded files`, the app first disables downloading on the Pinchflat source so no new media is queued.
+- It then asks Pinchflat to delete the source and its files.
+- The local channel folder is removed immediately after source deletion.
+- A persistent cleanup queue rechecks the channel after five minutes, then every five minutes for 30 minutes.
+- Follow-up cleanup survives an app restart because cleanup jobs are stored in SQLite.
+- The extra cleanup window works around Pinchflat's known orphaned-download behaviour when a source is deleted while jobs are already queued.
+
 ## Version 1.8.0
 
 Workflow and settings usability update.

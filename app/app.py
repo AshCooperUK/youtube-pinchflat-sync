@@ -30,7 +30,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -100,8 +100,13 @@ PASSWORD_HASHER = PasswordHasher(
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
 RECOVERY_CODE_COUNT = 10
 
-EMBY_OUTPUT_PATH_TEMPLATE = (
+LEGACY_EMBY_OUTPUT_PATH_TEMPLATE = (
     "{{ source_custom_name }}/"
+    "{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}"
+)
+
+EMBY_OUTPUT_PATH_TEMPLATE = (
+    "/shows/{{ source_custom_name }}/"
     "{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}"
 )
 
@@ -299,6 +304,20 @@ def init_db():
                 ip_address TEXT,
                 user_agent TEXT,
                 message TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS cleanup_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id TEXT NOT NULL,
+                channel_title TEXT NOT NULL,
+                output_template TEXT,
+                due_at REAL NOT NULL,
+                checks_remaining INTEGER NOT NULL DEFAULT 6,
+                interval_seconds INTEGER NOT NULL DEFAULT 300,
+                status TEXT NOT NULL DEFAULT 'pending',
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                finished_at TEXT
             );
             """
         )
@@ -854,6 +873,235 @@ def delete_subscription_download_folder(channel_title, output_template=None):
         return str(resolved)
 
     return None
+
+
+def schedule_unsubscribe_cleanup(
+    channel_id,
+    channel_title,
+    output_template=None,
+    delay_seconds=300,
+    checks=6,
+):
+    with db() as conn:
+        conn.execute(
+            """
+            DELETE FROM cleanup_jobs
+            WHERE channel_id = ? AND status = 'pending'
+            """,
+            (channel_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO cleanup_jobs (
+                channel_id,
+                channel_title,
+                output_template,
+                due_at,
+                checks_remaining,
+                interval_seconds,
+                status,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                channel_id,
+                channel_title,
+                output_template or EMBY_OUTPUT_PATH_TEMPLATE,
+                time.time() + max(1, int(delay_seconds)),
+                max(1, int(checks)),
+                300,
+                now_iso(),
+            ),
+        )
+
+
+def process_deferred_unsubscribe_cleanups():
+    now_ts = time.time()
+
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM cleanup_jobs
+            WHERE status = 'pending'
+              AND due_at <= ?
+            ORDER BY due_at ASC
+            LIMIT 25
+            """,
+            (now_ts,),
+        ).fetchall()
+
+    processed = 0
+    for row in rows:
+        processed += 1
+        row = dict(row)
+        try:
+            deleted_folder = delete_subscription_download_folder(
+                row["channel_title"],
+                row.get("output_template"),
+            )
+
+            remaining = max(0, int(row["checks_remaining"] or 1) - 1)
+            if remaining > 0:
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE cleanup_jobs
+                        SET due_at = ?,
+                            checks_remaining = ?,
+                            last_error = NULL
+                        WHERE id = ?
+                        """,
+                        (
+                            time.time() + int(row["interval_seconds"] or 300),
+                            remaining,
+                            row["id"],
+                        ),
+                    )
+            else:
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE cleanup_jobs
+                        SET status = 'complete',
+                            checks_remaining = 0,
+                            last_error = NULL,
+                            finished_at = ?
+                        WHERE id = ?
+                        """,
+                        (now_iso(), row["id"]),
+                    )
+
+            log_activity(
+                "cleanup",
+                "Post-unsubscribe cleanup check",
+                (
+                    f"{row['channel_title']}: "
+                    + (
+                        f"removed leftover folder {deleted_folder}."
+                        if deleted_folder
+                        else "no leftover files found."
+                    )
+                    + (
+                        f" {remaining} follow-up check(s) remain."
+                        if remaining
+                        else " Cleanup window complete."
+                    )
+                ),
+                "success",
+                row["channel_id"],
+            )
+
+        except Exception as exc:
+            remaining = max(0, int(row["checks_remaining"] or 1) - 1)
+            with db() as conn:
+                if remaining > 0:
+                    conn.execute(
+                        """
+                        UPDATE cleanup_jobs
+                        SET due_at = ?,
+                            checks_remaining = ?,
+                            last_error = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            time.time() + int(row["interval_seconds"] or 300),
+                            remaining,
+                            str(exc)[:1000],
+                            row["id"],
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE cleanup_jobs
+                        SET status = 'failed',
+                            checks_remaining = 0,
+                            last_error = ?,
+                            finished_at = ?
+                        WHERE id = ?
+                        """,
+                        (str(exc)[:1000], now_iso(), row["id"]),
+                    )
+
+            log_activity(
+                "cleanup",
+                "Post-unsubscribe cleanup error",
+                f"{row['channel_title']}: {exc}",
+                "error",
+                row["channel_id"],
+            )
+
+    return {"processed": processed}
+
+
+def prepare_pinchflat_source_for_removal(row):
+    """
+    Stop the source from adding more download work before asking Pinchflat to
+    remove it. Existing work already queued inside Pinchflat is handled by the
+    delayed cleanup window.
+    """
+    source_id = row.get("pinchflat_source_id")
+    if not source_id:
+        return
+
+    try:
+        update_pinchflat_source_settings(
+            source_id,
+            cutoff=subscription_cutoff(row),
+            download_enabled=False,
+            media_profile_id=subscription_media_profile_id(row),
+        )
+    except Exception as exc:
+        # Continue to source deletion even when the disable request fails.
+        log_activity(
+            "pinchflat",
+            "Could not pre-disable source",
+            f"{row.get('title') or row.get('channel_id')}: {exc}",
+            "warning",
+            row.get("channel_id"),
+        )
+
+
+def migrate_legacy_subscription_output_path(profile_settings):
+    """
+    v1.8.1 restores /shows/ as the default parent folder. Only the exact
+    v1.7/v1.8 generated template is migrated. Custom templates are untouched.
+    """
+    if not profile_settings or profile_settings.get("error"):
+        return profile_settings
+
+    current = str(profile_settings.get("output_path_template") or "").strip()
+    if current != LEGACY_EMBY_OUTPUT_PATH_TEMPLATE:
+        return profile_settings
+
+    profile_id = effective_media_profile_id()
+    if not profile_id:
+        return profile_settings
+
+    try:
+        values = profile_values_for_update(profile_settings)
+        values["output_path_template"] = EMBY_OUTPUT_PATH_TEMPLATE
+        update_media_profile_settings(profile_id, values)
+        log_activity(
+            "settings",
+            "Subscription path migrated",
+            (
+                "Updated the selected Pinchflat profile to "
+                f"{EMBY_OUTPUT_PATH_TEMPLATE}"
+            ),
+            "success",
+        )
+        return media_profile_settings(profile_id)
+    except Exception as exc:
+        log_activity(
+            "settings",
+            "Subscription path migration failed",
+            str(exc),
+            "error",
+        )
+        return profile_settings
 
 
 def pinchflat_stats_summary(profiles=None, storage=None):
@@ -1885,7 +2133,17 @@ def refresh_subscriptions():
                 policy = unsubscribe_policy()
                 delete_files = policy == "remove_delete"
 
+                output_template = media_profile_settings(
+                    subscription_media_profile_id(row)
+                ).get(
+                    "output_path_template",
+                    EMBY_OUTPUT_PATH_TEMPLATE,
+                )
+
                 if row.get("pinchflat_added") and row.get("pinchflat_source_id"):
+                    if delete_files:
+                        prepare_pinchflat_source_for_removal(row)
+
                     delete_pinchflat_source(
                         row["pinchflat_source_id"],
                         delete_files=delete_files,
@@ -1894,7 +2152,13 @@ def refresh_subscriptions():
                 deleted_folder = None
                 if delete_files:
                     deleted_folder = delete_subscription_download_folder(
-                        row.get("title") or row["channel_id"]
+                        row.get("title") or row["channel_id"],
+                        output_template,
+                    )
+                    schedule_unsubscribe_cleanup(
+                        row["channel_id"],
+                        row.get("title") or row["channel_id"],
+                        output_template,
                     )
 
                 with db() as conn:
@@ -1924,6 +2188,7 @@ def refresh_subscriptions():
                                 if deleted_folder
                                 else "Pinchflat media deletion requested; no remaining channel folder was found."
                             )
+                            + " Follow-up cleanup will run every 5 minutes for 30 minutes."
                         ),
                         "success",
                         row["channel_id"],
@@ -3743,6 +4008,9 @@ def index():
     profile_status = pinchflat_profile_status()
     profiles = pinchflat_profiles()
     profile_settings = media_profile_settings(effective_media_profile_id())
+    profile_settings = migrate_legacy_subscription_output_path(
+        profile_settings
+    )
     storage = storage_snapshot()
     pinchflat_stats = pinchflat_stats_summary(profiles, storage)
     for sub in subs:
@@ -4765,13 +5033,30 @@ def unsubscribe_from_youtube(channel_id):
             )
         elif policy in {"remove", "remove_delete"} and row_dict.get("pinchflat_added") and row_dict.get("pinchflat_source_id"):
             delete_files = policy == "remove_delete"
+            output_template = media_profile_settings(
+                subscription_media_profile_id(row_dict)
+            ).get(
+                "output_path_template",
+                EMBY_OUTPUT_PATH_TEMPLATE,
+            )
+
+            if delete_files:
+                prepare_pinchflat_source_for_removal(row_dict)
+
             delete_pinchflat_source(
                 row_dict["pinchflat_source_id"],
                 delete_files=delete_files,
             )
+
             if delete_files:
                 delete_subscription_download_folder(
-                    row_dict.get("title") or channel_id
+                    row_dict.get("title") or channel_id,
+                    output_template,
+                )
+                schedule_unsubscribe_cleanup(
+                    channel_id,
+                    row_dict.get("title") or channel_id,
+                    output_template,
                 )
             with db() as conn:
                 conn.execute(
@@ -5029,6 +5314,13 @@ scheduler.add_job(
     "interval",
     minutes=current_emby_poll_interval(),
     id="emby-download-sync",
+    max_instances=1,
+)
+scheduler.add_job(
+    process_deferred_unsubscribe_cleanups,
+    "interval",
+    minutes=1,
+    id="unsubscribe-cleanup",
     max_instances=1,
 )
 scheduler.start()
