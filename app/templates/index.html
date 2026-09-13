@@ -109,6 +109,21 @@
     .profile-settings-grid { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin:8px 0 0; }
     .compact-setting { padding:14px; }
     .compact-setting h3 { margin-bottom:10px; }
+    .mini-stat-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(110px,1fr));
+      gap:10px;
+      margin:10px 0 14px;
+    }
+    .mini-stat-grid > div {
+      background:#0b1220;
+      border:1px solid #263244;
+      border-radius:10px;
+      padding:10px;
+    }
+    .mini-stat-grid span,
+    .mini-stat-grid strong { display:block; }
+    .mini-stat-grid strong { margin-top:3px; }
     .settings-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:14px; }
     .setting-box { border:1px solid var(--line); border-radius:12px; padding:15px; background:var(--panel); }
     .activity-item { border-bottom:1px solid var(--line); padding:11px 0; }
@@ -157,12 +172,9 @@
       <button class="btn secondary" type="button" onclick="openSingleDownload()">Single Download</button>
       {% endif %}
       <button class="btn secondary" type="button" onclick="openActivity()">Activity</button>
-      {% if is_admin %}<button class="btn secondary" type="button" onclick="openSettings('general')">Settings</button>{% endif %}
-      <button class="btn secondary account-badge" type="button" onclick="openSettings('security')">
-        {{ current_user.display_name or current_user.username }} <span class="role-badge">{{ current_user.role }}</span>
-      </button>
+      <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
       {% if is_admin %}<a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>{% endif %}
-      <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out</button></form>
+      <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out {{ current_user.username }}</button></form>
     </div>
   </div>
 
@@ -496,6 +508,7 @@
                 <option value="keep" {% if unsubscribe_policy == "keep" %}selected{% endif %}>Keep Pinchflat source</option>
                 <option value="disable" {% if unsubscribe_policy == "disable" %}selected{% endif %}>Disable downloads in Pinchflat</option>
                 <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove Pinchflat source, keep downloaded files</option>
+                <option value="remove_delete" {% if unsubscribe_policy == "remove_delete" %}selected{% endif %}>Remove Pinchflat source and delete downloaded files</option>
               </select>
             </label>
             <label><input type="checkbox" name="show_removed" value="1" {% if show_removed %}checked{% endif %}> Include removed subscriptions by default</label>
@@ -545,28 +558,14 @@
         </div>
 
         <div class="setting-box">
-          <h3>Emby Download playlist</h3>
+          <h3>YouTube API</h3>
           <form method="post" action="/settings/youtube"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <label><input type="checkbox" name="emby_download_enabled" value="1" {% if emby_download_enabled %}checked{% endif %}> Monitor the private “Emby Download” playlist</label>
-            <label>Playlist name
-              <input type="text" value="Emby Download" disabled>
-            </label>
-            <label>Check playlist every
-              <input type="number" min="1" max="1440" name="emby_download_poll_minutes" value="{{ emby_download_poll_minutes }}">
-              <span class="muted small">minutes</span>
-            </label>
-            <label><input type="checkbox" name="emby_download_remove_after_success" value="1" {% if emby_download_remove_after_success %}checked{% endif %}> Remove videos from the playlist after a successful download</label>
-            <label>Daily API quota used for the estimate
+            <label>Daily API quota used for the dashboard estimate
               <input type="number" min="100" name="youtube_daily_quota" value="{{ youtube_daily_quota }}">
             </label>
             <button class="btn">Save YouTube</button>
           </form>
-          <div class="actions" style="margin-top:10px">
-            <form method="post" action="/emby-download/ensure"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-              <button class="btn secondary smallbtn" {% if not google_write_ready %}disabled{% endif %}>Ensure playlist exists</button>
-            </form>
-          </div>
-          <p class="muted small">Playlist ID: {{ emby_download_playlist_id or "not created yet" }}</p>
+          <p class="muted small">Emby Download playlist scheduling has moved to Automation.</p>
         </div>
       </div>
     </section>
@@ -589,14 +588,22 @@
         </div>
 
         <div class="setting-box">
-          <h3>Status</h3>
-          <p>{{ pinchflat_profile_message }}</p>
+          <h3>Pinchflat stats</h3>
+          <div class="mini-stat-grid">
+            <div><span class="muted small">Status</span><strong>{% if pinchflat_online %}Online{% else %}Offline{% endif %}</strong></div>
+            <div><span class="muted small">Media profiles</span><strong>{{ pinchflat_stats.profiles }}</strong></div>
+            <div><span class="muted small">Linked sources</span><strong>{{ pinchflat_stats.linked }}</strong></div>
+            <div><span class="muted small">Enabled</span><strong>{{ pinchflat_stats.enabled }}</strong></div>
+            <div><span class="muted small">Disabled</span><strong>{{ pinchflat_stats.disabled }}</strong></div>
+            <div><span class="muted small">Pending</span><strong>{{ pinchflat_stats.pending }}</strong></div>
+            <div><span class="muted small">Shared storage</span><strong>{{ pinchflat_stats.storage }}</strong></div>
+          </div>
+          <p class="muted small">{{ pinchflat_profile_message }}</p>
           {% if media_profile_settings.error %}
             <p class="bad small">{{ media_profile_settings.error }}</p>
           {% else %}
-            <p class="muted small">Editing: {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</p>
+            <p class="muted small">Selected profile: {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</p>
           {% endif %}
-          <a class="btn secondary" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
         </div>
 
         <div class="setting-box" style="grid-column:1/-1">
@@ -691,7 +698,7 @@
             </div>
 
             <div class="actions" style="margin-top:16px">
-              <button class="btn">Save Media Profile</button>
+              <button class="btn">Save Profile to {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</button>
               <span class="muted small">Existing downloaded files are not renamed when you change the output template.</span>
             </div>
           </form>
@@ -727,36 +734,96 @@
             <div id="default-custom">
               <label>Start date<input type="date" name="history_custom_date" value="{{ default_history_custom_date }}"></label>
             </div>
-            <button class="btn">Save Downloads</button>
+            <button class="btn">Save Download Range</button>
           </form>
         </div>
+
         <div class="setting-box">
           <h3>Storage</h3>
           <div class="metric">{{ storage_total }}</div>
-          <p class="muted small">Current size under the shared YouTube download directory. Per-channel estimates appear in the main table.</p>
+          <p class="muted small">Shared YouTube storage mounted inside the app as <code>/downloads</code>.</p>
           <p>{{ download_counts.running }} active direct download(s) · {{ download_counts.queued }} queued · {{ download_counts.failed }} failed</p>
+        </div>
+
+        <div class="setting-box" style="grid-column:1/-1">
+          <h3>Download paths</h3>
+          <p class="muted small">All paths are relative to the shared <code>/downloads</code> directory. The subscription template is also written to the selected Pinchflat Media Profile.</p>
+          <form method="post" action="/settings/download-paths"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <label>YouTube subscription auto-download path template
+              <input type="text" name="subscription_download_template" value="{{ subscription_download_template }}" autocomplete="off">
+            </label>
+            <div class="settings-grid">
+              <label>Emby Download folder
+                <input type="text" name="emby_download_folder" value="{{ emby_download_folder }}" placeholder="Emby Download">
+              </label>
+              <label>Single Download folder
+                <input type="text" name="single_download_folder" value="{{ single_download_folder }}" placeholder="Single Downloads">
+              </label>
+            </div>
+            <button class="btn">Save Download Paths</button>
+          </form>
         </div>
       </div>
     </section>
 
     <section class="tab-panel" data-panel="automation">
       <div class="settings-grid">
-        <div class="setting-box">
-          <h3>Scheduled sync</h3>
+        <div class="setting-box" style="grid-column:1/-1">
+          <h3>Automatic schedules</h3>
           <form method="post" action="/settings/automation"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <label>Subscription sync interval in minutes
-              <input type="number" min="5" max="1440" name="sync_interval_minutes" value="{{ interval }}">
-            </label>
-            <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Automatically retry failed source updates</label>
+            <div class="settings-grid">
+              <div>
+                <label>YouTube subscription sync
+                  <select name="sync_interval_minutes">
+                    {% set schedule_options = [(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
+                    {% for value, label in schedule_options %}
+                      <option value="{{ value }}" {% if interval == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                    {% if interval not in [5,15,30,60,120,360,720,1440] %}
+                      <option value="{{ interval }}" selected>Every {{ interval }} minutes · current</option>
+                    {% endif %}
+                  </select>
+                </label>
+                <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Automatically retry failed Pinchflat source updates</label>
+              </div>
+
+              <div>
+                <label>Emby Download playlist check
+                  <select name="emby_download_poll_minutes">
+                    {% set emby_schedule_options = [(1,'Every minute'),(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
+                    {% for value, label in emby_schedule_options %}
+                      <option value="{{ value }}" {% if emby_download_poll_minutes == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                    {% if emby_download_poll_minutes not in [1,5,15,30,60,120,360,720,1440] %}
+                      <option value="{{ emby_download_poll_minutes }}" selected>Every {{ emby_download_poll_minutes }} minutes · current</option>
+                    {% endif %}
+                  </select>
+                </label>
+                <label><input type="checkbox" name="emby_download_enabled" value="1" {% if emby_download_enabled %}checked{% endif %}> Monitor the private “Emby Download” playlist</label>
+                <label><input type="checkbox" name="emby_download_remove_after_success" value="1" {% if emby_download_remove_after_success %}checked{% endif %}> Remove playlist items after a successful download</label>
+              </div>
+            </div>
             <button class="btn">Save Automation</button>
           </form>
+
+          <div class="actions" style="margin-top:12px">
+            <form method="post" action="/emby-download/ensure"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <button class="btn secondary smallbtn" {% if not google_write_ready %}disabled{% endif %}>Ensure Emby Download playlist exists</button>
+            </form>
+            <span class="muted small">Playlist ID: {{ emby_download_playlist_id or "not created yet" }}</span>
+          </div>
         </div>
+
         <div class="setting-box">
-          <h3>Schedule</h3>
-          <p>Subscriptions: every <strong>{{ interval }} minutes</strong></p>
-          <p>Emby Download: every <strong>{{ emby_download_poll_minutes }} minutes</strong></p>
-          <p class="muted small">Next subscription sync: {{ next_sync or "not available" }}</p>
-          <p class="muted small">Next Emby Download check: {{ next_emby_sync or "not available" }}</p>
+          <h3>Subscription schedule</h3>
+          <div class="metric">{{ interval }} min</div>
+          <p class="muted small">Next run: {{ next_sync or "not available" }}</p>
+        </div>
+
+        <div class="setting-box">
+          <h3>Emby Download schedule</h3>
+          <div class="metric">{{ emby_download_poll_minutes }} min</div>
+          <p class="muted small">Next check: {{ next_emby_sync or "not available" }}</p>
         </div>
       </div>
     </section>

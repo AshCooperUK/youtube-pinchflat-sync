@@ -7,6 +7,7 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import sqlite3
 import struct
 import threading
@@ -29,7 +30,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.7.1"
+VERSION = "1.8.0"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -753,6 +754,134 @@ def normalise_storage_name(value):
     return value.strip(" .")
 
 
+def safe_relative_download_folder(value, default):
+    value = str(value or "").strip().replace("\\", "/").strip("/")
+    if not value:
+        value = default
+
+    candidate = Path(value)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise RuntimeError("Download folders must be relative to the shared /downloads directory.")
+
+    return "/".join(part for part in candidate.parts if part not in {"", "."})
+
+
+def profile_values_for_update(settings):
+    return {
+        "output_path_template": settings.get(
+            "output_path_template",
+            EMBY_OUTPUT_PATH_TEMPLATE,
+        ),
+        "download_subs": bool(settings.get("download_subs")),
+        "embed_subs": bool(settings.get("embed_subs")),
+        "download_thumbnail": bool(settings.get("download_thumbnail")),
+        "embed_thumbnail": bool(settings.get("embed_thumbnail")),
+        "download_metadata": bool(settings.get("download_metadata")),
+        "embed_metadata": bool(settings.get("embed_metadata")),
+        "include_shorts": bool(settings.get("include_shorts")),
+        "include_livestreams": bool(settings.get("include_livestreams", True)),
+        "preferred_resolution": settings.get("preferred_resolution", ""),
+        "redownload_delay_days": settings.get("redownload_delay_days", ""),
+        "download_nfo": bool(settings.get("download_nfo", True)),
+        "download_source_images": bool(
+            settings.get("download_source_images", True)
+        ),
+        "sponsorblock_behaviour": settings.get(
+            "sponsorblock_behaviour",
+            "disabled",
+        ),
+        "sponsorblock_categories": list(
+            settings.get("sponsorblock_categories") or []
+        ),
+    }
+
+
+def subscription_folder_parent(output_template=None):
+    template = str(
+        output_template
+        or media_profile_settings(
+            effective_media_profile_id()
+        ).get("output_path_template")
+        or EMBY_OUTPUT_PATH_TEMPLATE
+    )
+
+    marker = "{{ source_custom_name }}"
+    if marker not in template:
+        return None
+
+    prefix = template.split(marker, 1)[0].strip().replace("\\", "/").strip("/")
+    if not prefix:
+        return DOWNLOAD_ROOT
+
+    try:
+        safe_prefix = safe_relative_download_folder(prefix, "")
+    except RuntimeError:
+        return None
+
+    parent = (DOWNLOAD_ROOT / safe_prefix).resolve()
+    root = DOWNLOAD_ROOT.resolve()
+    if parent != root and root not in parent.parents:
+        return None
+    return parent
+
+
+def delete_subscription_download_folder(channel_title, output_template=None):
+    """
+    Remove only the channel folder used by the selected Pinchflat profile.
+    This runs after Pinchflat is asked to delete the source and media.
+    """
+    parent = subscription_folder_parent(output_template)
+    if parent is None or not parent.exists():
+        return None
+
+    target_name = normalise_storage_name(channel_title)
+    if not target_name:
+        return None
+
+    root = DOWNLOAD_ROOT.resolve()
+    for candidate in parent.iterdir():
+        if not candidate.is_dir():
+            continue
+        if normalise_storage_name(candidate.name) != target_name:
+            continue
+
+        resolved = candidate.resolve()
+        if resolved == root or root not in resolved.parents:
+            raise RuntimeError("Refusing to delete a folder outside /downloads.")
+
+        shutil.rmtree(resolved)
+        storage_snapshot(force=True)
+        return str(resolved)
+
+    return None
+
+
+def pinchflat_stats_summary(profiles=None, storage=None):
+    profiles = profiles if profiles is not None else pinchflat_profiles()
+    storage = storage if storage is not None else storage_snapshot()
+
+    with db() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN pinchflat_added = 1 THEN 1 ELSE 0 END) AS linked,
+                SUM(CASE WHEN pinchflat_added = 1 AND download_enabled = 1 THEN 1 ELSE 0 END) AS enabled,
+                SUM(CASE WHEN pinchflat_added = 1 AND download_enabled = 0 THEN 1 ELSE 0 END) AS disabled,
+                SUM(CASE WHEN active = 1 AND pinchflat_added = 0 THEN 1 ELSE 0 END) AS pending
+            FROM subscriptions
+            """
+        ).fetchone()
+
+    return {
+        "profiles": len(profiles),
+        "linked": int(row["linked"] or 0),
+        "enabled": int(row["enabled"] or 0),
+        "disabled": int(row["disabled"] or 0),
+        "pending": int(row["pending"] or 0),
+        "storage": format_bytes(storage["total"]),
+    }
+
+
 def storage_snapshot(force=False):
     now = time.time()
     with storage_cache_lock:
@@ -1319,7 +1448,7 @@ def new_subscription_policy():
 
 def unsubscribe_policy():
     value = get_setting("unsubscribe_policy", "keep").strip()
-    if value not in {"keep", "disable", "remove"}:
+    if value not in {"keep", "disable", "remove", "remove_delete"}:
         return "keep"
     return value
 
@@ -1752,11 +1881,20 @@ def refresh_subscriptions():
                         media_profile_id=subscription_media_profile_id(row),
                     )
 
-            elif unsubscribe_policy() == "remove":
+            elif unsubscribe_policy() in {"remove", "remove_delete"}:
+                policy = unsubscribe_policy()
+                delete_files = policy == "remove_delete"
+
                 if row.get("pinchflat_added") and row.get("pinchflat_source_id"):
                     delete_pinchflat_source(
                         row["pinchflat_source_id"],
-                        delete_files=False,
+                        delete_files=delete_files,
+                    )
+
+                deleted_folder = None
+                if delete_files:
+                    deleted_folder = delete_subscription_download_folder(
+                        row.get("title") or row["channel_id"]
                     )
 
                 with db() as conn:
@@ -1765,10 +1903,30 @@ def refresh_subscriptions():
                         UPDATE subscriptions
                         SET pinchflat_added = 0,
                             pinchflat_source_id = NULL,
+                            download_enabled = CASE
+                                WHEN ? = 1 THEN 0
+                                ELSE download_enabled
+                            END,
                             last_error = NULL
                         WHERE channel_id = ?
                         """,
-                        (row["channel_id"],),
+                        (1 if delete_files else 0, row["channel_id"]),
+                    )
+
+                if delete_files:
+                    log_activity(
+                        "pinchflat",
+                        "Removed source and downloaded files",
+                        (
+                            f"{row.get('title') or row['channel_id']} removed. "
+                            + (
+                                f"Deleted folder {deleted_folder}."
+                                if deleted_folder
+                                else "Pinchflat media deletion requested; no remaining channel folder was found."
+                            )
+                        ),
+                        "success",
+                        row["channel_id"],
                     )
 
         except Exception as exc:
@@ -3586,6 +3744,7 @@ def index():
     profiles = pinchflat_profiles()
     profile_settings = media_profile_settings(effective_media_profile_id())
     storage = storage_snapshot()
+    pinchflat_stats = pinchflat_stats_summary(profiles, storage)
     for sub in subs:
         sub["disk_bytes"] = channel_disk_usage(sub.get("title"), storage)
         sub["disk_usage"] = format_bytes(sub["disk_bytes"])
@@ -3617,10 +3776,18 @@ def index():
     }
 
     next_sync = None
+    next_emby_sync = None
     try:
         job = scheduler.get_job("subscription-sync")
         if job and job.next_run_time:
             next_sync = job.next_run_time.isoformat()
+    except Exception:
+        pass
+
+    try:
+        job = scheduler.get_job("emby-download-sync")
+        if job and job.next_run_time:
+            next_emby_sync = job.next_run_time.isoformat()
     except Exception:
         pass
 
@@ -3640,6 +3807,7 @@ def index():
         pinchflat_online=pinchflat_health(),
         pinchflat_profile_ready=profile_status["ready"],
         pinchflat_profile_message=profile_status["message"],
+        pinchflat_stats=pinchflat_stats,
         pinchflat_public_url=PINCHFLAT_PUBLIC_URL,
         pinchflat_open_url=(
             f"{PINCHFLAT_PUBLIC_URL}/?onboarding=0"
@@ -3654,6 +3822,7 @@ def index():
         dry_run=DRY_RUN,
         interval=current_sync_interval(),
         next_sync=next_sync,
+        next_emby_sync=next_emby_sync,
         default_history_mode=defaults["mode"],
         default_history_years=defaults["years"],
         default_history_custom_date=defaults["custom_date"],
@@ -3673,6 +3842,12 @@ def index():
         emby_download_poll_minutes=current_emby_poll_interval(),
         emby_download_playlist_id=emby_playlist_id,
         emby_download_remove_after_success=setting_bool("emby_download_remove_after_success", True),
+        emby_download_folder=get_setting("emby_download_folder", "Emby Download"),
+        single_download_folder=get_setting("single_download_folder", "Single Downloads"),
+        subscription_download_template=profile_settings.get(
+            "output_path_template",
+            EMBY_OUTPUT_PATH_TEMPLATE,
+        ),
         youtube_daily_quota=setting_int("youtube_daily_quota", 10000, 100, 100000000),
         current_user=auth["current_user"],
         is_admin=auth["is_admin"],
@@ -3789,7 +3964,7 @@ def save_default_history():
         "Per-source choices override this default.",
         "success",
     )
-    return redirect(url_for("index"))
+    return redirect(url_for("index") + "#downloads")
 
 
 @app.post("/subscriptions/<channel_id>/history")
@@ -4057,7 +4232,7 @@ def save_general_settings():
 
     if new_policy not in {"auto_enable", "disabled", "review"}:
         new_policy = "auto_enable"
-    if removed_policy not in {"keep", "disable", "remove"}:
+    if removed_policy not in {"keep", "disable", "remove", "remove_delete"}:
         removed_policy = "keep"
 
     set_setting("new_subscription_policy", new_policy)
@@ -4083,21 +4258,104 @@ def save_automation_settings():
     except ValueError:
         interval = 60
 
+    try:
+        emby_interval = int(
+            request.form.get("emby_download_poll_minutes", "5")
+        )
+    except ValueError:
+        emby_interval = 5
+
     interval = min(max(interval, 5), 1440)
+    emby_interval = min(max(emby_interval, 1), 1440)
+
     set_setting("sync_interval_minutes", str(interval))
+    set_setting("emby_download_poll_minutes", str(emby_interval))
     set_setting(
         "auto_retry",
         "1" if request.form.get("auto_retry") == "1" else "0",
     )
+    set_setting(
+        "emby_download_enabled",
+        "1" if request.form.get("emby_download_enabled") == "1" else "0",
+    )
+    set_setting(
+        "emby_download_remove_after_success",
+        "1"
+        if request.form.get("emby_download_remove_after_success") == "1"
+        else "0",
+    )
+    set_setting("emby_download_playlist_name", "Emby Download")
+
+    if setting_bool("emby_download_enabled", True) and google_write_scope_ready():
+        try:
+            ensure_emby_download_playlist()
+        except Exception as exc:
+            flash(
+                f"Automation saved, but Emby Download needs attention: {exc}",
+                "error",
+            )
+
     reschedule_sync_job()
 
     log_activity(
         "settings",
         "Automation settings updated",
-        f"Sync interval set to {interval} minutes.",
+        (
+            f"Subscription sync every {interval} minutes. "
+            f"Emby Download every {emby_interval} minutes."
+        ),
     )
     flash("Automation settings saved.", "success")
-    return redirect(url_for("index"))
+    return redirect(url_for("index") + "#automation")
+
+
+@app.post("/settings/download-paths")
+def save_download_paths():
+    profile_id = effective_media_profile_id()
+    subscription_template = (
+        request.form.get(
+            "subscription_download_template",
+            EMBY_OUTPUT_PATH_TEMPLATE,
+        ).strip()
+        or EMBY_OUTPUT_PATH_TEMPLATE
+    )
+
+    try:
+        emby_folder = safe_relative_download_folder(
+            request.form.get("emby_download_folder", ""),
+            "Emby Download",
+        )
+        single_folder = safe_relative_download_folder(
+            request.form.get("single_download_folder", ""),
+            "Single Downloads",
+        )
+
+        current = media_profile_settings(profile_id)
+        if current.get("error"):
+            raise RuntimeError(current["error"])
+
+        values = profile_values_for_update(current)
+        values["output_path_template"] = subscription_template
+        update_media_profile_settings(profile_id, values)
+
+        set_setting("emby_download_folder", emby_folder)
+        set_setting("single_download_folder", single_folder)
+
+        log_activity(
+            "settings",
+            "Download paths updated",
+            (
+                f"Subscriptions: {subscription_template}. "
+                f"Emby Download: {emby_folder}. "
+                f"Single Download: {single_folder}."
+            ),
+            "success",
+        )
+        flash("Download paths saved.", "success")
+    except Exception as exc:
+        flash(f"Download paths could not be saved: {exc}", "error")
+
+    return redirect(url_for("index") + "#downloads")
 
 
 @app.post("/settings/pinchflat")
@@ -4505,16 +4763,29 @@ def unsubscribe_from_youtube(channel_id):
                 download_enabled=False,
                 media_profile_id=subscription_media_profile_id(row_dict),
             )
-        elif policy == "remove" and row_dict.get("pinchflat_added") and row_dict.get("pinchflat_source_id"):
-            delete_pinchflat_source(row_dict["pinchflat_source_id"], delete_files=False)
+        elif policy in {"remove", "remove_delete"} and row_dict.get("pinchflat_added") and row_dict.get("pinchflat_source_id"):
+            delete_files = policy == "remove_delete"
+            delete_pinchflat_source(
+                row_dict["pinchflat_source_id"],
+                delete_files=delete_files,
+            )
+            if delete_files:
+                delete_subscription_download_folder(
+                    row_dict.get("title") or channel_id
+                )
             with db() as conn:
                 conn.execute(
                     """
                     UPDATE subscriptions
-                    SET pinchflat_added = 0, pinchflat_source_id = NULL
+                    SET pinchflat_added = 0,
+                        pinchflat_source_id = NULL,
+                        download_enabled = CASE
+                            WHEN ? = 1 THEN 0
+                            ELSE download_enabled
+                        END
                     WHERE channel_id = ?
                     """,
-                    (channel_id,),
+                    (1 if delete_files else 0, channel_id),
                 )
 
         log_activity(
@@ -4580,45 +4851,22 @@ def recent_download_status():
 
 @app.post("/settings/youtube")
 def save_youtube_settings():
-    set_setting(
-        "emby_download_enabled",
-        "1" if request.form.get("emby_download_enabled") == "1" else "0",
-    )
-    set_setting("emby_download_playlist_name", "Emby Download")
-    try:
-        poll_minutes = int(request.form.get("emby_download_poll_minutes", "5"))
-    except ValueError:
-        poll_minutes = 5
-    poll_minutes = min(max(poll_minutes, 1), 1440)
-    set_setting("emby_download_poll_minutes", str(poll_minutes))
-    set_setting(
-        "emby_download_remove_after_success",
-        "1" if request.form.get("emby_download_remove_after_success") == "1" else "0",
-    )
     try:
         quota = int(request.form.get("youtube_daily_quota", "10000"))
     except ValueError:
         quota = 10000
+
     quota = min(max(quota, 100), 100000000)
     set_setting("youtube_daily_quota", str(quota))
-
-    if setting_bool("emby_download_enabled", True) and google_write_scope_ready():
-        try:
-            ensure_emby_download_playlist()
-        except Exception as exc:
-            flash(f"Settings saved, but Emby Download setup needs attention: {exc}", "error")
-            return redirect(url_for("index"))
-
-    reschedule_sync_job()
 
     log_activity(
         "settings",
         "YouTube settings updated",
-        "Emby Download and API settings were updated.",
+        f"Daily API quota estimate set to {quota}.",
         "info",
     )
     flash("YouTube settings saved.", "success")
-    return redirect(url_for("index"))
+    return redirect(url_for("index") + "#youtube")
 
 
 @app.post("/emby-download/ensure")

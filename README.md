@@ -2,6 +2,22 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.8.0
+
+Workflow and settings usability update.
+
+- Adds an unsubscribe policy which removes the Pinchflat source and deletes its downloaded media.
+- After Pinchflat media deletion, the app also removes any remaining channel folder under the selected subscription path.
+- Adds Pinchflat statistics to Settings > Pinchflat and removes the duplicate Open Pinchflat button from that tab.
+- The Media Profile save button now names the selected profile.
+- Adds editable download paths for subscription auto-downloads, Emby Download and Single Download.
+- Moves Emby Download scheduling from YouTube to Automation.
+- Replaces raw schedule minute boxes with friendly schedule dropdowns.
+- Shows next subscription and Emby Download run times.
+- Removes the user/account badge from the main header.
+- The logout button now reads `Log out username`.
+- YouTube settings now focus on Google OAuth and API quota configuration.
+
 ## Version 1.7.1
 
 Pinchflat settings display and UI maintenance release.
