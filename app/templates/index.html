@@ -103,6 +103,9 @@
     .source-toggle input:checked + .toggle-track { background:var(--green); border-color:var(--green); }
     .source-toggle input:checked + .toggle-track::after { transform:translateX(19px); background:#07120b; }
     .source-toggle-text { min-width:58px; font-size:13px; }
+    .power-toggle-wrap { display:flex; align-items:center; gap:9px; margin-top:8px; }
+    .power-toggle-wrap form { margin:0; }
+    .power-toggle-label { color:var(--muted); font-size:13px; }
     .approve-state { min-width:116px; }
     .approve-state .btn { width:100%; }
     .source-save-actions { min-width:126px; display:flex; flex-direction:column; gap:7px; align-items:stretch; }
@@ -225,15 +228,40 @@
         <div class="metric bad">Setup</div>
       {% endif %}
     </div>
-    <div class="card">
+    <div class="card" id="top">
       <div class="muted small">Pinchflat</div>
-      {% if pinchflat_online and pinchflat_profile_ready %}
+      {% if pinchflat_online %}
         <div class="metric ok">Online</div>
-        <div class="muted small">{{ pinchflat_profile_message }}</div>
-      {% elif pinchflat_online %}
-        <div class="metric warn">Setup</div>
+      {% elif pinchflat_container.control_available and not pinchflat_container.running %}
+        <div class="metric bad">Stopped</div>
       {% else %}
         <div class="metric bad">Offline</div>
+      {% endif %}
+
+      {% if is_admin and pinchflat_container.control_available and pinchflat_container.exists %}
+        <div class="power-toggle-wrap">
+          <form method="post" action="/pinchflat/power">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <input
+              type="hidden"
+              name="action"
+              value="{{ 'stop' if pinchflat_container.running else 'start' }}"
+            >
+            <label class="source-toggle" title="Start or stop the Pinchflat Docker container">
+              <input
+                type="checkbox"
+                {% if pinchflat_container.running %}checked{% endif %}
+                onchange="this.form.submit()"
+              >
+              <span class="toggle-track"></span>
+              <span class="source-toggle-text">
+                {{ 'Enabled' if pinchflat_container.running else 'Disabled' }}
+              </span>
+            </label>
+          </form>
+        </div>
+      {% elif is_admin %}
+        <div class="muted small">Docker power control unavailable</div>
       {% endif %}
     </div>
     <div class="card">

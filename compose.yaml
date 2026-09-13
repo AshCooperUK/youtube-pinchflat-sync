@@ -54,6 +54,8 @@ services:
       PINCHFLAT_URL: http://butane.grovefarm:8945
       PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
       PINCHFLAT_DB_PATH: /pinchflat-config/pinchflat.db
+      PINCHFLAT_CONTAINER_NAME: pinchflat
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
       PINCHFLAT_MEDIA_PROFILE_ID: "1"
       PINCHFLAT_BASIC_AUTH_USERNAME: ""
       PINCHFLAT_BASIC_AUTH_PASSWORD: ""
@@ -79,6 +81,9 @@ services:
         source: /media/NVME-Storage/AppData/pinchflat
         target: /pinchflat-config
         read_only: true
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
     labels:
       icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
     x-casaos:
@@ -96,6 +101,9 @@ services:
         - container: /pinchflat-config
           description:
             en_US: Read-only Pinchflat database used to reconcile removed sources
+        - container: /var/run/docker.sock
+          description:
+            en_US: Docker Engine control for Pinchflat start, stop and direct source cleanup
       envs:
         - container: APP_URL
           description:
@@ -109,6 +117,12 @@ services:
         - container: PINCHFLAT_URL
           description:
             en_US: Internal Pinchflat URL
+        - container: PINCHFLAT_CONTAINER_NAME
+          description:
+            en_US: Docker container name controlled by the Pinchflat power switch
+        - container: DOCKER_SOCKET_PATH
+          description:
+            en_US: Docker Engine Unix socket path
         - container: PINCHFLAT_PUBLIC_URL
           description:
             en_US: Browser URL used by the Open Pinchflat button
@@ -142,7 +156,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.8.7"
+  version: "1.9.0"
   update_at: "2026-09-13"
   release_notes:
     en_US: Adds native username and password authentication, optional authenticator 2FA, recovery codes, user roles, session security, login throttling and account management.

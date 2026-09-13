@@ -2,6 +2,36 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.9.0
+
+Direct Pinchflat control release.
+
+- Fixes Pinchflat sources getting stuck on `Removing from Pinchflat`.
+- The sync app now mounts the Docker Engine socket and controls its own Pinchflat container.
+- Source removal now uses `Pinchflat.Sources.delete_source/2` inside the Pinchflat container as the primary deletion path.
+- This removes the source synchronously through Pinchflat's own application code rather than relying on the web form or queued SourceDeletionWorker.
+- Pinchflat's own source deletion removes associated source tasks before removing the source, which stops pending source work.
+- Existing downloaded files are kept when a channel is simply disabled.
+- The YouTube unsubscribe policy still controls whether downloaded files are retained or deleted.
+- Adds an Enabled / Disabled power switch to the Pinchflat dashboard card.
+- The switch starts and stops the `pinchflat` Docker container.
+- Background source reconciliation pauses while Pinchflat is intentionally stopped.
+- Full YouTube refresh and Emby Download processing continue while Pinchflat is stopped.
+- Adds the `/var/run/docker.sock` mount, `PINCHFLAT_CONTAINER_NAME` and `DOCKER_SOCKET_PATH` settings.
+
+This release needs the ZimaOS application to be recreated or updated from the new YAML so the Docker socket mount is applied.
+
+## Version 1.8.8
+
+Pinchflat source deletion transport fix.
+
+- Fixes disabled sources remaining in Pinchflat after the app says `Removing from Pinchflat`.
+- Uses Pinchflat's real HTTP `DELETE /sources/:id` route rather than replaying the HTML form with `POST + _method=delete`.
+- Keeps Pinchflat's CSRF token and `delete_files` parameter when issuing the DELETE request.
+- Prevents an in-progress source deletion from being immediately handled by Automatic Retry in the same sync.
+- Source-authority and unsubscribe reconciliation continue checking deletion every five minutes.
+- Once Pinchflat removes the source, the app clears the stored Pinchflat source link and shows `Not in Pinchflat`.
+
 ## Version 1.8.7
 
 Authoritative Enabled toggle release.

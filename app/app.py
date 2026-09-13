@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import http.client
 import io
 import json
 import os
@@ -8,6 +9,7 @@ import queue
 import re
 import secrets
 import shutil
+import socket
 import sqlite3
 import struct
 import threading
@@ -30,7 +32,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.8.7"
+VERSION = "1.9.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -66,6 +68,13 @@ PINCHFLAT_PUBLIC_URL = os.getenv(
 PINCHFLAT_DB_PATH = Path(
     os.getenv("PINCHFLAT_DB_PATH", "/pinchflat-config/pinchflat.db")
 )
+DOCKER_SOCKET_PATH = Path(
+    os.getenv("DOCKER_SOCKET_PATH", "/var/run/docker.sock")
+)
+PINCHFLAT_CONTAINER_NAME = os.getenv(
+    "PINCHFLAT_CONTAINER_NAME",
+    "pinchflat",
+).strip() or "pinchflat"
 PINCHFLAT_USER = os.getenv("PINCHFLAT_BASIC_AUTH_USERNAME", "")
 PINCHFLAT_PASS = os.getenv("PINCHFLAT_BASIC_AUTH_PASSWORD", "")
 
@@ -1170,6 +1179,9 @@ def reconcile_removed_pinchflat_sources():
     The read-only Pinchflat DB fallback also finds orphan sources left by older
     app versions which cleared pinchflat_source_id before deletion completed.
     """
+    if not pinchflat_health():
+        return {"checked": 0, "scheduled": 0}
+
     policy = unsubscribe_policy()
     if policy not in {"remove", "remove_delete"}:
         return {"checked": 0, "scheduled": 0}
@@ -1250,7 +1262,7 @@ def reconcile_removed_pinchflat_sources():
                     """,
                     (
                         str(source_id),
-                        "Pinchflat source removal is in progress.",
+                        "Pinchflat source removal is in progress. Waiting for Pinchflat deletion worker.",
                         row["channel_id"],
                     ),
                 )
@@ -1391,7 +1403,7 @@ def remove_subscription_source_keep_files(row):
             """,
             (
                 str(source_id),
-                "Pinchflat source removal is in progress.",
+                "Pinchflat source removal is in progress. Waiting for Pinchflat deletion worker.",
                 row["channel_id"],
             ),
         )
@@ -1515,6 +1527,13 @@ def reconcile_active_source_authority(max_changes=25):
     Older releases allowed disabled channels to remain as Pinchflat sources.
     At most max_changes source mutations are performed per pass.
     """
+    if not pinchflat_health():
+        return {
+            "checked": 0,
+            "changed": 0,
+            "errors": 0,
+        }
+
     with db() as conn:
         rows = [
             dict(row)
@@ -2838,7 +2857,7 @@ def refresh_subscriptions():
                             """,
                             (
                                 str(source_id),
-                                "Pinchflat source removal is in progress.",
+                                "Pinchflat source removal is in progress. Waiting for Pinchflat deletion worker.",
                                 row["channel_id"],
                             ),
                         )
@@ -2919,6 +2938,274 @@ def refresh_subscriptions():
         "removed": len(removed_rows),
         "policy_errors": policy_errors,
     }
+
+
+class DockerUnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, socket_path, timeout=30):
+        super().__init__("localhost", timeout=timeout)
+        self.socket_path = str(socket_path)
+
+    def connect(self):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect(self.socket_path)
+        self.sock = sock
+
+
+def docker_request(method, path, payload=None, timeout=30, versioned=True):
+    if not DOCKER_SOCKET_PATH.exists():
+        raise RuntimeError("Docker socket is not mounted into the app.")
+
+    body = None
+    headers = {"Host": "localhost"}
+
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+        headers["Content-Length"] = str(len(body))
+
+    if versioned:
+        version_status, _headers, version_body = docker_request(
+            "GET",
+            "/version",
+            timeout=timeout,
+            versioned=False,
+        )
+        if version_status >= 400:
+            raise RuntimeError("Docker Engine version could not be read.")
+        api_version = json.loads(
+            version_body.decode("utf-8", "replace")
+        ).get("ApiVersion", "1.41")
+        path = f"/v{api_version}{path}"
+
+    conn = DockerUnixHTTPConnection(
+        DOCKER_SOCKET_PATH,
+        timeout=timeout,
+    )
+
+    try:
+        conn.request(
+            method,
+            path,
+            body=body,
+            headers=headers,
+        )
+        response = conn.getresponse()
+        response_body = response.read()
+        response_headers = dict(response.getheaders())
+        return response.status, response_headers, response_body
+    finally:
+        conn.close()
+
+
+def pinchflat_container_status():
+    if not DOCKER_SOCKET_PATH.exists():
+        return {
+            "control_available": False,
+            "exists": False,
+            "running": pinchflat_health_http_only(),
+            "status": "unavailable",
+            "error": "Docker socket is not mounted.",
+        }
+
+    try:
+        name = quote(PINCHFLAT_CONTAINER_NAME, safe="")
+        status, _headers, body = docker_request(
+            "GET",
+            f"/containers/{name}/json",
+            timeout=10,
+        )
+
+        if status == 404:
+            return {
+                "control_available": True,
+                "exists": False,
+                "running": False,
+                "status": "not found",
+                "error": "",
+            }
+
+        if status >= 400:
+            raise RuntimeError(
+                f"Docker returned HTTP {status}: "
+                f"{body.decode('utf-8', 'replace')[:300]}"
+            )
+
+        info = json.loads(body.decode("utf-8", "replace"))
+        state = info.get("State") or {}
+
+        return {
+            "control_available": True,
+            "exists": True,
+            "running": bool(state.get("Running")),
+            "status": state.get("Status") or "unknown",
+            "error": state.get("Error") or "",
+        }
+
+    except Exception as exc:
+        return {
+            "control_available": False,
+            "exists": False,
+            "running": pinchflat_health_http_only(),
+            "status": "unavailable",
+            "error": str(exc),
+        }
+
+
+def set_pinchflat_container_power(running):
+    state = pinchflat_container_status()
+    if not state["control_available"]:
+        raise RuntimeError(
+            "Docker control is unavailable. Recreate the app with the "
+            "/var/run/docker.sock mount from the v1.9.0 YAML."
+        )
+    if not state["exists"]:
+        raise RuntimeError(
+            f"Docker container {PINCHFLAT_CONTAINER_NAME!r} was not found."
+        )
+
+    name = quote(PINCHFLAT_CONTAINER_NAME, safe="")
+
+    if running:
+        status, _headers, body = docker_request(
+            "POST",
+            f"/containers/{name}/start",
+            timeout=30,
+        )
+        if status not in (204, 304):
+            raise RuntimeError(
+                f"Docker could not start Pinchflat. HTTP {status}: "
+                f"{body.decode('utf-8', 'replace')[:300]}"
+            )
+
+        deadline = time.time() + 45
+        while time.time() < deadline:
+            if pinchflat_health_http_only(timeout=3):
+                break
+            time.sleep(1)
+
+    else:
+        status, _headers, body = docker_request(
+            "POST",
+            f"/containers/{name}/stop?t=20",
+            timeout=30,
+        )
+        if status not in (204, 304):
+            raise RuntimeError(
+                f"Docker could not stop Pinchflat. HTTP {status}: "
+                f"{body.decode('utf-8', 'replace')[:300]}"
+            )
+
+    return pinchflat_container_status()
+
+
+def docker_exec_in_pinchflat(command, timeout=180):
+    state = pinchflat_container_status()
+    if not state["control_available"]:
+        raise RuntimeError("Docker control is unavailable.")
+    if not state["exists"]:
+        raise RuntimeError("The Pinchflat Docker container was not found.")
+    if not state["running"]:
+        raise RuntimeError("Pinchflat is stopped.")
+
+    name = quote(PINCHFLAT_CONTAINER_NAME, safe="")
+    create_payload = {
+        "AttachStdout": True,
+        "AttachStderr": True,
+        "Tty": True,
+        "Cmd": list(command),
+    }
+
+    status, _headers, body = docker_request(
+        "POST",
+        f"/containers/{name}/exec",
+        payload=create_payload,
+        timeout=30,
+    )
+    if status not in (200, 201):
+        raise RuntimeError(
+            f"Docker exec could not be created. HTTP {status}: "
+            f"{body.decode('utf-8', 'replace')[:500]}"
+        )
+
+    exec_id = json.loads(
+        body.decode("utf-8", "replace")
+    ).get("Id")
+    if not exec_id:
+        raise RuntimeError("Docker did not return an exec ID.")
+
+    status, _headers, output = docker_request(
+        "POST",
+        f"/exec/{quote(exec_id, safe='')}/start",
+        payload={"Detach": False, "Tty": True},
+        timeout=timeout,
+    )
+    if status not in (200, 201):
+        raise RuntimeError(
+            f"Docker exec could not start. HTTP {status}: "
+            f"{output.decode('utf-8', 'replace')[:500]}"
+        )
+
+    status, _headers, inspect_body = docker_request(
+        "GET",
+        f"/exec/{quote(exec_id, safe='')}/json",
+        timeout=30,
+    )
+    if status >= 400:
+        raise RuntimeError(
+            f"Docker exec status could not be read. HTTP {status}."
+        )
+
+    inspect = json.loads(
+        inspect_body.decode("utf-8", "replace")
+    )
+    exit_code = inspect.get("ExitCode")
+
+    decoded = output.decode("utf-8", "replace").strip()
+    if exit_code not in (0, None):
+        raise RuntimeError(
+            f"Pinchflat command exited with code {exit_code}. "
+            f"{decoded[:1000]}"
+        )
+
+    return decoded
+
+
+def delete_pinchflat_source_direct(source_id, delete_files=False):
+    """
+    Delete through Pinchflat's own Elixir context inside its container.
+
+    This bypasses the web form and SourceDeletionWorker queue while still
+    using Pinchflat.Sources.delete_source/2, which removes all source tasks,
+    media records and the source itself.
+    """
+    source_id = int(source_id)
+    delete_literal = "true" if delete_files else "false"
+
+    expression = (
+        "case Pinchflat.Repo.get(Pinchflat.Sources.Source, "
+        f"{source_id}) do "
+        'nil -> IO.puts("SOURCE_NOT_FOUND"); '
+        "source -> "
+        "IO.inspect("
+        "Pinchflat.Sources.delete_source("
+        f"source, delete_files: {delete_literal}"
+        '), label: "DELETE_RESULT") '
+        "end"
+    )
+
+    output = docker_exec_in_pinchflat(
+        ["bin/pinchflat", "eval", expression],
+        timeout=300,
+    )
+
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if not pinchflat_source_exists_in_db(source_id):
+            return True
+        time.sleep(0.5)
+
+    return not pinchflat_source_exists_in_db(source_id)
 
 
 def pinchflat_db_readonly():
@@ -3046,15 +3333,27 @@ def clear_stale_pinchflat_link(channel_id):
         )
 
 
-def pinchflat_health():
+def pinchflat_health_http_only(timeout=10):
     try:
         response = requests.get(
             f"{PINCHFLAT_URL}/healthcheck",
-            timeout=10,
+            timeout=timeout,
         )
         return response.ok
     except requests.RequestException:
         return False
+
+
+def pinchflat_health():
+    if DOCKER_SOCKET_PATH.exists():
+        try:
+            state = pinchflat_container_status()
+            if state["control_available"] and not state["running"]:
+                return False
+        except Exception:
+            pass
+
+    return pinchflat_health_http_only(timeout=10)
 
 
 def scrape_form_payload(form):
@@ -3869,6 +4168,27 @@ def delete_pinchflat_source(source_id, delete_files=False):
     if not source_id or not pinchflat_source_exists(source_id):
         return True
 
+    docker_state = pinchflat_container_status()
+    if docker_state["control_available"]:
+        if not docker_state["running"]:
+            return False
+
+        try:
+            return delete_pinchflat_source_direct(
+                source_id,
+                delete_files=delete_files,
+            )
+        except Exception as exc:
+            log_activity(
+                "pinchflat",
+                "Direct source deletion failed",
+                (
+                    f"Source {source_id}: {exc}. "
+                    "Falling back to Pinchflat's web deletion route."
+                ),
+                "warning",
+            )
+
     session_obj = pinchflat_session()
     source_url = f"{PINCHFLAT_URL}/sources/{source_id}"
     response = session_obj.get(
@@ -3902,7 +4222,7 @@ def delete_pinchflat_source(source_id, delete_files=False):
         return not pinchflat_source_exists(source_id)
 
     payload = scrape_form_payload(delete_form)
-    payload["_method"] = "delete"
+    payload.pop("_method", None)
     payload["delete_files"] = "true" if delete_files else "false"
 
     action = delete_form.get("action") or f"/sources/{source_id}"
@@ -3912,7 +4232,9 @@ def delete_pinchflat_source(source_id, delete_files=False):
         else f"{PINCHFLAT_URL}{action if action.startswith('/') else '/' + action}"
     )
 
-    result = session_obj.post(
+    # Pinchflat's router exposes DELETE /sources/:id directly. Sending the
+    # actual HTTP verb avoids relying on Phoenix/Plug form-method override.
+    result = session_obj.delete(
         target,
         data=payload,
         timeout=180,
@@ -3963,6 +4285,8 @@ def retry_failed_source_updates():
             FROM subscriptions
             WHERE active = 1
               AND TRIM(COALESCE(last_error, '')) <> ''
+              AND COALESCE(last_error, '') NOT LIKE
+                  'Pinchflat source removal is in progress%'
             ORDER BY retry_count ASC, title COLLATE NOCASE ASC
             """
         ).fetchall()
@@ -4130,9 +4454,16 @@ def sync_once():
             run_id = cur.lastrowid
 
         refresh = refresh_subscriptions()
-        authority = reconcile_active_source_authority()
-        result = add_pending_sources()
-        retry = retry_failed_source_updates()
+
+        if pinchflat_health():
+            authority = reconcile_active_source_authority()
+            result = add_pending_sources()
+            retry = retry_failed_source_updates()
+        else:
+            authority = {"checked": 0, "changed": 0, "errors": 0}
+            result = {"added": 0, "skipped": 0, "errors": 0}
+            retry = {"attempted": 0, "fixed": 0, "errors": 0}
+
         emby = sync_emby_download_playlist()
 
         total_errors = (
@@ -4865,6 +5196,7 @@ def index():
 
     subs = [subscription_view(row) for row in rows]
     defaults = default_history_settings()
+    pinchflat_container = pinchflat_container_status()
     profile_status = pinchflat_profile_status()
     profiles = pinchflat_profiles()
     profile_settings = media_profile_settings(effective_media_profile_id())
@@ -4935,6 +5267,7 @@ def index():
         emby_output_path_template=EMBY_OUTPUT_PATH_TEMPLATE,
         sponsorblock_common_categories=SPONSORBLOCK_COMMON_CATEGORIES,
         pinchflat_online=pinchflat_health(),
+        pinchflat_container=pinchflat_container,
         pinchflat_profile_ready=profile_status["ready"],
         pinchflat_profile_message=profile_status["message"],
         pinchflat_stats=pinchflat_stats,
@@ -5619,6 +5952,44 @@ def save_download_paths():
         flash(f"Download paths could not be saved: {exc}", "error")
 
     return redirect(url_for("index") + "#downloads")
+
+
+@app.post("/pinchflat/power")
+def pinchflat_power():
+    action = request.form.get("action", "").strip().lower()
+
+    if action not in {"start", "stop"}:
+        flash("Unknown Pinchflat power action.", "error")
+        return redirect(url_for("index") + "#top")
+
+    try:
+        running = action == "start"
+        state = set_pinchflat_container_power(running)
+
+        log_activity(
+            "pinchflat",
+            f"Pinchflat {'started' if running else 'stopped'}",
+            (
+                f"Docker container {PINCHFLAT_CONTAINER_NAME} is "
+                f"{state['status']}."
+            ),
+            "success",
+        )
+
+        flash(
+            f"Pinchflat {'started' if running else 'stopped'}.",
+            "success",
+        )
+    except Exception as exc:
+        log_activity(
+            "pinchflat",
+            "Pinchflat power control failed",
+            str(exc),
+            "error",
+        )
+        flash(f"Pinchflat power control failed: {exc}", "error")
+
+    return redirect(url_for("index") + "#top")
 
 
 @app.post("/settings/pinchflat")
