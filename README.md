@@ -2,6 +2,21 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.0.1
+
+Discover and unsubscribe fixes.
+
+- Restores the per-channel YouTube Unsubscribe route accidentally omitted from v2.0.0.
+- Unsubscribe again calls the YouTube subscriptions API and applies the configured Pinchflat keep, disable, remove, or remove-and-delete policy.
+- Adds a Top 100 section to YouTube Discover.
+- Top 100 uses Wikipedia's current public list of the most-subscribed YouTube channels and caches the result for six hours.
+- Top 100 does not consume YouTube Data API search quota.
+- Fixes Random Shorts rendering by allowing the YouTube iframe API and player in the Content Security Policy.
+- Random Shorts now use the privacy-enhanced YouTube player host.
+- The Shorts player is reduced to a 330px-wide portrait player so it fits inside the popup.
+- Shorts start muted for reliable browser autoplay and include a Sound on / Mute button.
+- Automatic next-Short playback remains available.
+
 ## Version 2.0.0
 
 Major discovery, automation and media-management release.

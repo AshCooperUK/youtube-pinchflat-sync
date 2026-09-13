@@ -129,7 +129,7 @@
     .modal-body { padding:18px 20px 24px; overflow:auto; max-height:calc(90vh - 72px); }
     #settings-dialog { height:min(900px,90vh); }
     #settings-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; overflow-x:hidden; }
-    #discover-dialog { width:min(1220px,96vw); height:min(900px,92vh); }
+    #discover-dialog { width:min(1220px,96vw); height:min(840px,92vh); }
     #discover-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
     .discover-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
     .discover-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; }
@@ -138,11 +138,17 @@
     .discover-avatar { width:104px; height:104px; border-radius:50%; object-fit:cover; border:2px solid #415575; background:#08111f; }
     .discover-video-title { color:var(--text); font-weight:700; line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
     .discover-channel { color:var(--muted); font-size:13px; }
-    .shorts-shell { display:grid; grid-template-columns:minmax(300px,430px) minmax(220px,1fr); gap:22px; align-items:start; }
-    .shorts-player-frame { width:100%; aspect-ratio:9/16; max-height:68vh; background:#000; border-radius:16px; overflow:hidden; }
-    .shorts-player-frame iframe { width:100%; height:100%; }
+    .shorts-shell { display:grid; grid-template-columns:minmax(260px,330px) minmax(240px,1fr); gap:22px; align-items:start; }
+    .shorts-player-frame { width:min(100%,330px); aspect-ratio:9/16; background:#000; border-radius:16px; overflow:hidden; margin:0 auto; }
+    .shorts-player-frame iframe { display:block; width:100%; height:100%; border:0; }
     .shorts-info { padding:16px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
-    @media (max-width:760px) { .shorts-shell { grid-template-columns:1fr; } .shorts-player-frame { max-width:420px; margin:auto; } }
+    .top100-rank { font-size:13px; color:var(--accent); font-weight:800; }
+    .top100-subs { color:var(--text); font-weight:800; }
+    .top100-country { color:var(--muted); font-size:12px; min-height:18px; }
+    @media (max-width:760px) {
+      .shorts-shell { grid-template-columns:1fr; }
+      .shorts-player-frame { width:min(100%,290px); }
+    }
     .tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:18px; }
     .tab-btn { border:1px solid var(--line); background:#132139; color:var(--text); padding:8px 11px; border-radius:8px; cursor:pointer; }
     .tab-btn.active { background:var(--blue); border-color:var(--blue); }
@@ -618,13 +624,18 @@
     <div class="discover-toolbar">
       <button id="discover-videos-btn" class="btn" type="button" onclick="showDiscoverMode('videos')">Random Videos</button>
       <button id="discover-shorts-btn" class="btn secondary" type="button" onclick="showDiscoverMode('shorts')">Random Shorts</button>
-      <button class="btn ghost" type="button" onclick="refreshDiscover()">Shuffle</button>
+      <button id="discover-top100-btn" class="btn secondary" type="button" onclick="showDiscoverMode('top100')">Top 100</button>
+      <button class="btn ghost" type="button" onclick="refreshDiscover()">Refresh</button>
       <span id="discover-quota" class="muted small"></span>
     </div>
     <div id="discover-loading" class="empty hidden">Finding something different…</div>
     <div id="discover-error" class="flash error hidden"></div>
     <div id="discover-videos-panel">
       <div id="discover-grid" class="discover-grid"></div>
+    </div>
+    <div id="discover-top100-panel" class="hidden">
+      <p class="muted small">Current public ranking of the 100 most-subscribed YouTube channels. Click a tile to open the channel on YouTube.</p>
+      <div id="discover-top100-grid" class="discover-grid"></div>
     </div>
     <div id="discover-shorts-panel" class="hidden">
       <div class="shorts-shell">
@@ -634,6 +645,7 @@
           <p id="shorts-channel" class="muted"></p>
           <div class="actions">
             <button class="btn" type="button" onclick="nextRandomShort()">Next Short</button>
+            <button id="shorts-sound-btn" class="btn secondary" type="button" onclick="toggleShortsSound()">Sound on</button>
             <a id="shorts-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank">Open on YouTube</a>
           </div>
           <label style="margin-top:16px"><input id="shorts-auto-next" type="checkbox" checked> Automatically play the next Short when the current video finishes</label>
@@ -1191,9 +1203,10 @@ const singleDownloadDialog = document.getElementById("single-download-dialog");
 const discoverDialog = document.getElementById("discover-dialog");
 let singleDownloadTimer = null;
 let discoverMode = "videos";
-let discoverResults = {videos: [], shorts: []};
+let discoverResults = {videos: [], shorts: [], top100: []};
 let shortsIndex = 0;
 let shortsPlayer = null;
+let shortsMuted = true;
 let youtubeIframeApiPromise = null;
 
 function openSettings(tab="{{ 'general' if is_admin else 'security' }}") {
@@ -1238,11 +1251,15 @@ function ensureYouTubeIframeApi() {
 }
 
 async function showDiscoverMode(mode) {
-  discoverMode = mode === "shorts" ? "shorts" : "videos";
+  discoverMode = ["videos", "shorts", "top100"].includes(mode) ? mode : "videos";
+
   document.getElementById("discover-videos-panel").classList.toggle("hidden", discoverMode !== "videos");
   document.getElementById("discover-shorts-panel").classList.toggle("hidden", discoverMode !== "shorts");
+  document.getElementById("discover-top100-panel").classList.toggle("hidden", discoverMode !== "top100");
+
   document.getElementById("discover-videos-btn").classList.toggle("secondary", discoverMode !== "videos");
   document.getElementById("discover-shorts-btn").classList.toggle("secondary", discoverMode !== "shorts");
+  document.getElementById("discover-top100-btn").classList.toggle("secondary", discoverMode !== "top100");
 
   if (!discoverResults[discoverMode].length) {
     await loadDiscover(discoverMode);
@@ -1268,14 +1285,21 @@ async function loadDiscover(mode, force=false) {
     if (!data.ok) throw new Error(data.error || "YouTube discovery failed.");
 
     discoverResults[mode] = data.results || [];
-    document.getElementById("discover-quota").textContent =
-      `YouTube discovery searches remaining today: ${data.search_remaining}`;
 
-    if (mode === "videos") {
-      renderDiscoverTiles(discoverResults.videos);
+    if (mode === "top100") {
+      document.getElementById("discover-quota").textContent =
+        `Top 100 source: ${data.source || "Wikipedia"}. No YouTube search quota used.`;
+      renderTop100Tiles(discoverResults.top100);
     } else {
-      shortsIndex = 0;
-      await playRandomShort(0);
+      document.getElementById("discover-quota").textContent =
+        `YouTube discovery searches remaining today: ${data.search_remaining}`;
+
+      if (mode === "videos") {
+        renderDiscoverTiles(discoverResults.videos);
+      } else {
+        shortsIndex = 0;
+        await playRandomShort(0);
+      }
     }
   } catch (err) {
     error.textContent = err.message || String(err);
@@ -1325,6 +1349,53 @@ function renderDiscoverTiles(items) {
   });
 }
 
+function renderTop100Tiles(items) {
+  const grid = document.getElementById("discover-top100-grid");
+  grid.replaceChildren();
+
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "The Top 100 list is currently unavailable.";
+    grid.appendChild(empty);
+    return;
+  }
+
+  items.forEach(item => {
+    const link = document.createElement("a");
+    link.className = "discover-tile";
+    link.href = item.channel_url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = `#${item.rank} ${item.channel_title}`;
+
+    const img = document.createElement("img");
+    img.className = "discover-avatar";
+    img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    img.alt = `${item.channel_title} channel`;
+
+    const rank = document.createElement("div");
+    rank.className = "top100-rank";
+    rank.textContent = `#${item.rank}`;
+
+    const channel = document.createElement("div");
+    channel.className = "discover-video-title";
+    channel.textContent = item.channel_title;
+
+    const subscribers = document.createElement("div");
+    subscribers.className = "top100-subs";
+    subscribers.textContent = `${item.subscribers}M subscribers`;
+
+    const country = document.createElement("div");
+    country.className = "top100-country";
+    country.textContent = item.country || "";
+
+    link.append(img, rank, channel, subscribers, country);
+    grid.appendChild(link);
+  });
+}
+
+
 async function playRandomShort(index) {
   const items = discoverResults.shorts || [];
   if (!items.length) return;
@@ -1342,13 +1413,23 @@ async function playRandomShort(index) {
       width: "100%",
       height: "100%",
       videoId: item.video_id,
+      host: "https://www.youtube-nocookie.com",
       playerVars: {
         autoplay: 1,
         playsinline: 1,
         rel: 0,
-        modestbranding: 1
+        modestbranding: 1,
+        origin: window.location.origin
       },
       events: {
+        onReady: event => {
+          try {
+            event.target.mute();
+            shortsMuted = true;
+            updateShortsSoundButton();
+            event.target.playVideo();
+          } catch (_) {}
+        },
         onStateChange: event => {
           if (
             event.data === YT.PlayerState.ENDED &&
@@ -1368,6 +1449,27 @@ function nextRandomShort() {
   const items = discoverResults.shorts || [];
   if (!items.length) return;
   playRandomShort((shortsIndex + 1) % items.length);
+}
+
+function updateShortsSoundButton() {
+  const button = document.getElementById("shorts-sound-btn");
+  if (!button) return;
+  button.textContent = shortsMuted ? "Sound on" : "Mute";
+}
+
+function toggleShortsSound() {
+  if (!shortsPlayer) return;
+
+  try {
+    if (shortsMuted) {
+      shortsPlayer.unMute();
+      shortsMuted = false;
+    } else {
+      shortsPlayer.mute();
+      shortsMuted = true;
+    }
+    updateShortsSoundButton();
+  } catch (_) {}
 }
 
 function showTab(name) {

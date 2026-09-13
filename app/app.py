@@ -35,7 +35,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -155,6 +155,17 @@ DISCOVERY_TERMS = [
     "mechanical", "urban exploration", "maker", "woodworking", "tools",
     "farming", "boats", "weather", "geography", "archaeology",
 ]
+
+TOP100_WIKIPEDIA_URL = (
+    "https://en.wikipedia.org/wiki/"
+    "List_of_most-subscribed_YouTube_channels"
+)
+TOP100_CACHE_SECONDS = 21600
+TOP100_CACHE = {
+    "expires_at": 0.0,
+    "results": [],
+    "retrieved_at": "",
+}
 
 TOTP_ISSUER = "YouTube Pinchflat Sync"
 
@@ -866,6 +877,113 @@ def youtube_api_request(creds, http_method, path, quota_method, quota_cost=1, **
     record_api_usage(quota_method, quota_cost, response.ok)
     response.raise_for_status()
     return response
+
+
+def youtube_top100_channels(force=False):
+    now_ts = time.time()
+
+    if (
+        not force
+        and TOP100_CACHE["results"]
+        and TOP100_CACHE["expires_at"] > now_ts
+    ):
+        return {
+            "kind": "top100",
+            "results": TOP100_CACHE["results"],
+            "retrieved_at": TOP100_CACHE["retrieved_at"],
+            "source": "Wikipedia",
+        }
+
+    response = requests.get(
+        TOP100_WIKIPEDIA_URL,
+        timeout=25,
+        headers={
+            "User-Agent": (
+                "YouTube-Pinchflat-Sync/"
+                f"{VERSION} (+https://github.com/AshCooperUK/"
+                "youtube-pinchflat-sync)"
+            )
+        },
+    )
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    heading = soup.find(id="100_most-subscribed_channels")
+    table = heading.find_next("table") if heading else None
+
+    if table is None:
+        for candidate in soup.find_all("table"):
+            headers = " ".join(
+                cell.get_text(" ", strip=True)
+                for cell in candidate.find_all("th")
+            ).lower()
+            if "subscribers" in headers and "link" in headers:
+                table = candidate
+                break
+
+    if table is None:
+        raise RuntimeError(
+            "The Top 100 YouTube channel table could not be found."
+        )
+
+    results = []
+
+    for row in table.find_all("tr"):
+        cells = row.find_all(["th", "td"])
+        if len(cells) < 3:
+            continue
+
+        name = cells[0].get_text(" ", strip=True)
+        if not name or name.lower() == "name":
+            continue
+
+        youtube_link = None
+        for link in cells[1].find_all("a", href=True):
+            href = link.get("href", "").strip()
+            if "youtube.com/" in href:
+                youtube_link = href
+                break
+
+        if not youtube_link:
+            continue
+
+        if youtube_link.startswith("//"):
+            youtube_link = "https:" + youtube_link
+        elif youtube_link.startswith("/"):
+            youtube_link = "https://www.youtube.com" + youtube_link
+
+        subscribers = cells[2].get_text(" ", strip=True)
+        country = cells[-1].get_text(" ", strip=True) if len(cells) >= 7 else ""
+
+        results.append(
+            {
+                "rank": len(results) + 1,
+                "channel_title": name,
+                "channel_url": youtube_link,
+                "subscribers": subscribers,
+                "country": country,
+            }
+        )
+
+        if len(results) >= 100:
+            break
+
+    if not results:
+        raise RuntimeError(
+            "The Top 100 YouTube channel table returned no channels."
+        )
+
+    retrieved_at = now_iso()
+    TOP100_CACHE["expires_at"] = now_ts + TOP100_CACHE_SECONDS
+    TOP100_CACHE["results"] = results
+    TOP100_CACHE["retrieved_at"] = retrieved_at
+
+    return {
+        "kind": "top100",
+        "results": results,
+        "retrieved_at": retrieved_at,
+        "source": "Wikipedia",
+    }
 
 
 def youtube_discovery_results(kind="videos", limit=24):
@@ -5313,8 +5431,11 @@ def security_headers(response):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; img-src 'self' https: data:; "
-        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
-        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com; "
+        "connect-src 'self' https://www.youtube.com; "
+        "frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
+        "frame-ancestors 'none'; base-uri 'self'",
     )
     return response
 
@@ -7219,6 +7340,154 @@ def bulk_subscription_action():
     return redirect(url_for("index") + "#subscriptions")
 
 
+@app.post("/subscriptions/<channel_id>/unsubscribe")
+def unsubscribe_from_youtube(channel_id):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ?",
+            (channel_id,),
+        ).fetchone()
+
+    if row is None:
+        flash("Subscription was not found.", "error")
+        return redirect(url_for("index") + "#subscriptions")
+
+    row_dict = dict(row)
+
+    try:
+        youtube_unsubscribe(
+            channel_id,
+            row_value(
+                row,
+                "youtube_subscription_id",
+                None,
+            ),
+        )
+
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET active = 0,
+                    removed_at = ?,
+                    download_enabled = 0,
+                    source_authorised = 0,
+                    last_error = NULL
+                WHERE channel_id = ?
+                """,
+                (now_iso(), channel_id),
+            )
+
+        policy = unsubscribe_policy()
+        source_id = resolve_pinchflat_source_id(row_dict)
+
+        if policy == "disable" and source_id:
+            update_pinchflat_source_settings(
+                source_id,
+                cutoff=subscription_cutoff(row_dict),
+                download_enabled=False,
+                media_profile_id=subscription_media_profile_id(row_dict),
+            )
+
+        elif policy in {"remove", "remove_delete"}:
+            delete_files = policy == "remove_delete"
+            output_template = media_profile_settings(
+                subscription_media_profile_id(row_dict)
+            ).get(
+                "output_path_template",
+                EMBY_OUTPUT_PATH_TEMPLATE,
+            )
+
+            source_gone = not source_id
+
+            if source_id:
+                removal_row = dict(row_dict)
+                removal_row["pinchflat_source_id"] = str(source_id)
+                removal_row["pinchflat_added"] = 1
+
+                prepare_pinchflat_source_for_removal(removal_row)
+
+                source_gone = delete_pinchflat_source(
+                    source_id,
+                    delete_files=delete_files,
+                    subscription=removal_row,
+                )
+
+            if delete_files:
+                delete_subscription_download_folder(
+                    row_dict.get("title") or channel_id,
+                    output_template,
+                )
+
+            if source_gone:
+                clear_subscription_pinchflat_link(
+                    channel_id,
+                    source_id,
+                )
+            elif source_id:
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscriptions
+                        SET pinchflat_added = 1,
+                            pinchflat_source_id = ?,
+                            download_enabled = 0,
+                            source_authorised = 0,
+                            last_error = ?
+                        WHERE channel_id = ?
+                        """,
+                        (
+                            str(source_id),
+                            "Pinchflat source removal is still in progress.",
+                            channel_id,
+                        ),
+                    )
+
+            schedule_unsubscribe_cleanup(
+                channel_id,
+                row_dict.get("title") or channel_id,
+                output_template,
+                source_id=source_id,
+                delete_files=delete_files,
+                delay_seconds=300,
+                checks=6,
+            )
+
+        log_activity(
+            "youtube",
+            "YouTube subscription removed",
+            f"Unsubscribed from {row_dict.get('title') or channel_id}.",
+            "success",
+            channel_id,
+        )
+        flash(
+            f"Unsubscribed from {row_dict.get('title') or channel_id} on YouTube.",
+            "success",
+        )
+
+    except Exception as exc:
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET last_error = ?
+                WHERE channel_id = ?
+                """,
+                (str(exc)[:1000], channel_id),
+            )
+
+        log_activity(
+            "youtube",
+            "YouTube unsubscribe failed",
+            f"{row_dict.get('title') or channel_id}: {exc}",
+            "error",
+            channel_id,
+        )
+        flash(f"Unsubscribe failed: {exc}", "error")
+
+    return redirect(url_for("index") + "#subscriptions")
+
+
 @app.post("/single-download/start")
 def single_download_start():
     payload = request.get_json(silent=True) or {}
@@ -7254,10 +7523,23 @@ def download_status(job_id):
 @app.get("/api/discover")
 def discover_videos():
     kind = request.args.get("kind", "videos").strip().lower()
-    if kind not in {"videos", "shorts"}:
+    refresh = request.args.get("refresh", "0") == "1"
+
+    if kind not in {"videos", "shorts", "top100"}:
         kind = "videos"
 
     try:
+        if kind == "top100":
+            result = youtube_top100_channels(force=refresh)
+            stats = api_usage_stats()
+            return jsonify(
+                {
+                    "ok": True,
+                    **result,
+                    "search_remaining": stats["search_remaining"],
+                }
+            )
+
         result = youtube_discovery_results(kind=kind, limit=24)
         return jsonify({"ok": True, **result})
     except Exception as exc:
