@@ -29,7 +29,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -100,7 +100,7 @@ USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
 RECOVERY_CODE_COUNT = 10
 
 EMBY_OUTPUT_PATH_TEMPLATE = (
-    "/shows/{{ source_custom_name }}/"
+    "{{ source_custom_name }}/"
     "{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}"
 )
 
@@ -1889,8 +1889,39 @@ def profile_form_value(form, field_name, default=""):
     return field.get("value", default)
 
 
+def _pinchflat_alpine_toggle_value(field):
+    """
+    Pinchflat renders boolean toggles as hidden inputs wrapped in an Alpine
+    component such as: x-data="{ enabled: true }".
+
+    The hidden input's value is populated by browser-side JavaScript, so a
+    requests/BeautifulSoup scrape does not see the live value attribute.
+    Read the initial Alpine state instead.
+    """
+    node = field
+    for _depth in range(8):
+        if node is None:
+            break
+
+        x_data = node.get("x-data") if hasattr(node, "get") else None
+        if x_data:
+            match = re.search(
+                r"\benabled\s*:\s*(true|false)\b",
+                str(x_data),
+                re.IGNORECASE,
+            )
+            if match:
+                return match.group(1).lower() == "true"
+
+        node = getattr(node, "parent", None)
+
+    return None
+
+
 def profile_form_bool(form, field_name, default=False):
     fields = form.find_all(attrs={"name": field_name})
+
+    # Standard HTML checkboxes, including SponsorBlock-style checkbox groups.
     checkboxes = [
         field
         for field in fields
@@ -1899,6 +1930,23 @@ def profile_form_bool(form, field_name, default=False):
     ]
     if checkboxes:
         return any(field.has_attr("checked") for field in checkboxes)
+
+    # Pinchflat's custom toggle component uses an Alpine x-data wrapper.
+    for field in fields:
+        alpine_value = _pinchflat_alpine_toggle_value(field)
+        if alpine_value is not None:
+            return alpine_value
+
+    # Fall back to a static value when Pinchflat renders one directly.
+    for field in fields:
+        value = field.get("value") if hasattr(field, "get") else None
+        if value not in (None, ""):
+            return str(value).strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
 
     value = profile_form_value(form, field_name, "")
     if value == "":

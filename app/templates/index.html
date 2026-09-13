@@ -38,6 +38,7 @@
     .btn.ghost { background:transparent; border:1px solid var(--line); }
     .btn.danger { background:#9f2e37; }
     .btn.smallbtn { padding:7px 10px; min-height:34px; font-size:12px; }
+    .user-action-btn { width:78px; min-width:78px; }
     .btn[disabled] { opacity:.45; cursor:not-allowed; }
     .grid { display:grid; grid-template-columns:repeat(5,minmax(180px,1fr)); gap:12px; margin:22px 0 14px; }
     .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:17px; }
@@ -607,16 +608,15 @@
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
 
             <label>Output path template
-              <textarea id="media-profile-output-template" name="output_path_template" rows="3">{{ media_profile_settings.output_path_template }}</textarea>
+              <input
+                id="media-profile-output-template"
+                type="text"
+                name="output_path_template"
+                value="{{ media_profile_settings.output_path_template or emby_output_path_template }}"
+                placeholder="{{ emby_output_path_template }}"
+                autocomplete="off"
+              >
             </label>
-            <div class="actions" style="margin-top:-4px;margin-bottom:14px">
-              <button
-                type="button"
-                class="btn secondary smallbtn"
-                onclick='document.getElementById("media-profile-output-template").value={{ emby_output_path_template|tojson }}'
-              >Use Emby template</button>
-              <code class="small">{{ emby_output_path_template }}</code>
-            </div>
 
             <div class="settings-grid profile-settings-grid">
               <div class="setting-box compact-setting">
@@ -860,11 +860,11 @@
               <div class="actions">
                 <form method="post" action="/users/{{ user.id }}/toggle">
                   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                  <button class="btn ghost smallbtn">{{ 'Disable' if user.active else 'Enable' }}</button>
+                  <button class="btn ghost smallbtn user-action-btn">{{ 'Disable' if user.active else 'Enable' }}</button>
                 </form>
                 <form method="post" action="/users/{{ user.id }}/delete" onsubmit="return confirm('Permanently delete user {{ user.username|e }}? This cannot be undone.')">
                   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                  <button class="btn danger smallbtn">Delete</button>
+                  <button class="btn danger smallbtn user-action-btn">Delete</button>
                 </form>
               </div>
               {% endif %}

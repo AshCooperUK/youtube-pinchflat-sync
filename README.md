@@ -2,6 +2,20 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.7.1
+
+Pinchflat settings display and UI maintenance release.
+
+- Fixes Pinchflat toggle values not appearing enabled after reopening Settings.
+- Pinchflat uses Alpine-powered hidden toggle inputs rather than ordinary HTML checkboxes. The app now reads Pinchflat's actual `enabled: true/false` state from the edit form.
+- Subtitle, thumbnail, metadata, NFO and Series Images toggles now reflect the values already saved in Pinchflat.
+- Simplifies Output path template to one normal text input.
+- Changes the default media-centre path to:
+  `{{ source_custom_name }}/{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}`
+- Removes the extra output-template helper button and duplicate template display.
+- Makes Enable/Disable and Delete user buttons the same width.
+- Existing Pinchflat profile settings remain authoritative. The app reads the current profile each time Settings opens.
+
 ## Version 1.7.0
 
 Pinchflat profile management and user administration update.
