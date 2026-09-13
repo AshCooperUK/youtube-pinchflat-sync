@@ -120,10 +120,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "1.3.1"
+  version: "1.4.0"
   update_at: "2026-09-13"
   release_notes:
-    en_US: New subscriptions default to downloads disabled, adds bulk enable and disable controls, and automatically creates a Pinchflat Media Profile on fresh installs.
+    en_US: Redesigned dashboard with Settings and Activity popups, automatic downloads for new subscriptions, unsubscribe policies, filters, bulk tools, retries and selectable Pinchflat Media Profiles.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

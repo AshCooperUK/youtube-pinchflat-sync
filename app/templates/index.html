@@ -8,81 +8,96 @@
     :root {
       color-scheme: dark;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --bg:#08111f; --panel:#101b2d; --panel2:#0c1626; --line:#24344a;
+      --text:#eef4ff; --muted:#91a4bf; --blue:#2563eb; --blue2:#1d4ed8;
+      --green:#55e58b; --amber:#f7cc63; --red:#ff7b7b;
     }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: #0b1220; color: #e5e7eb; }
-    .wrap { max-width: 1450px; margin: 0 auto; padding: 28px 20px 50px; }
-    .header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
-    h1 { margin: 0 0 6px; font-size: 29px; }
-    h2 { margin: 0 0 14px; font-size: 19px; }
-    .muted { color: #94a3b8; }
-    .small { font-size: 13px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(225px, 1fr)); gap: 14px; margin: 22px 0; }
-    .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; margin: 14px 0; }
-    .card { background: #111827; border: 1px solid #263244; border-radius: 14px; padding: 17px; }
-    .ok { color: #86efac; }
-    .bad { color: #fca5a5; }
-    .warn { color: #fde68a; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); }
+    body.modal-open { overflow:hidden; }
+    a { color:#9dc1ff; }
+    .wrap { max-width:1540px; margin:0 auto; padding:26px 22px 54px; }
+    .header { display:flex; justify-content:space-between; align-items:flex-start; gap:18px; }
+    .header-actions { display:flex; gap:9px; flex-wrap:wrap; justify-content:flex-end; }
+    h1 { margin:0; font-size:30px; }
+    h2 { margin:0 0 13px; font-size:20px; }
+    h3 { margin:0 0 10px; font-size:16px; }
+    p { line-height:1.5; }
+    .subtitle,.muted { color:var(--muted); }
+    .small { font-size:13px; }
     .btn {
-      display: inline-block;
-      background: #2563eb;
-      border: 0;
-      padding: 10px 14px;
-      border-radius: 9px;
-      text-decoration: none;
-      cursor: pointer;
-      color: #fff;
-      font-weight: 600;
+      border:0; border-radius:9px; padding:10px 14px; cursor:pointer;
+      background:var(--blue); color:white; font-weight:700; text-decoration:none;
+      display:inline-flex; align-items:center; justify-content:center; gap:6px;
     }
-    .btn.secondary { background: #334155; }
-    .btn.smallbtn { padding: 8px 11px; font-size: 13px; }
-    .btn[disabled] { opacity: .45; cursor: default; }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    input, select {
-      width: 100%;
-      background: #0b1220;
-      color: #e5e7eb;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 10px;
-      margin-top: 5px;
+    .btn:hover { background:var(--blue2); }
+    .btn.secondary { background:#34445d; }
+    .btn.ghost { background:transparent; border:1px solid var(--line); }
+    .btn.danger { background:#9f2e37; }
+    .btn.smallbtn { padding:7px 10px; font-size:12px; }
+    .btn[disabled] { opacity:.45; cursor:not-allowed; }
+    .grid { display:grid; grid-template-columns:repeat(5,minmax(180px,1fr)); gap:12px; margin:22px 0 14px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:17px; }
+    .metric { font-size:27px; font-weight:800; margin-top:5px; }
+    .ok { color:var(--green); } .warn { color:var(--amber); } .bad { color:var(--red); }
+    .flash { padding:12px 14px; border-radius:10px; margin:13px 0; background:#34445d; }
+    .flash.error { background:#7a252d; } .flash.success { background:#175a35; }
+    .toolbar { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin:12px 0; }
+    .toolbar .grow { flex:1 1 240px; }
+    input,select {
+      background:#08111f; color:var(--text); border:1px solid #30415b;
+      border-radius:8px; padding:9px 10px; min-height:39px;
     }
-    input[type="checkbox"] { width: auto; margin: 0; accent-color: #2563eb; }
-    label { display: block; margin: 10px 0; font-size: 14px; }
-    .bulk-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
-    .source-download { min-width: 145px; }
-    code {
-      display: inline-block;
-      max-width: 100%;
-      overflow-wrap: anywhere;
-      background: #0b1220;
-      padding: 3px 6px;
-      border-radius: 5px;
+    input[type="text"],input[type="url"],input[type="password"],input[type="number"],input[type="date"],select { width:100%; }
+    input[type="checkbox"] { width:auto; min-height:auto; accent-color:var(--blue); }
+    label { display:block; margin:10px 0; font-size:14px; }
+    .inline-control { min-width:170px; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
+    table { width:100%; border-collapse:collapse; min-width:1180px; }
+    th,td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:12px; position:sticky; top:0; background:#0e192a; z-index:1; }
+    tr:last-child td { border-bottom:0; }
+    tr.hidden-row { display:none; }
+    .pill { display:inline-flex; padding:4px 8px; border-radius:999px; background:#24344a; font-size:12px; white-space:nowrap; }
+    .pill.enabled { color:var(--green); } .pill.disabled { color:#c8d3e5; }
+    .pill.pending,.pill.review { color:var(--amber); } .pill.error,.pill.removed { color:var(--red); }
+    .channel-title { font-weight:750; }
+    .error-text { max-width:330px; color:var(--red); font-size:12px; word-break:break-word; }
+    .row-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+    .source-range,.source-profile { min-width:185px; }
+    code { background:#08111f; border-radius:5px; padding:3px 6px; overflow-wrap:anywhere; }
+    .empty { padding:30px; text-align:center; color:var(--muted); }
+    .hidden { display:none !important; }
+
+    dialog {
+      width:min(1000px,94vw); max-height:90vh; padding:0; border:1px solid var(--line);
+      border-radius:16px; background:var(--panel2); color:var(--text); box-shadow:0 24px 80px rgba(0,0,0,.55);
     }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #263244; vertical-align: top; }
-    th { color: #94a3b8; font-size: 13px; }
-    .flash { padding: 12px 14px; border-radius: 9px; margin: 13px 0; background: #334155; }
-    .flash.error { background: #7f1d1d; }
-    .flash.success { background: #14532d; }
-    .cutoff { font-size: 28px; font-weight: 700; margin: 6px 0; }
-    .source-range { min-width: 245px; }
-    .source-range select { margin: 0 0 6px; }
-    .source-range input { margin: 0 0 6px; }
-    .source-meta { margin-top: 5px; }
-    .hidden { display: none !important; }
-    .status-pill {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: #1e293b;
-      font-size: 12px;
+    dialog::backdrop { background:rgba(0,0,0,.72); backdrop-filter:blur(2px); }
+    .modal-head { display:flex; justify-content:space-between; align-items:center; padding:18px 20px; border-bottom:1px solid var(--line); }
+    .modal-body { padding:18px 20px 24px; overflow:auto; max-height:calc(90vh - 72px); }
+    .tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:18px; }
+    .tab-btn { border:1px solid var(--line); background:#132139; color:var(--text); padding:8px 11px; border-radius:8px; cursor:pointer; }
+    .tab-btn.active { background:var(--blue); border-color:var(--blue); }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+    .settings-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:14px; }
+    .setting-box { border:1px solid var(--line); border-radius:12px; padding:15px; background:var(--panel); }
+    .activity-item { border-bottom:1px solid var(--line); padding:11px 0; }
+    .activity-item:last-child { border-bottom:0; }
+    .activity-time { color:var(--muted); font-size:12px; }
+    .modal-close { background:none; border:0; color:var(--muted); cursor:pointer; font-size:24px; }
+    .version { color:var(--muted); font-size:12px; }
+
+    @media (max-width:1100px) {
+      .grid { grid-template-columns:repeat(2,minmax(180px,1fr)); }
     }
-    @media (max-width: 800px) {
-      .header { display: block; }
-      .table-wrap { overflow-x: auto; }
-      table { min-width: 980px; font-size: 13px; }
-      th, td { padding: 8px 5px; }
+    @media (max-width:700px) {
+      .wrap { padding:18px 12px 40px; }
+      .header { display:block; }
+      .header-actions { justify-content:flex-start; margin-top:14px; }
+      .grid,.settings-grid { grid-template-columns:1fr; }
+      h1 { font-size:25px; }
     }
   </style>
 </head>
@@ -91,9 +106,17 @@
   <div class="header">
     <div>
       <h1>YouTube → Pinchflat Sync</h1>
-      <div class="muted">Automatic YouTube subscription importer</div>
+      <div class="subtitle">Automatic YouTube subscription importer</div>
+      <div class="version">v{{ version }}</div>
     </div>
-    <div class="muted small">v{{ version }}</div>
+    <div class="header-actions">
+      <form method="post" action="/sync">
+        <button class="btn" {% if not google_connected %}disabled{% endif %}>Sync now</button>
+      </form>
+      <button class="btn secondary" type="button" onclick="openActivity()">Activity</button>
+      <button class="btn secondary" type="button" onclick="openSettings()">Settings</button>
+      <a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
+    </div>
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -104,244 +127,183 @@
 
   <div class="grid">
     <div class="card">
-      <strong>Google</strong><br>
+      <div class="muted small">Google</div>
       {% if google_connected %}
-        <span class="ok">Connected</span>
+        <div class="metric ok">Connected</div>
       {% elif google_configured %}
-        <span class="warn">Configured, not connected</span><br><br>
-        <a class="btn" href="/oauth/google/login">Connect Google</a>
+        <div class="metric warn">Ready</div>
+        <a class="btn smallbtn" href="/oauth/google/login">Connect</a>
       {% else %}
-        <span class="bad">Not configured</span>
+        <div class="metric bad">Setup</div>
       {% endif %}
     </div>
-
     <div class="card">
-      <strong>Pinchflat</strong><br>
+      <div class="muted small">Pinchflat</div>
       {% if pinchflat_online and pinchflat_profile_ready %}
-        <span class="ok">Online</span>
+        <div class="metric ok">Online</div>
         <div class="muted small">{{ pinchflat_profile_message }}</div>
       {% elif pinchflat_online %}
-        <span class="warn">Setup required</span>
-        <div class="muted small">{{ pinchflat_profile_message }}</div>
+        <div class="metric warn">Setup</div>
       {% else %}
-        <span class="bad">Offline</span>
-      {% endif %}
-      <br><br>
-      <a class="btn secondary" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
-    </div>
-
-    <div class="card">
-      <strong>Default download history</strong>
-      <div class="cutoff">{{ default_history_cutoff }}</div>
-      <div class="muted small">Used by sources left on “Default”.</div>
-    </div>
-
-    <div class="card">
-      <strong>Schedule</strong><br>
-      Every {{ interval }} minutes
-      {% if dry_run %}<br><span class="warn">DRY RUN enabled</span>{% endif %}
-      <br><br>
-      {% if last_run %}
-        <span class="muted small">Last: {{ last_run["status"] }} · {{ last_run["message"] }}</span>
-      {% else %}
-        <span class="muted small">No automatic sync has run yet.</span>
+        <div class="metric bad">Offline</div>
       {% endif %}
     </div>
+    <div class="card">
+      <div class="muted small">Subscriptions</div>
+      <div class="metric">{{ counts.active }}</div>
+      <div class="muted small">{{ counts.removed }} removed · {{ counts.review }} review</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Downloads</div>
+      <div class="metric ok">{{ counts.enabled }}</div>
+      <div class="muted small">{{ counts.disabled }} disabled · {{ counts.pending }} pending</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Errors</div>
+      <div class="metric {% if counts.errors %}bad{% else %}ok{% endif %}">{{ counts.errors }}</div>
+      <div class="muted small">
+        {% if last_run %}Last sync: {{ last_run["status"] }}{% else %}No sync yet{% endif %}
+      </div>
+    </div>
   </div>
 
-  <div class="two">
-    <div class="card">
-      <h2>Default download history</h2>
-      <p class="muted small">
-        This is the fallback for new subscriptions. Each YouTube source has its own range selector below.
-      </p>
-
-      <form method="post" action="/settings/history">
-        <label>
-          Default range
-          <select name="history_mode" id="default_history_mode" onchange="toggleDefaultHistoryFields()">
-            <option value="today" {% if default_history_mode == "today" %}selected{% endif %}>Today</option>
-            <option value="this_week" {% if default_history_mode == "this_week" %}selected{% endif %}>This week</option>
-            <option value="this_month" {% if default_history_mode == "this_month" %}selected{% endif %}>This month</option>
-            <option value="six_months" {% if default_history_mode == "six_months" %}selected{% endif %}>Last 6 months</option>
-            <option value="last_year" {% if default_history_mode == "last_year" %}selected{% endif %}>Last year</option>
-            <option value="years_back" {% if default_history_mode == "years_back" %}selected{% endif %}>Choose years back</option>
-            <option value="custom_date" {% if default_history_mode == "custom_date" %}selected{% endif %}>Custom date</option>
-            <option value="subscription_date" {% if default_history_mode == "subscription_date" %}selected{% endif %}>Original subscription date</option>
-          </select>
-        </label>
-
-        <div id="default_years_field">
-          <label>
-            Years back
-            <select name="history_years">
-              {% for y in range(1, 11) %}
-                <option value="{{ y }}" {% if default_history_years == y %}selected{% endif %}>
-                  {{ y }} year{% if y != 1 %}s{% endif %} ago → today
-                </option>
-              {% endfor %}
-            </select>
-          </label>
-        </div>
-
-        <div id="default_custom_date_field">
-          <label>
-            Start date
-            <input type="date" name="history_custom_date" value="{{ default_history_custom_date }}">
-          </label>
-        </div>
-
-        <button class="btn" type="submit">Save default range</button>
-      </form>
+  <div class="card" id="subscriptions">
+    <div class="header">
+      <div>
+        <h2>Subscriptions</h2>
+        <div class="muted small">New subscriptions follow the policy in Settings. Filters and sorting are remembered in this browser.</div>
+      </div>
+      <div class="actions">
+        <form method="post" action="/refresh-subscriptions">
+          <button class="btn secondary smallbtn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
+        </form>
+        <form method="post" action="/add-pending">
+          <button class="btn smallbtn" {% if not google_connected or not pinchflat_online %}disabled{% endif %}>Add pending</button>
+        </form>
+      </div>
     </div>
 
-    {% if not google_connected %}
-    <div class="card">
-      <h2>Configuration</h2>
-      <form method="post" action="/settings/configuration">
-        <label>
-          Public dashboard URL
-          <input type="url" name="app_url" value="{{ app_url }}" placeholder="https://youtube.example.com">
-        </label>
-
-        <label>
-          Google OAuth Client ID
-          <input type="text" name="google_client_id" placeholder="xxxxxxxx.apps.googleusercontent.com">
-        </label>
-
-        <label>
-          Google OAuth Client Secret
-          <input type="password" name="google_client_secret" placeholder="Leave blank to keep the saved secret">
-        </label>
-
-        <label>
-          Pinchflat Media Profile ID
-          <input type="number" min="1" name="pinchflat_media_profile_id" value="{{ media_profile_id }}">
-        </label>
-
-        <button class="btn" type="submit">Save configuration</button>
-      </form>
-
-      <p class="muted small">
-        Google authorised redirect URI:
-        <br><code>{{ callback_uri if callback_uri else "Set the public dashboard URL first" }}</code>
-      </p>
+    <div class="toolbar">
+      <div class="grow">
+        <input id="source-search" type="text" placeholder="Search channels…" oninput="applyFilters()">
+      </div>
+      <div class="inline-control">
+        <select id="status-filter" onchange="applyFilters()">
+          <option value="active">All active</option>
+          <option value="enabled">Enabled</option>
+          <option value="disabled">Disabled</option>
+          <option value="pending">Pending</option>
+          <option value="review">Needs review</option>
+          <option value="error">Errors</option>
+          <option value="removed">Removed</option>
+          <option value="all">Everything</option>
+        </select>
+      </div>
+      <div class="inline-control">
+        <select id="sort-filter" onchange="applyFilters()">
+          <option value="title">A → Z</option>
+          <option value="status">Status</option>
+          <option value="newest">Newest first</option>
+        </select>
+      </div>
+      <span class="muted small" id="visible-count"></span>
     </div>
-    {% else %}
-    <div class="card">
-      <h2>Google connected</h2>
-      <p class="ok">OAuth configuration is complete.</p>
-      <p class="muted small">
-        The Google configuration form is hidden while the account is connected.
-        Disconnect Google to change OAuth settings.
-      </p>
-      <form method="post" action="/oauth/google/disconnect">
-        <button class="btn secondary" type="submit">Disconnect Google</button>
-      </form>
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <div class="actions">
-      <form method="post" action="/refresh-subscriptions">
-        <button class="btn secondary" type="submit" {% if not google_connected %}disabled{% endif %}>Refresh YouTube subscriptions</button>
-      </form>
-
-      <form method="post" action="/add-pending">
-        <button class="btn" type="submit" {% if not google_connected or not pinchflat_online %}disabled{% endif %}>Add pending to Pinchflat</button>
-      </form>
-
-      <form method="post" action="/sync">
-        <button class="btn secondary" type="submit" {% if not google_connected %}disabled{% endif %}>Full sync now</button>
-      </form>
-    </div>
-
-    <p class="muted small">
-      New subscriptions start with downloads disabled. Add pending sources safely, then enable only the channels you want.
-      Full sync refreshes YouTube and adds pending sources using each source's current enabled or disabled state.
-    </p>
-  </div>
-
-  <div class="card" id="subscriptions" style="margin-top:14px">
-    <h2>Subscriptions</h2>
-    <p class="muted small">
-      Pinchflat still indexes disabled sources, but it will not download their media.
-      Select several channels below and enable or disable them together.
-    </p>
 
     {% if subs %}
-    <form id="bulk-source-form" method="post" action="/subscriptions/bulk-download">
-      <div class="bulk-bar">
-        <button class="btn smallbtn" type="submit" name="bulk_action" value="enable">Enable selected</button>
-        <button class="btn smallbtn secondary" type="submit" name="bulk_action" value="disable">Disable selected</button>
-        <span class="muted small" id="selected-count">0 selected</span>
-      </div>
-    </form>
+    <form id="bulk-form" method="post" action="/subscriptions/bulk" onsubmit="return confirmBulkAction()"></form>
+    <div class="toolbar">
+      <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(true)">Select visible</button>
+      <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(false)">Clear</button>
+      <span class="muted small" id="selected-count">0 selected</span>
+
+      <select id="bulk-action" name="bulk_action" form="bulk-form" class="inline-control" onchange="toggleBulkOptions()" required>
+        <option value="">Bulk action…</option>
+        <option value="enable">Enable downloads</option>
+        <option value="disable">Disable downloads</option>
+        <option value="approve">Approve review sources</option>
+        <option value="range">Set download range</option>
+        <option value="profile">Set Media Profile</option>
+        <option value="retry">Retry errors</option>
+      </select>
+
+      <select id="bulk-range" name="bulk_history_mode" form="bulk-form" class="inline-control hidden">
+        <option value="default">Default range</option>
+        <option value="today">Today</option>
+        <option value="this_week">This week</option>
+        <option value="this_month">This month</option>
+        <option value="six_months">Last 6 months</option>
+        <option value="last_year">Last year</option>
+        {% for y in range(2, 11) %}<option value="years_{{ y }}">Last {{ y }} years</option>{% endfor %}
+        <option value="subscription_date">Subscription date</option>
+        <option value="custom_date">Custom date</option>
+      </select>
+
+      <input id="bulk-custom-date" name="bulk_custom_date" form="bulk-form" type="date" class="inline-control hidden">
+
+      <select id="bulk-profile" name="bulk_profile_id" form="bulk-form" class="inline-control hidden">
+        {% for profile in profiles %}
+          <option value="{{ profile.id }}">{{ profile.name }}</option>
+        {% endfor %}
+      </select>
+
+      <button class="btn smallbtn" type="submit" form="bulk-form">Apply</button>
+    </div>
+
     <div class="table-wrap">
-      <table>
+      <table id="subscriptions-table">
         <thead>
           <tr>
-            <th><input type="checkbox" id="select-all-sources" title="Select all sources"></th>
+            <th></th>
             <th>Channel</th>
             <th>Status</th>
             <th>Download</th>
-            <th>Download range</th>
-            <th>Pinchflat cutoff</th>
-            <th>Error</th>
+            <th>Range</th>
+            <th>Media Profile</th>
+            <th>Cutoff</th>
+            <th>Error / Actions</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="subscription-body">
         {% for sub in subs %}
-          <tr>
+          <tr
+            class="source-row"
+            data-title="{{ sub['title']|lower }}"
+            data-status="{{ sub['ui_status'] }}"
+            data-active="{{ 1 if sub['active'] else 0 }}"
+            data-error="{{ 1 if sub['last_error'] else 0 }}"
+            data-first-seen="{{ sub['first_seen_at'] }}"
+          >
             <td>
               <input
-                type="checkbox"
                 class="source-select"
+                type="checkbox"
                 name="channel_ids"
                 value="{{ sub['channel_id'] }}"
-                form="bulk-source-form"
-                aria-label="Select {{ sub['title'] }}"
+                form="bulk-form"
+                onchange="updateSelectedCount()"
               >
             </td>
             <td>
-              <a href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
-              {% if not sub["active"] %}
-                <div class="muted small source-meta">No longer subscribed</div>
-              {% endif %}
+              <a class="channel-title" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
+              {% if not sub["active"] %}<div class="small bad">No longer subscribed</div>{% endif %}
+              {% if sub["needs_review"] %}<div class="small warn">Waiting for approval</div>{% endif %}
             </td>
-
             <td>
-              {% if sub["pinchflat_added"] %}
-                <span class="status-pill ok">Added</span>
-              {% else %}
-                <span class="status-pill warn">Pending</span>
-              {% endif %}
-              <div class="muted small source-meta">
-                {{ "Enabled" if sub["download_enabled"] else "Disabled" }}
-              </div>
+              <span class="pill {{ sub['ui_status'] }}">{{ sub['ui_status']|replace('_',' ')|title }}</span>
+              {% if sub["pinchflat_added"] %}<div class="small muted">In Pinchflat</div>{% endif %}
             </td>
-
-            <td class="source-download">
+            <td>
               <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/download">
                 <select name="download_enabled" onchange="this.form.submit()">
-                  <option value="0" {% if not sub["download_enabled"] %}selected{% endif %}>Disabled</option>
                   <option value="1" {% if sub["download_enabled"] %}selected{% endif %}>Enabled</option>
+                  <option value="0" {% if not sub["download_enabled"] %}selected{% endif %}>Disabled</option>
                 </select>
               </form>
-              <div class="muted small source-meta">
-                {% if sub["download_enabled"] %}
-                  Media downloads enabled
-                {% else %}
-                  Index only. No downloads
-                {% endif %}
-              </div>
             </td>
-
             <td class="source-range">
               <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/history">
                 {% set current_mode = sub["history_mode"] or "default" %}
-                <select name="history_mode" class="source-history-mode" onchange="toggleSourceCustomDate(this)">
+                <select name="history_mode" class="source-history-mode" onchange="toggleSourceDate(this)">
                   <option value="default" {% if current_mode == "default" %}selected{% endif %}>Default</option>
                   <option value="today" {% if current_mode == "today" %}selected{% endif %}>Today</option>
                   <option value="this_week" {% if current_mode == "this_week" %}selected{% endif %}>This week</option>
@@ -351,81 +313,360 @@
                   {% for y in range(2, 11) %}
                     <option value="years_{{ y }}" {% if current_mode == "years_" ~ y %}selected{% endif %}>Last {{ y }} years</option>
                   {% endfor %}
-                  <option value="subscription_date" {% if current_mode == "subscription_date" %}selected{% endif %}>Original subscription date</option>
+                  <option value="subscription_date" {% if current_mode == "subscription_date" %}selected{% endif %}>Subscription date</option>
                   <option value="custom_date" {% if current_mode == "custom_date" %}selected{% endif %}>Custom date</option>
                 </select>
-
-                <input
-                  class="source-custom-date {% if current_mode != 'custom_date' %}hidden{% endif %}"
-                  type="date"
-                  name="history_custom_date"
-                  value="{{ sub['history_custom_date'] or '' }}"
-                >
-
-                <button class="btn smallbtn secondary" type="submit">Save</button>
+                <input class="source-date {% if current_mode != 'custom_date' %}hidden{% endif %}" type="date" name="history_custom_date" value="{{ sub['history_custom_date'] or '' }}">
+                <button class="btn ghost smallbtn" type="submit">Save</button>
               </form>
-
-              {% if sub["pinchflat_added"] %}
-                <div class="muted small source-meta">
-                  Saving updates the Pinchflat cutoff when the source ID is known.
-                </div>
-              {% endif %}
             </td>
-
+            <td class="source-profile">
+              <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/profile">
+                <select name="media_profile_id" onchange="this.form.submit()">
+                  {% for profile in profiles %}
+                    <option value="{{ profile.id }}" {% if sub["media_profile_id"]|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
+                  {% endfor %}
+                </select>
+              </form>
+            </td>
             <td>
               <code>{{ sub["cutoff"] }}</code>
-              <div class="muted small source-meta">{{ sub["history_label"] }}</div>
+              <div class="small muted">{{ sub["history_label"] }}</div>
             </td>
-
-            <td class="bad">{{ sub["last_error"] or "" }}</td>
+            <td>
+              {% if sub["last_error"] %}
+                <div class="error-text">{{ sub["last_error"] }}</div>
+                <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/retry" class="row-actions">
+                  <button class="btn danger smallbtn">Retry</button>
+                </form>
+              {% else %}
+                <span class="small muted">No error</span>
+              {% endif %}
+            </td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-      <span class="muted">
-        Connect Google, then select “Refresh YouTube subscriptions”.
-      </span>
+      <div class="empty">Connect Google and refresh your subscriptions.</div>
     {% endif %}
   </div>
 </div>
 
+<dialog id="settings-dialog">
+  <div class="modal-head">
+    <div><h2 style="margin:0">Settings</h2><div class="muted small">Configuration is kept out of the main dashboard.</div></div>
+    <button class="modal-close" onclick="closeSettings()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="general" onclick="showTab('general')">General</button>
+      <button class="tab-btn" data-tab="youtube" onclick="showTab('youtube')">YouTube</button>
+      <button class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')">Pinchflat</button>
+      <button class="tab-btn" data-tab="downloads" onclick="showTab('downloads')">Downloads</button>
+      <button class="tab-btn" data-tab="automation" onclick="showTab('automation')">Automation</button>
+      <button class="tab-btn" data-tab="advanced" onclick="showTab('advanced')">Advanced</button>
+    </div>
+
+    <section class="tab-panel active" data-panel="general">
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>New subscriptions</h3>
+          <form method="post" action="/settings/general">
+            <label>When a new YouTube subscription appears
+              <select name="new_subscription_policy">
+                <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable and download</option>
+                <option value="disabled" {% if new_subscription_policy == "disabled" %}selected{% endif %}>Add to Pinchflat, downloads disabled</option>
+                <option value="review" {% if new_subscription_policy == "review" %}selected{% endif %}>Wait for approval before adding</option>
+              </select>
+            </label>
+            <label>When you unsubscribe on YouTube
+              <select name="unsubscribe_policy">
+                <option value="keep" {% if unsubscribe_policy == "keep" %}selected{% endif %}>Keep Pinchflat source</option>
+                <option value="disable" {% if unsubscribe_policy == "disable" %}selected{% endif %}>Disable downloads in Pinchflat</option>
+                <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove Pinchflat source, keep downloaded files</option>
+              </select>
+            </label>
+            <label><input type="checkbox" name="show_removed" value="1" {% if show_removed %}checked{% endif %}> Include removed subscriptions by default</label>
+            <button class="btn">Save General</button>
+          </form>
+        </div>
+        <div class="setting-box">
+          <h3>Current behaviour</h3>
+          <p class="muted small">Automatic sync applies these rules every {{ interval }} minutes.</p>
+          <p>New: <strong>{{ new_subscription_policy }}</strong></p>
+          <p>Unsubscribed: <strong>{{ unsubscribe_policy }}</strong></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="youtube">
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>Google OAuth</h3>
+          {% if google_connected %}
+            <p class="ok">Google is connected.</p>
+            <form method="post" action="/oauth/google/disconnect">
+              <button class="btn danger">Disconnect Google</button>
+            </form>
+          {% else %}
+            <form method="post" action="/settings/configuration">
+              <label>Public dashboard URL
+                <input type="url" name="app_url" value="{{ app_url }}" placeholder="https://youtube.example.com">
+              </label>
+              <label>Google OAuth Client ID
+                <input type="text" name="google_client_id" placeholder="xxxxxxxx.apps.googleusercontent.com">
+              </label>
+              <label>Google OAuth Client Secret
+                <input type="password" name="google_client_secret" placeholder="Leave blank to keep saved secret">
+              </label>
+              <input type="hidden" name="pinchflat_media_profile_id" value="{{ media_profile_id }}">
+              <button class="btn">Save OAuth settings</button>
+            </form>
+            {% if google_configured %}<p><a class="btn secondary" href="/oauth/google/login">Connect Google</a></p>{% endif %}
+          {% endif %}
+        </div>
+        <div class="setting-box">
+          <h3>Google callback</h3>
+          <code>{{ callback_uri if callback_uri else "Set your public dashboard URL first" }}</code>
+          <p class="muted small">This exact address belongs in Google Cloud as the authorised redirect URI.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="pinchflat">
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>Default Media Profile</h3>
+          <form method="post" action="/settings/pinchflat">
+            <label>Profile
+              <select name="pinchflat_media_profile_id">
+                {% for profile in profiles %}
+                  <option value="{{ profile.id }}" {% if media_profile_id|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label><input type="checkbox" name="auto_create_media_profile" value="1" {% if auto_create_media_profile %}checked{% endif %}> Automatically create “YouTube Sync” profile on a fresh Pinchflat install</label>
+            <button class="btn">Save Pinchflat</button>
+          </form>
+        </div>
+        <div class="setting-box">
+          <h3>Status</h3>
+          <p>{{ pinchflat_profile_message }}</p>
+          <a class="btn secondary" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="downloads">
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>Default download history</h3>
+          <form method="post" action="/settings/history">
+            <label>Default range
+              <select name="history_mode" id="default-history-mode" onchange="toggleDefaultHistory()">
+                <option value="today" {% if default_history_mode == "today" %}selected{% endif %}>Today</option>
+                <option value="this_week" {% if default_history_mode == "this_week" %}selected{% endif %}>This week</option>
+                <option value="this_month" {% if default_history_mode == "this_month" %}selected{% endif %}>This month</option>
+                <option value="six_months" {% if default_history_mode == "six_months" %}selected{% endif %}>Last 6 months</option>
+                <option value="last_year" {% if default_history_mode == "last_year" %}selected{% endif %}>Last year</option>
+                <option value="years_back" {% if default_history_mode == "years_back" %}selected{% endif %}>Choose years back</option>
+                <option value="custom_date" {% if default_history_mode == "custom_date" %}selected{% endif %}>Custom date</option>
+                <option value="subscription_date" {% if default_history_mode == "subscription_date" %}selected{% endif %}>Subscription date</option>
+              </select>
+            </label>
+            <div id="default-years">
+              <label>Years back
+                <select name="history_years">
+                  {% for y in range(1, 11) %}<option value="{{ y }}" {% if default_history_years == y %}selected{% endif %}>{{ y }} year{% if y != 1 %}s{% endif %}</option>{% endfor %}
+                </select>
+              </label>
+            </div>
+            <div id="default-custom">
+              <label>Start date<input type="date" name="history_custom_date" value="{{ default_history_custom_date }}"></label>
+            </div>
+            <button class="btn">Save Downloads</button>
+          </form>
+        </div>
+        <div class="setting-box">
+          <h3>Effective default</h3>
+          <div class="metric">{{ default_history_cutoff }}</div>
+          <p class="muted small">Each channel can override this in the subscription table.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="automation">
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>Scheduled sync</h3>
+          <form method="post" action="/settings/automation">
+            <label>Sync interval in minutes
+              <input type="number" min="5" max="1440" name="sync_interval_minutes" value="{{ interval }}">
+            </label>
+            <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Automatically retry failed source updates</label>
+            <button class="btn">Save Automation</button>
+          </form>
+        </div>
+        <div class="setting-box">
+          <h3>Schedule</h3>
+          <p>Every <strong>{{ interval }} minutes</strong></p>
+          <p class="muted small">Next run: <span id="next-sync">{{ next_sync or "not available" }}</span></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="advanced">
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>Application</h3>
+          <p>Version <strong>{{ version }}</strong></p>
+          <p>Dry run: <strong>{{ "Enabled" if dry_run else "Disabled" }}</strong></p>
+          <p><a href="https://github.com/AshCooperUK/youtube-pinchflat-sync" target="_blank">GitHub repository</a></p>
+        </div>
+        <div class="setting-box">
+          <h3>Health</h3>
+          <p><a href="/health" target="_blank">Open health endpoint</a></p>
+          <p class="muted small">Use Activity for recent sync and error history.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</dialog>
+
+<dialog id="activity-dialog">
+  <div class="modal-head">
+    <div><h2 style="margin:0">Activity</h2><div class="muted small">Recent automation, source and settings events.</div></div>
+    <button class="modal-close" onclick="closeActivity()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    {% if activity_rows %}
+      {% for item in activity_rows %}
+        <div class="activity-item">
+          <strong class="{% if item['severity'] == 'warning' %}warn{% elif item['severity'] == 'success' %}ok{% elif item['severity'] == 'error' %}bad{% endif %}">{{ item["title"] }}</strong>
+          <div>{{ item["message"] }}</div>
+          <div class="activity-time">{{ item["created_at"] }} · {{ item["event_type"] }}</div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">No activity has been recorded yet.</div>
+    {% endif %}
+    <h3 style="margin-top:24px">Recent sync runs</h3>
+    {% for run in recent_runs %}
+      <div class="activity-item">
+        <strong>{{ run["status"] }}</strong>
+        <div>{{ run["message"] }}</div>
+        <div class="activity-time">{{ run["started_at"] }}</div>
+      </div>
+    {% endfor %}
+  </div>
+</dialog>
+
 <script>
-function updateSelectedCount() {
-  const boxes = Array.from(document.querySelectorAll(".source-select"));
-  const selected = boxes.filter(box => box.checked).length;
-  const label = document.getElementById("selected-count");
-  if (label) label.textContent = `${selected} selected`;
+const settingsDialog = document.getElementById("settings-dialog");
+const activityDialog = document.getElementById("activity-dialog");
+
+function openSettings(tab="general") { showTab(tab); settingsDialog.showModal(); }
+function closeSettings() { settingsDialog.close(); }
+function openActivity() { activityDialog.showModal(); }
+function closeActivity() { activityDialog.close(); }
+
+function showTab(name) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
 }
 
-const selectAll = document.getElementById("select-all-sources");
-if (selectAll) {
-  selectAll.addEventListener("change", function () {
-    document.querySelectorAll(".source-select").forEach(box => {
-      box.checked = selectAll.checked;
-    });
-    updateSelectedCount();
+function toggleDefaultHistory() {
+  const mode = document.getElementById("default-history-mode")?.value;
+  document.getElementById("default-years")?.classList.toggle("hidden", mode !== "years_back");
+  document.getElementById("default-custom")?.classList.toggle("hidden", mode !== "custom_date");
+}
+toggleDefaultHistory();
+
+function toggleSourceDate(select) {
+  const input = select.closest("form").querySelector(".source-date");
+  input.classList.toggle("hidden", select.value !== "custom_date");
+}
+
+const search = document.getElementById("source-search");
+const statusFilter = document.getElementById("status-filter");
+const sortFilter = document.getElementById("sort-filter");
+
+function initialFilter() {
+  search.value = localStorage.getItem("ytpf-search") || "";
+  statusFilter.value = localStorage.getItem("ytpf-status") || "{{ 'all' if show_removed else 'active' }}";
+  sortFilter.value = localStorage.getItem("ytpf-sort") || "title";
+}
+
+function applyFilters() {
+  localStorage.setItem("ytpf-search", search.value);
+  localStorage.setItem("ytpf-status", statusFilter.value);
+  localStorage.setItem("ytpf-sort", sortFilter.value);
+
+  const term = search.value.toLowerCase().trim();
+  const filter = statusFilter.value;
+  const body = document.getElementById("subscription-body");
+  if (!body) return;
+  const rows = Array.from(body.querySelectorAll(".source-row"));
+
+  rows.forEach(row => {
+    const titleMatch = !term || row.dataset.title.includes(term);
+    let statusMatch = true;
+    if (filter === "active") statusMatch = row.dataset.active === "1";
+    else if (filter !== "all") statusMatch = row.dataset.status === filter;
+    row.classList.toggle("hidden-row", !(titleMatch && statusMatch));
   });
+
+  const visible = rows.filter(r => !r.classList.contains("hidden-row"));
+  visible.sort((a,b) => {
+    if (sortFilter.value === "status") return a.dataset.status.localeCompare(b.dataset.status) || a.dataset.title.localeCompare(b.dataset.title);
+    if (sortFilter.value === "newest") return b.dataset.firstSeen.localeCompare(a.dataset.firstSeen);
+    return a.dataset.title.localeCompare(b.dataset.title);
+  });
+  visible.forEach(row => body.appendChild(row));
+  document.getElementById("visible-count").textContent = `${visible.length} shown`;
+  updateSelectedCount();
 }
 
-document.querySelectorAll(".source-select").forEach(box => {
-  box.addEventListener("change", updateSelectedCount);
+function setAllVisible(checked) {
+  document.querySelectorAll(".source-row:not(.hidden-row) .source-select").forEach(box => box.checked = checked);
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  const n = document.querySelectorAll(".source-select:checked").length;
+  document.getElementById("selected-count").textContent = `${n} selected`;
+}
+
+function toggleBulkOptions() {
+  const action = document.getElementById("bulk-action").value;
+  document.getElementById("bulk-range").classList.toggle("hidden", action !== "range");
+  document.getElementById("bulk-profile").classList.toggle("hidden", action !== "profile");
+  document.getElementById("bulk-custom-date").classList.add("hidden");
+}
+document.getElementById("bulk-range")?.addEventListener("change", function() {
+  document.getElementById("bulk-custom-date").classList.toggle("hidden", this.value !== "custom_date");
 });
 
-function toggleDefaultHistoryFields() {
-  const mode = document.getElementById("default_history_mode").value;
-  document.getElementById("default_years_field").classList.toggle("hidden", mode !== "years_back");
-  document.getElementById("default_custom_date_field").classList.toggle("hidden", mode !== "custom_date");
+function confirmBulkAction() {
+  const count = document.querySelectorAll(".source-select:checked").length;
+  const action = document.getElementById("bulk-action").value;
+  if (!count || !action) return false;
+  return window.confirm(`Apply "${action}" to ${count} selected source(s)?`);
 }
 
-function toggleSourceCustomDate(selectElement) {
-  const form = selectElement.closest("form");
-  const dateInput = form.querySelector(".source-custom-date");
-  dateInput.classList.toggle("hidden", selectElement.value !== "custom_date");
-}
+initialFilter();
+applyFilters();
+toggleBulkOptions();
 
-toggleDefaultHistoryFields();
+[settingsDialog, activityDialog].forEach(d => {
+  d?.addEventListener("click", event => {
+    const rect = d.getBoundingClientRect();
+    const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if (!inside) d.close();
+  });
+});
 </script>
 </body>
 </html>

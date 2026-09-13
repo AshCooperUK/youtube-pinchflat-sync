@@ -1,73 +1,204 @@
 # YouTube Pinchflat Sync
 
-## Version 1.3.1
+A Docker dashboard for ZimaOS which reads the subscriptions from your Google/YouTube account and manages matching Pinchflat sources.
 
-This maintenance release fixes editing existing Pinchflat sources:
+## Version 1.4.0
 
-- The app now selects Pinchflat's actual Source edit form.
-- It ignores the global `/search` form on Pinchflat pages.
-- Per-source download-range changes now post back to the Source route.
-- Per-source Enabled/Disabled changes use the same corrected edit form.
-- Pinchflat HTTP 500 update errors now show the target route for easier diagnosis.
+Version 1.4.0 is the UI and automation release.
 
-## Version 1.3.0
+### New dashboard
 
-This version adds:
+The main page now focuses on:
 
-- New YouTube subscriptions default to downloads disabled.
-- Pinchflat sources are created with `Download Media` off unless you enable them.
-- Disabled sources remain available for indexing and review without downloading media.
-- Each source has its own Enabled/Disabled control.
-- Multi-select checkboxes let you enable or disable several sources together.
-- Download date ranges stay separate from the enabled state.
-- Fresh Pinchflat installs automatically receive a `YouTube Sync` Media Profile.
-- Automatic profile creation uses Pinchflat's own New Media Profile form and current defaults.
-- The Pinchflat onboarding screen is completed automatically.
-- Existing Pinchflat sources from earlier app versions retain their enabled state during database migration.
+- Google status
+- Pinchflat status
+- Active subscriptions
+- Enabled and disabled downloads
+- Pending sources
+- Errors
+- Subscription management
 
-## Recommended first-use flow
+Configuration no longer fills the main page.
 
-1. Connect Google.
-2. Refresh YouTube subscriptions.
-3. Tick the channels you want and select `Enable selected`.
-4. Choose any per-source download ranges.
-5. Select `Add pending to Pinchflat`.
+Use the `Settings` button to open a tabbed settings popup.
 
-Channels you do not enable are still added to Pinchflat with media downloading disabled.
+Use the `Activity` button to view recent sync activity and sync runs.
 
-Version 1.2.1 improves Pinchflat setup detection and onboarding handling.
+### New subscription behaviour
 
-## v1.2.1 changes
+The default is now:
 
-- Each YouTube subscription has its own download-range dropdown.
-- Choices include Default, Today, This week, This month, Last 6 months, Last year, 2 to 10 years, original subscription date and a custom date.
-- A source row shows the exact Pinchflat cutoff date before it is added.
-- `Refresh YouTube subscriptions` discovers subscriptions without adding them to Pinchflat. This gives you time to choose per-source ranges.
-- `Add pending to Pinchflat` creates pending sources using their individual ranges.
-- `Full sync now` retains the original automatic behaviour.
-- The scheduled sync still runs every `SYNC_INTERVAL_MINUTES`.
-- The OAuth configuration section is hidden after Google connects. Disconnect Google to show it again.
-- Existing v1.1 SQLite databases are upgraded automatically.
-- The app checks that the configured Pinchflat Media Profile exists before creating a source.
-- Pinchflat source creation now starts from Pinchflat's live HTML form values, reducing breakage when Pinchflat changes form fields.
-- After the first successful source is added, the app marks Pinchflat onboarding complete using `?onboarding=0`.
-- The Open Pinchflat button opens the normal Pinchflat dashboard once a valid Media Profile exists.
-- Pinchflat HTTP 500 errors now include a clearer source-creation message in the dashboard.
+`Automatically enable and download`
 
-## Important behaviour
+When the scheduled sync finds a brand-new YouTube subscription it:
 
-Per-source ranges are applied when the sync service creates a Pinchflat source.
+1. Adds the channel to the local database.
+2. Enables downloads.
+3. Creates the Pinchflat source.
+4. Uses the configured default download range.
+5. Uses the configured default Pinchflat Media Profile.
 
-For sources created by v1.2.1, the app stores the Pinchflat source ID. Changing the dropdown later also updates the existing Pinchflat download cutoff through Pinchflat's edit form.
+The Settings > General tab also offers:
 
-Older sources without a stored source ID keep their existing Pinchflat cutoff until changed directly in Pinchflat.
+- Automatically enable and download
+- Add to Pinchflat with downloads disabled
+- Wait for approval before adding
+
+### YouTube unsubscribe behaviour
+
+When a channel disappears from your YouTube subscriptions, choose one of:
+
+- Keep Pinchflat source
+- Disable downloads in Pinchflat
+- Remove Pinchflat source while keeping downloaded files
+
+Removed YouTube subscriptions stay in the local history and are hidden from the normal active view. Use the `Removed` filter to see them.
+
+### Subscription filters and sorting
+
+The source table now has:
+
+- Channel search
+- All active filter
+- Enabled filter
+- Disabled filter
+- Pending filter
+- Needs review filter
+- Error filter
+- Removed filter
+- A to Z sorting
+- Status sorting
+- Newest-first sorting
+
+The browser remembers search, filter and sorting choices.
+
+### Bulk actions
+
+Select several channels and apply:
+
+- Enable downloads
+- Disable downloads
+- Approve review sources
+- Set download range
+- Set Pinchflat Media Profile
+- Retry errors
+
+A confirmation box appears before a bulk change is applied.
+
+### Media Profiles
+
+Pinchflat Media Profiles are loaded into dropdowns.
+
+You can choose:
+
+- A default Media Profile in Settings > Pinchflat
+- A different Media Profile for an individual YouTube source
+- A Media Profile for several selected sources using the bulk controls
+
+On a fresh Pinchflat installation the app can automatically create a `YouTube Sync` Media Profile.
+
+### Automatic retries
+
+Failed Pinchflat source updates are retried during scheduled syncs.
+
+The dashboard keeps the last error and retry count until the update succeeds.
+
+### Activity history
+
+The Activity popup keeps recent events such as:
+
+- New YouTube subscriptions
+- Removed YouTube subscriptions
+- Pinchflat source imports
+- Automatic retries
+- Settings changes
+- Synchronisation results
+
+### Download ranges
+
+The existing per-source ranges remain:
+
+- Default
+- Today
+- This week
+- This month
+- Last 6 months
+- Last year
+- Last 2 to 10 years
+- Original YouTube subscription date
+- Custom date
+
+The default download history lives under Settings > Downloads.
+
+### Settings tabs
+
+The Settings popup contains:
+
+- General
+- YouTube
+- Pinchflat
+- Downloads
+- Automation
+- Advanced
+
+The Google OAuth credential form stays hidden while Google is connected.
+
+### Pinchflat onboarding
+
+When the app creates a Pinchflat source, it completes Pinchflat onboarding automatically so Pinchflat opens on the normal dashboard.
 
 ## Google OAuth
 
-For the existing deployment:
+For the current Ash setup:
 
 `https://youtube.ashjohn.uk/oauth/google/callback`
 
-## Container
+The Google OAuth scope is:
+
+`https://www.googleapis.com/auth/youtube.readonly`
+
+## Storage paths
+
+The supplied ZimaOS YAML uses:
+
+- Sync data: `/media/NVME-Storage/AppData/youtube-pinchflat-sync/data`
+- Pinchflat config: `/media/NVME-Storage/AppData/pinchflat`
+- Pinchflat downloads: `/media/Storage/Media/YouTube`
+
+Upgrades preserve the SQLite database and OAuth token when those paths remain unchanged.
+
+## Publishing with GitHub Desktop
+
+Extract a release ZIP over your local clone of:
+
+`AshCooperUK/youtube-pinchflat-sync`
+
+Then use GitHub Desktop:
+
+1. Review the changed files.
+2. Enter a summary such as `Release v1.4.0`.
+3. Select `Commit to main`.
+4. Select `Push origin`.
+5. Wait for GitHub Actions to finish.
+
+The included workflow publishes:
 
 `ghcr.io/ashcooperuk/youtube-pinchflat-sync:latest`
+
+and:
+
+`ghcr.io/ashcooperuk/youtube-pinchflat-sync:1.4.0`
+
+## ZimaOS
+
+The ZimaOS compose definition is available at:
+
+`compose.yaml`
+
+and:
+
+`Apps/YouTubePinchflatSync/docker-compose.yml`
+
+The dashboard listens on port `8787`.
+
+Pinchflat listens on port `8945`.
