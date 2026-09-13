@@ -2,6 +2,21 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.3.0
+
+Expanded latest-subscriptions player.
+
+- Increases `Latest from your subscriptions` from 12 to 36 videos.
+- There is still no date window. The app combines current subscription channel feeds and displays the newest 36 videos overall.
+- Clicking a video thumbnail or title now opens an in-app playback popup instead of immediately opening YouTube.
+- The popup uses YouTube's privacy-enhanced embedded player and starts the selected video automatically.
+- The popup includes `Favourite Video`, `Favourite Channel`, `Like on YouTube`, and `Open on YouTube`.
+- Favourite state remains synchronised with the main subscription list, Discover and Favourites.
+- The popup shows the video title, channel, views, publication age and full YouTube description.
+- Closing the popup clears the embedded player so playback stops immediately.
+- Channel avatar and channel name on the main latest-video tiles still open the YouTube channel directly.
+- The final metadata enrichment remains a single `videos.list` request by limiting candidate enrichment to 50 video IDs.
+
 ## Version 2.2.2
 
 Personalised Discover and YouTube Like controls.

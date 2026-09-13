@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.2.2"
+VERSION = "2.3.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1341,7 +1341,7 @@ def youtube_channel_feed(channel_id, force=False):
     return list(entries)
 
 
-def youtube_latest_subscription_videos(limit=12, force=False):
+def youtube_latest_subscription_videos(limit=36, force=False):
     """
     Return the latest uploads across every active YouTube subscription.
 
@@ -1349,7 +1349,7 @@ def youtube_latest_subscription_videos(limit=12, force=False):
     upload feed for every active subscribed channel, combines those entries,
     sorts them by publication time, and returns the newest N videos overall.
     """
-    limit = min(max(int(limit or 12), 1), 24)
+    limit = min(max(int(limit or 36), 1), 48)
     now_ts = time.time()
 
     if (
@@ -1459,7 +1459,7 @@ def youtube_latest_subscription_videos(limit=12, force=False):
     # YouTube has removed or made one of the feed entries unavailable.
     candidate_ids = [
         item["video_id"]
-        for item in candidates[: max(limit * 2, 24)]
+        for item in candidates[:50]
     ]
 
     details_by_id = {}
@@ -1495,6 +1495,7 @@ def youtube_latest_subscription_videos(limit=12, force=False):
 
             details_by_id[video_id] = {
                 "title": snippet.get("title") or "",
+                "description": snippet.get("description") or "",
                 "channel_id": snippet.get("channelId") or "",
                 "channel_title": snippet.get("channelTitle") or "",
                 "published_at": snippet.get("publishedAt") or "",
@@ -1538,6 +1539,7 @@ def youtube_latest_subscription_videos(limit=12, force=False):
                     or candidate.get("title")
                     or "YouTube video"
                 ),
+                "description": details.get("description") or "",
                 "video_url": (
                     f"https://www.youtube.com/watch?v={video_id}"
                 ),
@@ -8798,7 +8800,7 @@ def latest_subscription_videos():
 
     try:
         result = youtube_latest_subscription_videos(
-            limit=12,
+            limit=36,
             force=refresh,
         )
         return jsonify({"ok": True, **result})
