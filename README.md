@@ -2,6 +2,23 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.2.0
+
+Latest subscription videos dashboard.
+
+- Adds a new `Latest from your subscriptions` section between the dashboard status cards and the Subscriptions table.
+- Shows up to 12 of the newest YouTube uploads returned for channels which are currently active subscriptions in the app.
+- Uses YouTube's authorised activity feed, then filters every result against the app's subscription database so recommendations and non-subscribed channels are excluded.
+- Video details include thumbnail, duration, title, channel avatar, channel name, view count and relative publish time.
+- Clicking the video thumbnail or title opens the video on YouTube.
+- Clicking the channel avatar or channel name opens the YouTube channel.
+- Each video thumbnail has a heart in the top-right corner.
+- The heart favourites the channel, not the video.
+- Favourite hearts stay synchronised with the main subscription list and Favourites popup.
+- Results are cached for five minutes to keep YouTube API usage low.
+- Adds a `Refresh videos` button for an immediate refresh.
+- The layout uses four columns on large screens, three on smaller desktops, two on tablets and one on narrow screens.
+
 ## Version 2.1.1
 
 Random Shorts description display.

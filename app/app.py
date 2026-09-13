@@ -35,7 +35,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.1.1"
+VERSION = "2.2.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -162,6 +162,13 @@ TOP100_WIKIPEDIA_URL = (
 )
 TOP100_CACHE_SECONDS = 21600
 TOP100_CACHE = {
+    "expires_at": 0.0,
+    "results": [],
+    "retrieved_at": "",
+}
+
+LATEST_SUBSCRIPTIONS_CACHE_SECONDS = 300
+LATEST_SUBSCRIPTIONS_CACHE = {
     "expires_at": 0.0,
     "results": [],
     "retrieved_at": "",
@@ -1169,6 +1176,244 @@ def youtube_top100_channels(force=False):
     }
 
 
+
+
+def youtube_duration_label(value):
+    value = str(value or "").strip()
+    if not value:
+        return ""
+
+    match = re.fullmatch(
+        r"P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?",
+        value,
+    )
+    if not match:
+        return ""
+
+    days, hours, minutes, seconds = [
+        int(part or 0)
+        for part in match.groups()
+    ]
+    hours += days * 24
+
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+    return f"{minutes}:{seconds:02d}"
+
+
+def youtube_latest_subscription_videos(limit=12, force=False):
+    limit = min(max(int(limit or 12), 1), 24)
+    now_ts = time.time()
+
+    if (
+        not force
+        and LATEST_SUBSCRIPTIONS_CACHE["results"]
+        and LATEST_SUBSCRIPTIONS_CACHE["expires_at"] > now_ts
+    ):
+        return {
+            "results": LATEST_SUBSCRIPTIONS_CACHE["results"][:limit],
+            "retrieved_at": LATEST_SUBSCRIPTIONS_CACHE["retrieved_at"],
+            "source": "YouTube subscription activity",
+        }
+
+    creds = load_credentials()
+    if not creds:
+        raise RuntimeError("Google account is not connected.")
+
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT channel_id, title, channel_url, thumbnail_url
+            FROM subscriptions
+            WHERE active = 1
+            """
+        ).fetchall()
+
+    subscriptions = {
+        row["channel_id"]: {
+            "channel_title": row["title"] or "",
+            "channel_url": row["channel_url"] or (
+                f"https://www.youtube.com/channel/{row['channel_id']}"
+            ),
+            "channel_thumbnail_url": row["thumbnail_url"] or "",
+        }
+        for row in rows
+        if row["channel_id"]
+    }
+
+    if not subscriptions:
+        return {
+            "results": [],
+            "retrieved_at": now_iso(),
+            "source": "YouTube subscription activity",
+        }
+
+    video_ids = []
+    page_token = None
+    pages = 0
+    seen_video_ids = set()
+
+    # Pull enough personalised activity to obtain at least twelve upload
+    # candidates from channels which are definitely in our subscription DB.
+    while pages < 4 and len(video_ids) < max(limit * 2, 24):
+        params = {
+            "part": "snippet,contentDetails",
+            "home": "true",
+            "maxResults": 50,
+            "regionCode": "GB",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        try:
+            response = youtube_api_request(
+                creds,
+                "GET",
+                "activities",
+                "activities.list",
+                1,
+                params=params,
+            )
+        except requests.HTTPError as exc:
+            detail = ""
+            try:
+                detail = (exc.response.json().get("error") or {}).get("message") or ""
+            except Exception:
+                detail = ""
+            raise RuntimeError(
+                "YouTube did not return the subscription activity feed. "
+                f"{detail or str(exc)}"
+            ) from exc
+
+        payload = response.json()
+
+        for activity in payload.get("items", []):
+            snippet = activity.get("snippet") or {}
+            details = activity.get("contentDetails") or {}
+            upload = details.get("upload") or {}
+            video_id = upload.get("videoId")
+
+            if not video_id or video_id in seen_video_ids:
+                continue
+
+            # The activity feed is personalised and can contain other content.
+            # Only keep channels already confirmed as active subscriptions.
+            channel_id = snippet.get("channelId") or ""
+            if channel_id and channel_id not in subscriptions:
+                continue
+
+            seen_video_ids.add(video_id)
+            video_ids.append(video_id)
+
+        page_token = payload.get("nextPageToken")
+        pages += 1
+
+        if not page_token:
+            break
+
+    if not video_ids:
+        result = {
+            "results": [],
+            "retrieved_at": now_iso(),
+            "source": "YouTube subscription activity",
+        }
+        LATEST_SUBSCRIPTIONS_CACHE.update(
+            {
+                "expires_at": now_ts + 60,
+                "results": [],
+                "retrieved_at": result["retrieved_at"],
+            }
+        )
+        return result
+
+    videos = []
+
+    # videos.list accepts up to 50 IDs. The activity scan above only needs a
+    # small number, but batching keeps quota use at one unit per 50 videos.
+    for start in range(0, len(video_ids), 50):
+        chunk = video_ids[start:start + 50]
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "videos",
+            "videos.list",
+            1,
+            params={
+                "part": "snippet,statistics,contentDetails",
+                "id": ",".join(chunk),
+                "maxResults": 50,
+            },
+        )
+
+        for video in response.json().get("items", []):
+            video_id = video.get("id") or ""
+            snippet = video.get("snippet") or {}
+            statistics = video.get("statistics") or {}
+            content_details = video.get("contentDetails") or {}
+            channel_id = snippet.get("channelId") or ""
+
+            # This second subscription check is authoritative. It prevents
+            # recommended/non-subscribed videos appearing even if an activity
+            # item omitted or changed its channel identifier.
+            if not video_id or channel_id not in subscriptions:
+                continue
+
+            thumbnails = snippet.get("thumbnails") or {}
+            thumbnail = (
+                thumbnails.get("maxres")
+                or thumbnails.get("standard")
+                or thumbnails.get("high")
+                or thumbnails.get("medium")
+                or thumbnails.get("default")
+                or {}
+            )
+
+            channel = subscriptions[channel_id]
+
+            videos.append(
+                {
+                    "video_id": video_id,
+                    "title": snippet.get("title") or "YouTube video",
+                    "video_url": f"https://www.youtube.com/watch?v={video_id}",
+                    "channel_id": channel_id,
+                    "channel_title": (
+                        snippet.get("channelTitle")
+                        or channel["channel_title"]
+                        or "YouTube channel"
+                    ),
+                    "channel_url": channel["channel_url"],
+                    "channel_thumbnail_url": channel["channel_thumbnail_url"],
+                    "thumbnail_url": thumbnail.get("url") or "",
+                    "published_at": snippet.get("publishedAt") or "",
+                    "view_count": int(statistics.get("viewCount") or 0),
+                    "duration": youtube_duration_label(
+                        content_details.get("duration")
+                    ),
+                }
+            )
+
+    videos.sort(
+        key=lambda item: item.get("published_at") or "",
+        reverse=True,
+    )
+    videos = videos[:limit]
+    videos = annotate_favourites(videos)
+
+    retrieved_at = now_iso()
+    LATEST_SUBSCRIPTIONS_CACHE.update(
+        {
+            "expires_at": now_ts + LATEST_SUBSCRIPTIONS_CACHE_SECONDS,
+            "results": videos,
+            "retrieved_at": retrieved_at,
+        }
+    )
+
+    return {
+        "results": videos,
+        "retrieved_at": retrieved_at,
+        "source": "YouTube subscription activity",
+    }
 
 
 def youtube_discovery_results(kind="videos", limit=24):
@@ -8212,6 +8457,20 @@ def subscribe_to_youtube_channel():
         youtube_subscribe(channel_id)
         refresh_subscriptions()
         return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/latest-subscriptions")
+def latest_subscription_videos():
+    refresh = request.args.get("refresh", "0") == "1"
+
+    try:
+        result = youtube_latest_subscription_videos(
+            limit=12,
+            force=refresh,
+        )
+        return jsonify({"ok": True, **result})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 

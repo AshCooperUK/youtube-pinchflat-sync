@@ -151,6 +151,121 @@
     .discover-avatar { width:104px; height:104px; border-radius:50%; object-fit:cover; border:2px solid #415575; background:#08111f; }
     .discover-video-title { color:var(--text); font-weight:700; line-height:1.25; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
     .discover-channel { color:var(--muted); font-size:13px; }
+
+    .latest-videos-card { margin-top:18px; margin-bottom:18px; }
+    .latest-videos-grid {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:22px 16px;
+      margin-top:16px;
+    }
+    .latest-video-card { min-width:0; }
+    .latest-video-thumb-wrap {
+      position:relative;
+      display:block;
+      width:100%;
+      aspect-ratio:16/9;
+      overflow:hidden;
+      border-radius:12px;
+      background:#050a12;
+      border:1px solid var(--line);
+    }
+    .latest-video-thumb {
+      display:block;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+    .latest-channel-heart {
+      position:absolute;
+      top:10px;
+      right:10px;
+      z-index:3;
+      width:38px;
+      height:38px;
+      display:grid;
+      place-items:center;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.28);
+      background:rgba(4,10,18,.82);
+      color:#fff;
+      font-size:22px;
+      cursor:pointer;
+      backdrop-filter:blur(5px);
+    }
+    .latest-channel-heart:hover { transform:scale(1.06); }
+    .latest-channel-heart.active {
+      color:#ff4f81;
+      border-color:#ff4f81;
+      background:rgba(44,8,23,.9);
+    }
+    .latest-video-duration {
+      position:absolute;
+      right:8px;
+      bottom:8px;
+      padding:3px 6px;
+      border-radius:5px;
+      background:rgba(0,0,0,.82);
+      color:#fff;
+      font-size:12px;
+      font-weight:700;
+    }
+    .latest-video-meta {
+      display:grid;
+      grid-template-columns:40px minmax(0,1fr);
+      gap:10px;
+      margin-top:10px;
+    }
+    .latest-channel-avatar {
+      width:40px;
+      height:40px;
+      border-radius:50%;
+      object-fit:cover;
+      border:1px solid var(--line);
+      background:#08111f;
+    }
+    .latest-video-title {
+      display:-webkit-box;
+      -webkit-box-orient:vertical;
+      -webkit-line-clamp:2;
+      overflow:hidden;
+      color:var(--text);
+      font-weight:800;
+      line-height:1.3;
+      text-decoration:none;
+      margin-bottom:4px;
+    }
+    .latest-video-title:hover,
+    .latest-video-channel:hover { text-decoration:underline; }
+    .latest-video-channel {
+      display:block;
+      color:var(--muted);
+      font-size:13px;
+      text-decoration:none;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .latest-video-stats {
+      color:var(--muted);
+      font-size:12px;
+      margin-top:2px;
+    }
+    .latest-videos-status {
+      min-height:22px;
+      color:var(--muted);
+      font-size:13px;
+      margin-top:8px;
+    }
+    @media (max-width:1180px) {
+      .latest-videos-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    }
+    @media (max-width:820px) {
+      .latest-videos-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
+    @media (max-width:520px) {
+      .latest-videos-grid { grid-template-columns:1fr; }
+    }
     .shorts-shell { display:grid; grid-template-columns:minmax(260px,330px) minmax(240px,1fr); gap:22px; align-items:start; }
     .shorts-player-frame { width:min(100%,330px); aspect-ratio:9/16; background:#000; border-radius:16px; overflow:hidden; margin:0 auto; }
     .shorts-player-frame iframe { display:block; width:100%; height:100%; border:0; }
@@ -352,6 +467,33 @@
       </div>
     </div>
   </div>
+
+  {% if google_connected %}
+  <div class="card latest-videos-card" id="latest-subscription-videos">
+    <div class="header">
+      <div>
+        <h2>Latest from your subscriptions</h2>
+        <div class="muted small">
+          The 12 newest uploads found from channels you currently subscribe to.
+          The heart favourites the channel, not the individual video.
+        </div>
+      </div>
+      <div class="actions">
+        <button
+          class="btn secondary smallbtn"
+          type="button"
+          id="latest-videos-refresh"
+          onclick="loadLatestSubscriptionVideos(true)"
+        >Refresh videos</button>
+      </div>
+    </div>
+
+    <div id="latest-videos-status" class="latest-videos-status">
+      Loading your newest subscription videos…
+    </div>
+    <div id="latest-videos-grid" class="latest-videos-grid"></div>
+  </div>
+  {% endif %}
 
   <div class="card" id="subscriptions">
     <div class="header">
@@ -1387,6 +1529,7 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
     });
     setHeartButton(button, data.favourite, "channel");
     document.querySelectorAll(`.source-row .heart-btn[data-channel-id="${CSS.escape(channelId)}"]`).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
+    document.querySelectorAll(`.latest-channel-heart[data-channel-id="${CSS.escape(channelId)}"]`).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
     document.querySelectorAll(`.source-row`).forEach(row => {
       const heart = row.querySelector(`.heart-btn[data-channel-id="${CSS.escape(channelId)}"]`);
       if (heart) row.dataset.favourite = data.favourite ? "1" : "0";
@@ -1416,6 +1559,209 @@ async function toggleVideoFavourite(button, item) {
     window.alert(err.message || String(err));
   }
 }
+
+function formatLatestViewCount(value) {
+  const count = Number(value || 0);
+  if (!Number.isFinite(count) || count < 0) return "";
+
+  if (count >= 1000000000) {
+    return `${(count / 1000000000).toFixed(count >= 10000000000 ? 0 : 1)}B views`;
+  }
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(count >= 10000000 ? 0 : 1)}M views`;
+  }
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}K views`;
+  }
+  return `${count} view${count === 1 ? "" : "s"}`;
+}
+
+function formatLatestAge(value) {
+  if (!value) return "";
+
+  const published = new Date(value);
+  if (Number.isNaN(published.getTime())) return "";
+
+  const seconds = Math.max(
+    0,
+    Math.floor((Date.now() - published.getTime()) / 1000)
+  );
+
+  const units = [
+    [31536000, "year"],
+    [2592000, "month"],
+    [604800, "week"],
+    [86400, "day"],
+    [3600, "hour"],
+    [60, "minute"]
+  ];
+
+  for (const [size, label] of units) {
+    if (seconds >= size) {
+      const amount = Math.floor(seconds / size);
+      return `${amount} ${label}${amount === 1 ? "" : "s"} ago`;
+    }
+  }
+
+  return "Just now";
+}
+
+function latestChannelHeart(item) {
+  const heart = document.createElement("button");
+  heart.type = "button";
+  heart.className = `latest-channel-heart ${item.is_favourite_channel ? "active" : ""}`;
+  heart.dataset.channelId = item.channel_id || "";
+  heart.title = item.is_favourite_channel
+    ? `Remove ${item.channel_title} from favourite channels`
+    : `Add ${item.channel_title} to favourite channels`;
+  heart.textContent = item.is_favourite_channel ? "♥" : "♡";
+
+  heart.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    toggleChannelFavourite(
+      heart,
+      item.channel_id || "",
+      item.channel_title || "YouTube channel",
+      item.channel_url || "",
+      item.channel_thumbnail_url || ""
+    );
+  });
+
+  return heart;
+}
+
+function renderLatestSubscriptionVideos(items) {
+  const grid = document.getElementById("latest-videos-grid");
+  const status = document.getElementById("latest-videos-status");
+
+  if (!grid || !status) return;
+
+  grid.replaceChildren();
+
+  if (!items.length) {
+    status.textContent =
+      "No recent subscription uploads were returned by YouTube.";
+    return;
+  }
+
+  status.textContent = "";
+
+  items.forEach(item => {
+    const card = document.createElement("article");
+    card.className = "latest-video-card";
+
+    const thumbLink = document.createElement("a");
+    thumbLink.className = "latest-video-thumb-wrap";
+    thumbLink.href = item.video_url;
+    thumbLink.target = "_blank";
+    thumbLink.rel = "noopener";
+    thumbLink.title = item.title || "Open video on YouTube";
+
+    const thumb = document.createElement("img");
+    thumb.className = "latest-video-thumb";
+    thumb.src = item.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    thumb.alt = item.title || "YouTube video";
+    thumb.loading = "lazy";
+    thumb.referrerPolicy = "no-referrer";
+
+    thumbLink.appendChild(thumb);
+    thumbLink.appendChild(latestChannelHeart(item));
+
+    if (item.duration) {
+      const duration = document.createElement("span");
+      duration.className = "latest-video-duration";
+      duration.textContent = item.duration;
+      thumbLink.appendChild(duration);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "latest-video-meta";
+
+    const avatarLink = document.createElement("a");
+    avatarLink.href = item.channel_url;
+    avatarLink.target = "_blank";
+    avatarLink.rel = "noopener";
+    avatarLink.title = `Open ${item.channel_title} on YouTube`;
+
+    const avatar = document.createElement("img");
+    avatar.className = "latest-channel-avatar";
+    avatar.src = item.channel_thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    avatar.alt = item.channel_title || "YouTube channel";
+    avatar.loading = "lazy";
+    avatar.referrerPolicy = "no-referrer";
+    avatarLink.appendChild(avatar);
+
+    const text = document.createElement("div");
+
+    const title = document.createElement("a");
+    title.className = "latest-video-title";
+    title.href = item.video_url;
+    title.target = "_blank";
+    title.rel = "noopener";
+    title.textContent = item.title || "YouTube video";
+    title.title = item.title || "";
+
+    const channel = document.createElement("a");
+    channel.className = "latest-video-channel";
+    channel.href = item.channel_url;
+    channel.target = "_blank";
+    channel.rel = "noopener";
+    channel.textContent = item.channel_title || "YouTube channel";
+    channel.title = item.channel_title || "";
+
+    const stats = document.createElement("div");
+    stats.className = "latest-video-stats";
+
+    const bits = [
+      formatLatestViewCount(item.view_count),
+      formatLatestAge(item.published_at)
+    ].filter(Boolean);
+
+    stats.textContent = bits.join(" · ");
+
+    text.append(title, channel, stats);
+    meta.append(avatarLink, text);
+    card.append(thumbLink, meta);
+    grid.appendChild(card);
+  });
+}
+
+async function loadLatestSubscriptionVideos(force=false) {
+  const grid = document.getElementById("latest-videos-grid");
+  const status = document.getElementById("latest-videos-status");
+  const refresh = document.getElementById("latest-videos-refresh");
+
+  if (!grid || !status) return;
+
+  if (refresh) refresh.disabled = true;
+  status.textContent = force
+    ? "Refreshing your newest subscription videos…"
+    : "Loading your newest subscription videos…";
+
+  try {
+    const response = await fetch(
+      `/api/latest-subscriptions?refresh=${force ? 1 : 0}`
+    );
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error || `HTTP ${response.status}`
+      );
+    }
+
+    renderLatestSubscriptionVideos(data.results || []);
+  } catch (err) {
+    grid.replaceChildren();
+    status.textContent =
+      `Latest videos could not be loaded: ${err.message || String(err)}`;
+  } finally {
+    if (refresh) refresh.disabled = false;
+  }
+}
+
 
 async function openFavourites(tab="channels") {
   favouriteTab = tab;
@@ -2093,6 +2439,9 @@ function confirmBulkAction() {
 initialFilter();
 applyFilters();
 toggleBulkOptions();
+{% if google_connected %}
+loadLatestSubscriptionVideos(false);
+{% endif %}
 const settingsHashTabs = new Set(["security", "pinchflat", "general", "youtube", "downloads", "automation", "advanced"]);
 const requestedSettingsTab = window.location.hash.replace("#", "");
 if (settingsHashTabs.has(requestedSettingsTab)) {
