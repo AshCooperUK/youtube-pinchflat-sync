@@ -16,6 +16,7 @@ import struct
 import threading
 import xml.etree.ElementTree as ET
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -35,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -173,6 +174,11 @@ LATEST_SUBSCRIPTIONS_CACHE = {
     "results": [],
     "retrieved_at": "",
 }
+
+YOUTUBE_CHANNEL_FEED_CACHE_SECONDS = 600
+YOUTUBE_CHANNEL_FEED_CACHE = {}
+YOUTUBE_CHANNEL_FEED_LOCK = threading.Lock()
+YOUTUBE_CHANNEL_FEED_WORKERS = 24
 
 TOTP_ISSUER = "YouTube Pinchflat Sync"
 
@@ -1202,7 +1208,137 @@ def youtube_duration_label(value):
     return f"{minutes}:{seconds:02d}"
 
 
+def youtube_duration_label(value):
+    value = str(value or "").strip()
+    if not value:
+        return ""
+
+    match = re.fullmatch(
+        r"P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?",
+        value,
+    )
+    if not match:
+        return ""
+
+    days, hours, minutes, seconds = [
+        int(part or 0)
+        for part in match.groups()
+    ]
+    hours += days * 24
+
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+    return f"{minutes}:{seconds:02d}"
+
+
+def youtube_channel_feed(channel_id, force=False):
+    """
+    Return recent uploads from one subscribed channel's public YouTube Atom
+    feed. This does not consume YouTube Data API quota.
+    """
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return []
+
+    now_ts = time.time()
+
+    if not force:
+        with YOUTUBE_CHANNEL_FEED_LOCK:
+            cached = YOUTUBE_CHANNEL_FEED_CACHE.get(channel_id)
+
+        if cached and cached.get("expires_at", 0) > now_ts:
+            return list(cached.get("entries") or [])
+
+    url = (
+        "https://www.youtube.com/feeds/videos.xml"
+        f"?channel_id={quote(channel_id)}"
+    )
+
+    response = requests.get(
+        url,
+        timeout=12,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 YouTube-Pinchflat-Sync/"
+                f"{VERSION}"
+            )
+        },
+    )
+    response.raise_for_status()
+
+    root = ET.fromstring(response.content)
+
+    ns = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "yt": "http://www.youtube.com/xml/schemas/2015",
+        "media": "http://search.yahoo.com/mrss/",
+    }
+
+    entries = []
+
+    for entry in root.findall("atom:entry", ns):
+        video_id = (
+            entry.findtext("yt:videoId", default="", namespaces=ns)
+            or ""
+        ).strip()
+
+        if not video_id:
+            continue
+
+        title = (
+            entry.findtext("atom:title", default="", namespaces=ns)
+            or "YouTube video"
+        ).strip()
+
+        published = (
+            entry.findtext("atom:published", default="", namespaces=ns)
+            or ""
+        ).strip()
+
+        updated = (
+            entry.findtext("atom:updated", default="", namespaces=ns)
+            or ""
+        ).strip()
+
+        channel_title = (
+            entry.findtext("atom:author/atom:name", default="", namespaces=ns)
+            or ""
+        ).strip()
+
+        entries.append(
+            {
+                "video_id": video_id,
+                "title": title,
+                "published_at": published or updated,
+                "channel_id": channel_id,
+                "channel_title": channel_title,
+                "video_url": (
+                    f"https://www.youtube.com/watch?v={video_id}"
+                ),
+                "thumbnail_url": (
+                    f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                ),
+            }
+        )
+
+    with YOUTUBE_CHANNEL_FEED_LOCK:
+        YOUTUBE_CHANNEL_FEED_CACHE[channel_id] = {
+            "expires_at": now_ts + YOUTUBE_CHANNEL_FEED_CACHE_SECONDS,
+            "entries": entries,
+        }
+
+    return list(entries)
+
+
 def youtube_latest_subscription_videos(limit=12, force=False):
+    """
+    Return the latest uploads across every active YouTube subscription.
+
+    There is deliberately no date window. The app reads the recent public
+    upload feed for every active subscribed channel, combines those entries,
+    sorts them by publication time, and returns the newest N videos overall.
+    """
     limit = min(max(int(limit or 12), 1), 24)
     now_ts = time.time()
 
@@ -1214,7 +1350,7 @@ def youtube_latest_subscription_videos(limit=12, force=False):
         return {
             "results": LATEST_SUBSCRIPTIONS_CACHE["results"][:limit],
             "retrieved_at": LATEST_SUBSCRIPTIONS_CACHE["retrieved_at"],
-            "source": "YouTube subscription activity",
+            "source": "YouTube channel feeds",
         }
 
     creds = load_credentials()
@@ -1246,93 +1382,79 @@ def youtube_latest_subscription_videos(limit=12, force=False):
         return {
             "results": [],
             "retrieved_at": now_iso(),
-            "source": "YouTube subscription activity",
+            "source": "YouTube channel feeds",
         }
 
-    video_ids = []
-    page_token = None
-    pages = 0
-    seen_video_ids = set()
+    combined = []
+    failed_channels = 0
 
-    # Pull enough personalised activity to obtain at least twelve upload
-    # candidates from channels which are definitely in our subscription DB.
-    while pages < 4 and len(video_ids) < max(limit * 2, 24):
-        params = {
-            "part": "snippet,contentDetails",
-            "home": "true",
-            "maxResults": 50,
-            "regionCode": "GB",
+    # Fetch each channel in parallel. Cached channel feeds return immediately,
+    # so routine page loads are cheap. A forced refresh refreshes every feed.
+    with ThreadPoolExecutor(
+        max_workers=YOUTUBE_CHANNEL_FEED_WORKERS
+    ) as executor:
+        futures = {
+            executor.submit(
+                youtube_channel_feed,
+                channel_id,
+                force,
+            ): channel_id
+            for channel_id in subscriptions
         }
-        if page_token:
-            params["pageToken"] = page_token
 
-        try:
-            response = youtube_api_request(
-                creds,
-                "GET",
-                "activities",
-                "activities.list",
-                1,
-                params=params,
-            )
-        except requests.HTTPError as exc:
-            detail = ""
+        for future in as_completed(futures):
+            channel_id = futures[future]
+
             try:
-                detail = (exc.response.json().get("error") or {}).get("message") or ""
+                feed_entries = future.result()
             except Exception:
-                detail = ""
-            raise RuntimeError(
-                "YouTube did not return the subscription activity feed. "
-                f"{detail or str(exc)}"
-            ) from exc
-
-        payload = response.json()
-
-        for activity in payload.get("items", []):
-            snippet = activity.get("snippet") or {}
-            details = activity.get("contentDetails") or {}
-            upload = details.get("upload") or {}
-            video_id = upload.get("videoId")
-
-            if not video_id or video_id in seen_video_ids:
+                failed_channels += 1
                 continue
 
-            # The activity feed is personalised and can contain other content.
-            # Only keep channels already confirmed as active subscriptions.
-            channel_id = snippet.get("channelId") or ""
-            if channel_id and channel_id not in subscriptions:
-                continue
+            channel = subscriptions[channel_id]
 
-            seen_video_ids.add(video_id)
-            video_ids.append(video_id)
+            for item in feed_entries:
+                item = dict(item)
+                item["channel_title"] = (
+                    item.get("channel_title")
+                    or channel["channel_title"]
+                    or "YouTube channel"
+                )
+                item["channel_url"] = channel["channel_url"]
+                item["channel_thumbnail_url"] = (
+                    channel["channel_thumbnail_url"]
+                )
+                combined.append(item)
 
-        page_token = payload.get("nextPageToken")
-        pages += 1
-
-        if not page_token:
-            break
-
-    if not video_ids:
-        result = {
-            "results": [],
-            "retrieved_at": now_iso(),
-            "source": "YouTube subscription activity",
-        }
-        LATEST_SUBSCRIPTIONS_CACHE.update(
-            {
-                "expires_at": now_ts + 60,
-                "results": [],
-                "retrieved_at": result["retrieved_at"],
-            }
+    if not combined:
+        raise RuntimeError(
+            "No YouTube channel feeds returned recent uploads. "
+            f"Feeds failed: {failed_channels} of {len(subscriptions)}."
         )
-        return result
 
-    videos = []
+    # Deduplicate before sorting.
+    unique = {}
+    for item in combined:
+        video_id = item.get("video_id")
+        if video_id and video_id not in unique:
+            unique[video_id] = item
 
-    # videos.list accepts up to 50 IDs. The activity scan above only needs a
-    # small number, but batching keeps quota use at one unit per 50 videos.
-    for start in range(0, len(video_ids), 50):
-        chunk = video_ids[start:start + 50]
+    candidates = list(unique.values())
+    candidates.sort(
+        key=lambda item: item.get("published_at") or "",
+        reverse=True,
+    )
+
+    # Take a little more than needed before the API enrichment step in case
+    # YouTube has removed or made one of the feed entries unavailable.
+    candidate_ids = [
+        item["video_id"]
+        for item in candidates[: max(limit * 2, 24)]
+    ]
+
+    details_by_id = {}
+
+    if candidate_ids:
         response = youtube_api_request(
             creds,
             "GET",
@@ -1341,7 +1463,7 @@ def youtube_latest_subscription_videos(limit=12, force=False):
             1,
             params={
                 "part": "snippet,statistics,contentDetails",
-                "id": ",".join(chunk),
+                "id": ",".join(candidate_ids[:50]),
                 "maxResults": 50,
             },
         )
@@ -1351,14 +1473,6 @@ def youtube_latest_subscription_videos(limit=12, force=False):
             snippet = video.get("snippet") or {}
             statistics = video.get("statistics") or {}
             content_details = video.get("contentDetails") or {}
-            channel_id = snippet.get("channelId") or ""
-
-            # This second subscription check is authoritative. It prevents
-            # recommended/non-subscribed videos appearing even if an activity
-            # item omitted or changed its channel identifier.
-            if not video_id or channel_id not in subscriptions:
-                continue
-
             thumbnails = snippet.get("thumbnails") or {}
             thumbnail = (
                 thumbnails.get("maxres")
@@ -1369,30 +1483,82 @@ def youtube_latest_subscription_videos(limit=12, force=False):
                 or {}
             )
 
-            channel = subscriptions[channel_id]
+            details_by_id[video_id] = {
+                "title": snippet.get("title") or "",
+                "channel_id": snippet.get("channelId") or "",
+                "channel_title": snippet.get("channelTitle") or "",
+                "published_at": snippet.get("publishedAt") or "",
+                "thumbnail_url": thumbnail.get("url") or "",
+                "view_count": int(statistics.get("viewCount") or 0),
+                "duration": youtube_duration_label(
+                    content_details.get("duration")
+                ),
+            }
 
-            videos.append(
-                {
-                    "video_id": video_id,
-                    "title": snippet.get("title") or "YouTube video",
-                    "video_url": f"https://www.youtube.com/watch?v={video_id}",
-                    "channel_id": channel_id,
-                    "channel_title": (
-                        snippet.get("channelTitle")
-                        or channel["channel_title"]
-                        or "YouTube channel"
-                    ),
-                    "channel_url": channel["channel_url"],
-                    "channel_thumbnail_url": channel["channel_thumbnail_url"],
-                    "thumbnail_url": thumbnail.get("url") or "",
-                    "published_at": snippet.get("publishedAt") or "",
-                    "view_count": int(statistics.get("viewCount") or 0),
-                    "duration": youtube_duration_label(
-                        content_details.get("duration")
-                    ),
-                }
-            )
+    videos = []
 
+    for candidate in candidates:
+        if len(videos) >= limit:
+            break
+
+        video_id = candidate.get("video_id") or ""
+        details = details_by_id.get(video_id)
+
+        # Skip a feed entry if videos.list says the video no longer exists.
+        if not details:
+            continue
+
+        channel_id = (
+            details.get("channel_id")
+            or candidate.get("channel_id")
+            or ""
+        )
+
+        # This keeps the result authoritative to the current subscription DB.
+        if channel_id not in subscriptions:
+            continue
+
+        channel = subscriptions[channel_id]
+
+        videos.append(
+            {
+                "video_id": video_id,
+                "title": (
+                    details.get("title")
+                    or candidate.get("title")
+                    or "YouTube video"
+                ),
+                "video_url": (
+                    f"https://www.youtube.com/watch?v={video_id}"
+                ),
+                "channel_id": channel_id,
+                "channel_title": (
+                    details.get("channel_title")
+                    or channel["channel_title"]
+                    or "YouTube channel"
+                ),
+                "channel_url": channel["channel_url"],
+                "channel_thumbnail_url": (
+                    channel["channel_thumbnail_url"]
+                ),
+                "thumbnail_url": (
+                    details.get("thumbnail_url")
+                    or candidate.get("thumbnail_url")
+                    or ""
+                ),
+                "published_at": (
+                    details.get("published_at")
+                    or candidate.get("published_at")
+                    or ""
+                ),
+                "view_count": int(
+                    details.get("view_count") or 0
+                ),
+                "duration": details.get("duration") or "",
+            }
+        )
+
+    # Sort once more using authoritative videos.list publication timestamps.
     videos.sort(
         key=lambda item: item.get("published_at") or "",
         reverse=True,
@@ -1412,8 +1578,10 @@ def youtube_latest_subscription_videos(limit=12, force=False):
     return {
         "results": videos,
         "retrieved_at": retrieved_at,
-        "source": "YouTube subscription activity",
+        "source": "YouTube channel feeds",
+        "failed_channels": failed_channels,
     }
+
 
 
 def youtube_discovery_results(kind="videos", limit=24):

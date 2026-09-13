@@ -474,8 +474,8 @@
       <div>
         <h2>Latest from your subscriptions</h2>
         <div class="muted small">
-          The 12 newest uploads found from channels you currently subscribe to.
-          The heart favourites the channel, not the individual video.
+          The latest 12 videos across all channels you currently subscribe to.
+          There is no date window. The heart favourites the channel, not the individual video.
         </div>
       </div>
       <div class="actions">
@@ -1642,7 +1642,7 @@ function renderLatestSubscriptionVideos(items) {
 
   if (!items.length) {
     status.textContent =
-      "No recent subscription uploads were returned by YouTube.";
+      "No subscription videos were returned by YouTube.";
     return;
   }
 
