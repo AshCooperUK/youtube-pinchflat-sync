@@ -105,6 +105,9 @@
     .tab-btn.active { background:var(--blue); border-color:var(--blue); }
     .tab-panel { display:none; }
     .tab-panel.active { display:block; }
+    .profile-settings-grid { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin:8px 0 0; }
+    .compact-setting { padding:14px; }
+    .compact-setting h3 { margin-bottom:10px; }
     .settings-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:14px; }
     .setting-box { border:1px solid var(--line); border-radius:12px; padding:15px; background:var(--panel); }
     .activity-item { border-bottom:1px solid var(--line); padding:11px 0; }
@@ -464,14 +467,14 @@
   <div class="modal-body">
     <div class="tabs">
       {% if is_admin %}
-      <button class="tab-btn active" data-tab="general" onclick="showTab('general')">General</button>
-      <button class="tab-btn" data-tab="youtube" onclick="showTab('youtube')">YouTube</button>
-      <button class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')">Pinchflat</button>
-      <button class="tab-btn" data-tab="downloads" onclick="showTab('downloads')">Downloads</button>
-      <button class="tab-btn" data-tab="automation" onclick="showTab('automation')">Automation</button>
-      <button class="tab-btn" data-tab="advanced" onclick="showTab('advanced')">Advanced</button>
+      <button type="button" class="tab-btn active" data-tab="general" onclick="showTab('general')">General</button>
+      <button type="button" class="tab-btn" data-tab="youtube" onclick="showTab('youtube')">YouTube</button>
+      <button type="button" class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')">Pinchflat</button>
+      <button type="button" class="tab-btn" data-tab="downloads" onclick="showTab('downloads')">Downloads</button>
+      <button type="button" class="tab-btn" data-tab="automation" onclick="showTab('automation')">Automation</button>
+      <button type="button" class="tab-btn" data-tab="advanced" onclick="showTab('advanced')">Advanced</button>
       {% endif %}
-      <button class="tab-btn {% if not is_admin %}active{% endif %}" data-tab="security" onclick="showTab('security')">Security</button>
+      <button type="button" class="tab-btn {% if not is_admin %}active{% endif %}" data-tab="security" onclick="showTab('security')">Security</button>
     </div>
 
     {% if is_admin %}
@@ -573,7 +576,7 @@
           <h3>Default Media Profile</h3>
           <form method="post" action="/settings/pinchflat"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Profile
-              <select name="pinchflat_media_profile_id">
+              <select name="pinchflat_media_profile_id" onchange="this.form.submit()">
                 {% for profile in profiles %}
                   <option value="{{ profile.id }}" {% if media_profile_id|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
                 {% endfor %}
@@ -583,10 +586,116 @@
             <button class="btn">Save Pinchflat</button>
           </form>
         </div>
+
         <div class="setting-box">
           <h3>Status</h3>
           <p>{{ pinchflat_profile_message }}</p>
+          {% if media_profile_settings.error %}
+            <p class="bad small">{{ media_profile_settings.error }}</p>
+          {% else %}
+            <p class="muted small">Editing: {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</p>
+          {% endif %}
           <a class="btn secondary" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>
+        </div>
+
+        <div class="setting-box" style="grid-column:1/-1">
+          <h3>Current Media Profile</h3>
+          <p class="muted small">These controls edit the selected profile directly in Pinchflat.</p>
+
+          {% if not media_profile_settings.error %}
+          <form method="post" action="/settings/pinchflat/profile" id="pinchflat-media-profile-form">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+            <label>Output path template
+              <textarea id="media-profile-output-template" name="output_path_template" rows="3">{{ media_profile_settings.output_path_template }}</textarea>
+            </label>
+            <div class="actions" style="margin-top:-4px;margin-bottom:14px">
+              <button
+                type="button"
+                class="btn secondary smallbtn"
+                onclick='document.getElementById("media-profile-output-template").value={{ emby_output_path_template|tojson }}'
+              >Use Emby template</button>
+              <code class="small">{{ emby_output_path_template }}</code>
+            </div>
+
+            <div class="settings-grid profile-settings-grid">
+              <div class="setting-box compact-setting">
+                <h3>Subtitles</h3>
+                <label><input type="checkbox" name="download_subs" value="1" {% if media_profile_settings.download_subs %}checked{% endif %} {% if not media_profile_settings.available.download_subs %}disabled{% endif %}> Download subtitles</label>
+                <label><input type="checkbox" name="embed_subs" value="1" {% if media_profile_settings.embed_subs %}checked{% endif %} {% if not media_profile_settings.available.embed_subs %}disabled{% endif %}> Embed subtitles</label>
+              </div>
+
+              <div class="setting-box compact-setting">
+                <h3>Thumbnails</h3>
+                <label><input type="checkbox" name="download_thumbnail" value="1" {% if media_profile_settings.download_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.download_thumbnail %}disabled{% endif %}> Download thumbnails</label>
+                <label><input type="checkbox" name="embed_thumbnail" value="1" {% if media_profile_settings.embed_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.embed_thumbnail %}disabled{% endif %}> Embed thumbnails</label>
+              </div>
+
+              <div class="setting-box compact-setting">
+                <h3>Metadata</h3>
+                <label><input type="checkbox" name="download_metadata" value="1" {% if media_profile_settings.download_metadata %}checked{% endif %} {% if not media_profile_settings.available.download_metadata %}disabled{% endif %}> Download metadata</label>
+                <label><input type="checkbox" name="embed_metadata" value="1" {% if media_profile_settings.embed_metadata %}checked{% endif %} {% if not media_profile_settings.available.embed_metadata %}disabled{% endif %}> Embed metadata</label>
+              </div>
+
+              <div class="setting-box compact-setting">
+                <h3>Content types</h3>
+                <label><input type="checkbox" name="include_shorts" value="1" {% if media_profile_settings.include_shorts %}checked{% endif %} {% if not media_profile_settings.available.shorts_behaviour %}disabled{% endif %}> Include Shorts</label>
+                <label><input type="checkbox" name="include_livestreams" value="1" {% if media_profile_settings.include_livestreams %}checked{% endif %} {% if not media_profile_settings.available.livestream_behaviour %}disabled{% endif %}> Include livestreams</label>
+              </div>
+
+              <div class="setting-box compact-setting">
+                <h3>Quality</h3>
+                <label>Default download resolution
+                  <select name="preferred_resolution" {% if not media_profile_settings.available.preferred_resolution %}disabled{% endif %}>
+                    {% for option in media_profile_settings.resolution_options %}
+                      <option value="{{ option.value }}" {% if media_profile_settings.preferred_resolution|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Redownload delay
+                  <select name="redownload_delay_days" {% if not media_profile_settings.available.redownload_delay_days %}disabled{% endif %}>
+                    {% set current_delay = media_profile_settings.redownload_delay_days|string %}
+                    <option value="" {% if not current_delay %}selected{% endif %}>Disabled</option>
+                    {% for days in [1,2,3,7,14,30] %}
+                      <option value="{{ days }}" {% if current_delay == days|string %}selected{% endif %}>{{ days }} day{% if days != 1 %}s{% endif %}</option>
+                    {% endfor %}
+                    {% if current_delay and current_delay not in ['1','2','3','7','14','30'] %}
+                      <option value="{{ current_delay }}" selected>{{ current_delay }} days · current</option>
+                    {% endif %}
+                  </select>
+                </label>
+              </div>
+
+              <div class="setting-box compact-setting">
+                <h3>Media centre</h3>
+                <label><input type="checkbox" name="download_nfo" value="1" {% if media_profile_settings.download_nfo %}checked{% endif %} {% if not media_profile_settings.available.download_nfo %}disabled{% endif %}> Download NFO data</label>
+                <label><input type="checkbox" name="download_source_images" value="1" {% if media_profile_settings.download_source_images %}checked{% endif %} {% if not media_profile_settings.available.download_source_images %}disabled{% endif %}> Download Series Images</label>
+              </div>
+            </div>
+
+            <div class="setting-box" style="margin-top:14px">
+              <h3>SponsorBlock</h3>
+              <label>Behaviour
+                <select name="sponsorblock_behaviour" id="sponsorblock-behaviour" onchange="toggleSponsorBlockCategories()" {% if not media_profile_settings.available.sponsorblock_behaviour %}disabled{% endif %}>
+                  <option value="disabled" {% if media_profile_settings.sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option>
+                  <option value="mark" {% if media_profile_settings.sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark segments as chapters</option>
+                  <option value="remove" {% if media_profile_settings.sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove segments</option>
+                </select>
+              </label>
+              <div id="sponsorblock-categories">
+                <div class="muted small" style="margin-bottom:8px">Categories</div>
+                {% for value, label in sponsorblock_common_categories %}
+                  <label><input type="checkbox" name="sponsorblock_categories" value="{{ value }}" {% if value in media_profile_settings.sponsorblock_categories %}checked{% endif %}> {{ label }}</label>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="actions" style="margin-top:16px">
+              <button class="btn">Save Media Profile</button>
+              <span class="muted small">Existing downloaded files are not renamed when you change the output template.</span>
+            </div>
+          </form>
+          {% endif %}
         </div>
       </div>
     </section>
@@ -746,7 +855,20 @@
           <h3>Users</h3>
           <div class="table-wrap"><table class="compact-table user-table"><thead><tr><th>User</th><th>Role</th><th>2FA</th><th>Status</th><th>Last login</th><th></th></tr></thead><tbody>
           {% for user in security_users %}
-            <tr><td><strong>{{ user.display_name or user.username }}</strong><div class="small muted">{{ user.username }}</div></td><td>{{ user.role|title }}</td><td>{{ 'Enabled' if user.totp_enabled else 'Off' }}</td><td>{{ 'Active' if user.active else 'Disabled' }}</td><td>{{ user.last_login_at or 'Never' }}</td><td>{% if user.id != current_user.id %}<form method="post" action="/users/{{ user.id }}/toggle"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost smallbtn">{{ 'Disable' if user.active else 'Enable' }}</button></form>{% endif %}</td></tr>
+            <tr><td><strong>{{ user.display_name or user.username }}</strong><div class="small muted">{{ user.username }}</div></td><td>{{ user.role|title }}</td><td>{{ 'Enabled' if user.totp_enabled else 'Off' }}</td><td>{{ 'Active' if user.active else 'Disabled' }}</td><td>{{ user.last_login_at or 'Never' }}</td><td>
+              {% if user.id != current_user.id %}
+              <div class="actions">
+                <form method="post" action="/users/{{ user.id }}/toggle">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                  <button class="btn ghost smallbtn">{{ 'Disable' if user.active else 'Enable' }}</button>
+                </form>
+                <form method="post" action="/users/{{ user.id }}/delete" onsubmit="return confirm('Permanently delete user {{ user.username|e }}? This cannot be undone.')">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                  <button class="btn danger smallbtn">Delete</button>
+                </form>
+              </div>
+              {% endif %}
+            </td></tr>
           {% endfor %}
           </tbody></table></div>
         </div>
@@ -816,7 +938,10 @@ const activityDialog = document.getElementById("activity-dialog");
 const singleDownloadDialog = document.getElementById("single-download-dialog");
 let singleDownloadTimer = null;
 
-function openSettings(tab="{{ 'general' if is_admin else 'security' }}") { showTab(tab); settingsDialog.showModal(); }
+function openSettings(tab="{{ 'general' if is_admin else 'security' }}") {
+  showTab(tab);
+  if (!settingsDialog.open) settingsDialog.showModal();
+}
 function closeSettings() { settingsDialog.close(); }
 function openActivity() { activityDialog.showModal(); }
 function closeActivity() { activityDialog.close(); }
@@ -837,6 +962,14 @@ function toggleDefaultHistory() {
   document.getElementById("default-custom")?.classList.toggle("hidden", mode !== "custom_date");
 }
 toggleDefaultHistory();
+
+function toggleSponsorBlockCategories() {
+  const select = document.getElementById("sponsorblock-behaviour");
+  const categories = document.getElementById("sponsorblock-categories");
+  if (!select || !categories) return;
+  categories.classList.toggle("hidden", select.value === "disabled");
+}
+toggleSponsorBlockCategories();
 
 function toggleSourceDate(select) {
   const form = select.closest("form");
@@ -969,13 +1102,15 @@ function confirmBulkAction() {
 initialFilter();
 applyFilters();
 toggleBulkOptions();
-if (window.location.hash === "#security") openSettings("security");
+const settingsHashTabs = new Set(["security", "pinchflat", "general", "youtube", "downloads", "automation", "advanced"]);
+const requestedSettingsTab = window.location.hash.replace("#", "");
+if (settingsHashTabs.has(requestedSettingsTab)) {
+  openSettings(requestedSettingsTab);
+}
 
 [settingsDialog, activityDialog, singleDownloadDialog].forEach(d => {
   d?.addEventListener("click", event => {
-    const rect = d.getBoundingClientRect();
-    const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
-    if (!inside) d.close();
+    if (event.target === d) d.close();
   });
 });
 </script>

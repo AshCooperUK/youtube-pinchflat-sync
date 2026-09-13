@@ -2,6 +2,22 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 1.7.0
+
+Pinchflat profile management and user administration update.
+
+- Administrators can permanently delete other users from Settings > Security.
+- The current Pinchflat Media Profile can now be edited directly from Settings > Pinchflat.
+- Adds an editable Emby output path template.
+- Adds subtitle, thumbnail and metadata download/embed controls.
+- Adds Shorts and livestream include toggles.
+- Adds preferred resolution and redownload delay controls.
+- Adds NFO and Series Images controls.
+- Adds SponsorBlock behaviour and category controls.
+- Newly auto-created `YouTube Sync` profiles default to the Emby media-centre template, Shorts excluded, livestreams included, NFO enabled and Series Images enabled.
+- Fixes the Settings dialog occasionally closing the first time the Pinchflat tab is selected.
+- Returning from a Pinchflat or Security settings save reopens the correct Settings tab.
+
 ## Version 1.6.0
 
 Native authentication and security release.

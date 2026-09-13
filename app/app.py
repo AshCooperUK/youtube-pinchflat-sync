@@ -29,7 +29,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,6 +98,18 @@ PASSWORD_HASHER = PasswordHasher(
 )
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
 RECOVERY_CODE_COUNT = 10
+
+EMBY_OUTPUT_PATH_TEMPLATE = (
+    "/shows/{{ source_custom_name }}/"
+    "{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}"
+)
+
+SPONSORBLOCK_COMMON_CATEGORIES = [
+    ("sponsor", "Sponsor"),
+    ("outro", "Outro/Credits"),
+    ("preview", "Preview/Recap"),
+    ("intro", "Intro/Intermission"),
+]
 TOTP_ISSUER = "YouTube Pinchflat Sync"
 
 
@@ -1852,6 +1864,364 @@ def scrape_form_payload(form):
     return payload
 
 
+def profile_form_has_field(form, field_name):
+    return form.find(attrs={"name": field_name}) is not None
+
+
+def profile_form_value(form, field_name, default=""):
+    field = form.find(attrs={"name": field_name})
+    if field is None:
+        return default
+
+    if field.name == "select":
+        selected = field.find("option", selected=True)
+        if selected is None:
+            selected = field.find("option")
+        return selected.get("value", "") if selected else default
+
+    if field.name == "textarea":
+        return field.text or default
+
+    field_type = (field.get("type") or "text").lower()
+    if field_type == "checkbox":
+        return "true" if field.has_attr("checked") else "false"
+
+    return field.get("value", default)
+
+
+def profile_form_bool(form, field_name, default=False):
+    fields = form.find_all(attrs={"name": field_name})
+    checkboxes = [
+        field
+        for field in fields
+        if field.name == "input"
+        and (field.get("type") or "").lower() == "checkbox"
+    ]
+    if checkboxes:
+        return any(field.has_attr("checked") for field in checkboxes)
+
+    value = profile_form_value(form, field_name, "")
+    if value == "":
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def profile_form_select_options(form, field_name):
+    field = form.find("select", attrs={"name": field_name})
+    if field is None:
+        return []
+
+    options = []
+    for option in field.find_all("option"):
+        value = option.get("value", "")
+        label = " ".join(option.stripped_strings).strip() or value
+        options.append({"value": value, "label": label})
+    return options
+
+
+def profile_form_multi_values(form, field_fragment):
+    values = []
+    for field in form.find_all(attrs={"name": True}):
+        name = field.get("name") or ""
+        if field_fragment not in name:
+            continue
+
+        if field.name == "input":
+            field_type = (field.get("type") or "").lower()
+            value = field.get("value", "")
+            if (
+                field_type in {"checkbox", "radio"}
+                and field.has_attr("checked")
+                and value
+            ):
+                values.append(value)
+
+        elif field.name == "select":
+            for option in field.find_all("option", selected=True):
+                value = option.get("value", "")
+                if value:
+                    values.append(value)
+
+    return list(dict.fromkeys(values))
+
+
+def load_media_profile_form(profile_id, session_obj=None):
+    session_obj = session_obj or pinchflat_session()
+    page = session_obj.get(
+        f"{PINCHFLAT_URL}/media_profiles/{profile_id}/edit",
+        timeout=30,
+    )
+    page.raise_for_status()
+
+    soup = BeautifulSoup(page.text, "html.parser")
+    form = None
+
+    for candidate in soup.find_all("form"):
+        if candidate.find(
+            attrs={"name": "media_profile[output_path_template]"}
+        ):
+            form = candidate
+            break
+
+    if form is None:
+        raise RuntimeError(
+            f"Pinchflat Media Profile {profile_id} edit form was not found."
+        )
+
+    return session_obj, form
+
+
+def media_profile_settings(profile_id):
+    default_resolutions = [
+        {"value": "2160p", "label": "2160p / 4K"},
+        {"value": "1440p", "label": "1440p"},
+        {"value": "1080p", "label": "1080p"},
+        {"value": "720p", "label": "720p"},
+        {"value": "480p", "label": "480p"},
+        {"value": "360p", "label": "360p"},
+        {"value": "audio", "label": "Audio Only"},
+    ]
+
+    settings = {
+        "id": str(profile_id or ""),
+        "name": "",
+        "output_path_template": EMBY_OUTPUT_PATH_TEMPLATE,
+        "download_subs": False,
+        "embed_subs": False,
+        "download_thumbnail": False,
+        "embed_thumbnail": False,
+        "download_metadata": False,
+        "embed_metadata": False,
+        "include_shorts": False,
+        "include_livestreams": True,
+        "preferred_resolution": "1080p",
+        "resolution_options": default_resolutions,
+        "redownload_delay_days": "",
+        "download_nfo": True,
+        "download_source_images": True,
+        "sponsorblock_behaviour": "disabled",
+        "sponsorblock_categories": [],
+        "available": {},
+        "error": "",
+    }
+
+    if not profile_id:
+        settings["error"] = "No Media Profile is selected."
+        return settings
+
+    try:
+        _session_obj, form = load_media_profile_form(profile_id)
+
+        field_map = {
+            "output_path_template": "media_profile[output_path_template]",
+            "download_subs": "media_profile[download_subs]",
+            "embed_subs": "media_profile[embed_subs]",
+            "download_thumbnail": "media_profile[download_thumbnail]",
+            "embed_thumbnail": "media_profile[embed_thumbnail]",
+            "download_metadata": "media_profile[download_metadata]",
+            "embed_metadata": "media_profile[embed_metadata]",
+            "shorts_behaviour": "media_profile[shorts_behaviour]",
+            "livestream_behaviour": "media_profile[livestream_behaviour]",
+            "preferred_resolution": "media_profile[preferred_resolution]",
+            "redownload_delay_days": "media_profile[redownload_delay_days]",
+            "download_nfo": "media_profile[download_nfo]",
+            "download_source_images": "media_profile[download_source_images]",
+            "sponsorblock_behaviour": "media_profile[sponsorblock_behaviour]",
+        }
+
+        settings["available"] = {
+            key: profile_form_has_field(form, field_name)
+            for key, field_name in field_map.items()
+        }
+
+        settings["name"] = profile_form_value(
+            form,
+            "media_profile[name]",
+            f"Media Profile {profile_id}",
+        )
+        settings["output_path_template"] = profile_form_value(
+            form,
+            field_map["output_path_template"],
+            EMBY_OUTPUT_PATH_TEMPLATE,
+        )
+
+        for key in [
+            "download_subs",
+            "embed_subs",
+            "download_thumbnail",
+            "embed_thumbnail",
+            "download_metadata",
+            "embed_metadata",
+            "download_nfo",
+            "download_source_images",
+        ]:
+            settings[key] = profile_form_bool(
+                form,
+                field_map[key],
+                settings[key],
+            )
+
+        settings["include_shorts"] = (
+            profile_form_value(
+                form,
+                field_map["shorts_behaviour"],
+                "exclude",
+            )
+            == "include"
+        )
+        settings["include_livestreams"] = (
+            profile_form_value(
+                form,
+                field_map["livestream_behaviour"],
+                "include",
+            )
+            == "include"
+        )
+
+        settings["preferred_resolution"] = profile_form_value(
+            form,
+            field_map["preferred_resolution"],
+            "1080p",
+        )
+        options = profile_form_select_options(
+            form,
+            field_map["preferred_resolution"],
+        )
+        if options:
+            settings["resolution_options"] = options
+
+        settings["redownload_delay_days"] = profile_form_value(
+            form,
+            field_map["redownload_delay_days"],
+            "",
+        )
+        settings["sponsorblock_behaviour"] = profile_form_value(
+            form,
+            field_map["sponsorblock_behaviour"],
+            "disabled",
+        )
+        settings["sponsorblock_categories"] = profile_form_multi_values(
+            form,
+            "sponsorblock_categories",
+        )
+
+    except Exception as exc:
+        settings["error"] = str(exc)
+
+    return settings
+
+
+def _profile_set_bool(payload, form, field_name, enabled):
+    if profile_form_has_field(form, field_name):
+        payload[field_name] = "true" if enabled else "false"
+
+
+def update_media_profile_settings(profile_id, values):
+    session_obj, form = load_media_profile_form(profile_id)
+    payload = scrape_form_payload(form)
+
+    def set_if_supported(field_name, value):
+        if profile_form_has_field(form, field_name):
+            payload[field_name] = value
+
+    set_if_supported(
+        "media_profile[output_path_template]",
+        values.get("output_path_template", EMBY_OUTPUT_PATH_TEMPLATE),
+    )
+
+    for key in [
+        "download_subs",
+        "embed_subs",
+        "download_thumbnail",
+        "embed_thumbnail",
+        "download_metadata",
+        "embed_metadata",
+        "download_nfo",
+        "download_source_images",
+    ]:
+        _profile_set_bool(
+            payload,
+            form,
+            f"media_profile[{key}]",
+            bool(values.get(key)),
+        )
+
+    set_if_supported(
+        "media_profile[shorts_behaviour]",
+        "include" if values.get("include_shorts") else "exclude",
+    )
+    set_if_supported(
+        "media_profile[livestream_behaviour]",
+        "include" if values.get("include_livestreams") else "exclude",
+    )
+    set_if_supported(
+        "media_profile[preferred_resolution]",
+        values.get("preferred_resolution", ""),
+    )
+    set_if_supported(
+        "media_profile[redownload_delay_days]",
+        values.get("redownload_delay_days", ""),
+    )
+    set_if_supported(
+        "media_profile[sponsorblock_behaviour]",
+        values.get("sponsorblock_behaviour", "disabled"),
+    )
+
+    category_field_names = {
+        field.get("name")
+        for field in form.find_all(attrs={"name": True})
+        if "sponsorblock_categories" in (field.get("name") or "")
+    }
+    category_field_names.discard(None)
+    if category_field_names:
+        for key in list(payload):
+            if "sponsorblock_categories" in key:
+                payload.pop(key, None)
+        category_name = next(
+            (
+                name
+                for name in category_field_names
+                if name.endswith("[]")
+            ),
+            next(iter(category_field_names)),
+        )
+        categories = values.get("sponsorblock_categories") or []
+        payload[category_name] = categories if categories else [""]
+
+    action = form.get("action") or f"/media_profiles/{profile_id}"
+    if action.startswith(("http://", "https://")):
+        target = action
+    else:
+        target = (
+            f"{PINCHFLAT_URL}"
+            f"{action if action.startswith('/') else '/' + action}"
+        )
+
+    response = session_obj.post(
+        target,
+        data=payload,
+        timeout=60,
+        allow_redirects=False,
+    )
+
+    if response.status_code in (301, 302, 303):
+        return True
+
+    body = " ".join(
+        BeautifulSoup(response.text, "html.parser").stripped_strings
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Pinchflat returned HTTP {response.status_code}. "
+            f"{body[:400] or 'No error text returned.'}"
+        )
+
+    raise RuntimeError(
+        "Pinchflat did not confirm the Media Profile update. "
+        f"{body[:400] or 'No response message returned.'}"
+    )
+
+
 def load_new_source_form(session_obj):
     form_page = session_obj.get(
         f"{PINCHFLAT_URL}/sources/new",
@@ -1906,9 +2276,22 @@ def create_default_media_profile(session_obj=None):
 
     payload = scrape_form_payload(form)
     payload["media_profile[name]"] = "YouTube Sync"
-    payload["media_profile[output_path_template]"] = (
-        "/{{ source_custom_name }}/{{ upload_yyyy_mm_dd }} {{ title }}/"
-        "{{ title }} [{{ id }}].{{ ext }}"
+    payload["media_profile[output_path_template]"] = EMBY_OUTPUT_PATH_TEMPLATE
+    if profile_form_has_field(form, "media_profile[shorts_behaviour]"):
+        payload["media_profile[shorts_behaviour]"] = "exclude"
+    if profile_form_has_field(form, "media_profile[livestream_behaviour]"):
+        payload["media_profile[livestream_behaviour]"] = "include"
+    _profile_set_bool(
+        payload,
+        form,
+        "media_profile[download_nfo]",
+        True,
+    )
+    _profile_set_bool(
+        payload,
+        form,
+        "media_profile[download_source_images]",
+        True,
     )
 
     action = form.get("action") or "/media_profiles"
@@ -3052,6 +3435,52 @@ def toggle_user(user_id):
     return redirect(url_for("index") + "#security")
 
 
+@app.post("/users/<int:user_id>/delete")
+def delete_user(user_id):
+    admin = current_user_record()
+    target = get_user_by_id(user_id)
+
+    if not target:
+        flash("User not found.", "error")
+        return redirect(url_for("index") + "#security")
+
+    if admin and int(admin["id"]) == int(user_id):
+        flash("You cannot delete your own account.", "error")
+        return redirect(url_for("index") + "#security")
+
+    if target["role"] == "admin":
+        with db() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM users
+                WHERE role = 'admin' AND active = 1
+                """
+            ).fetchone()
+        active_admins = int(row["count"] or 0)
+        if target["active"] and active_admins <= 1:
+            flash(
+                "You cannot delete the last active Administrator account.",
+                "error",
+            )
+            return redirect(url_for("index") + "#security")
+
+    target_username = target["username"]
+    record_auth_event(
+        "user_deleted",
+        True,
+        user=admin,
+        username=target_username,
+        message=f"Deleted user {target_username}.",
+    )
+
+    with db() as conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+    flash(f"User {target_username} deleted.", "success")
+    return redirect(url_for("index") + "#security")
+
+
 @app.route("/")
 def index():
     google_connected = False
@@ -3107,6 +3536,7 @@ def index():
     defaults = default_history_settings()
     profile_status = pinchflat_profile_status()
     profiles = pinchflat_profiles()
+    profile_settings = media_profile_settings(effective_media_profile_id())
     storage = storage_snapshot()
     for sub in subs:
         sub["disk_bytes"] = channel_disk_usage(sub.get("title"), storage)
@@ -3156,6 +3586,9 @@ def index():
         app_url=effective_app_url(),
         media_profile_id=effective_media_profile_id(),
         profiles=profiles,
+        media_profile_settings=profile_settings,
+        emby_output_path_template=EMBY_OUTPUT_PATH_TEMPLATE,
+        sponsorblock_common_categories=SPONSORBLOCK_COMMON_CATEGORIES,
         pinchflat_online=pinchflat_health(),
         pinchflat_profile_ready=profile_status["ready"],
         pinchflat_profile_message=profile_status["message"],
@@ -3636,7 +4069,86 @@ def save_pinchflat_settings():
         f"Default Media Profile: {profile_id or effective_media_profile_id()}.",
     )
     flash("Pinchflat settings saved.", "success")
-    return redirect(url_for("index"))
+    return redirect(url_for("index") + "#pinchflat")
+
+
+@app.post("/settings/pinchflat/profile")
+def save_current_media_profile():
+    profile_id = effective_media_profile_id()
+    if not profile_id:
+        flash("Choose a Pinchflat Media Profile first.", "error")
+        return redirect(url_for("index") + "#pinchflat")
+
+    behaviour = request.form.get(
+        "sponsorblock_behaviour",
+        "disabled",
+    ).strip()
+    if behaviour not in {"disabled", "mark", "remove"}:
+        behaviour = "disabled"
+
+    values = {
+        "output_path_template": (
+            request.form.get(
+                "output_path_template",
+                EMBY_OUTPUT_PATH_TEMPLATE,
+            ).strip()
+            or EMBY_OUTPUT_PATH_TEMPLATE
+        ),
+        "download_subs": request.form.get("download_subs") == "1",
+        "embed_subs": request.form.get("embed_subs") == "1",
+        "download_thumbnail": (
+            request.form.get("download_thumbnail") == "1"
+        ),
+        "embed_thumbnail": (
+            request.form.get("embed_thumbnail") == "1"
+        ),
+        "download_metadata": (
+            request.form.get("download_metadata") == "1"
+        ),
+        "embed_metadata": (
+            request.form.get("embed_metadata") == "1"
+        ),
+        "include_shorts": request.form.get("include_shorts") == "1",
+        "include_livestreams": (
+            request.form.get("include_livestreams") == "1"
+        ),
+        "preferred_resolution": request.form.get(
+            "preferred_resolution",
+            "",
+        ).strip(),
+        "redownload_delay_days": request.form.get(
+            "redownload_delay_days",
+            "",
+        ).strip(),
+        "download_nfo": request.form.get("download_nfo") == "1",
+        "download_source_images": (
+            request.form.get("download_source_images") == "1"
+        ),
+        "sponsorblock_behaviour": behaviour,
+        "sponsorblock_categories": request.form.getlist(
+            "sponsorblock_categories"
+        ),
+    }
+
+    try:
+        update_media_profile_settings(profile_id, values)
+        log_activity(
+            "settings",
+            "Pinchflat Media Profile updated",
+            f"Updated Media Profile {profile_id}.",
+            "success",
+        )
+        flash("Pinchflat Media Profile saved.", "success")
+    except Exception as exc:
+        log_activity(
+            "settings",
+            "Pinchflat Media Profile update failed",
+            str(exc),
+            "error",
+        )
+        flash(f"Pinchflat Media Profile could not be saved: {exc}", "error")
+
+    return redirect(url_for("index") + "#pinchflat")
 
 
 @app.post("/subscriptions/<channel_id>/profile")
