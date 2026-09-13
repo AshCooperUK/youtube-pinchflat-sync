@@ -2,6 +2,17 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.3.3
+
+YouTube Like CSRF fix.
+
+- Fixes `Unexpected token '<' ... is not valid JSON` when pressing `Like on YouTube`.
+- The Like button previously posted JSON without the application's required CSRF header.
+- Flask rejected the request with an HTML 400 page before the YouTube Like endpoint ran.
+- `Like on YouTube` now uses the existing CSRF-aware `apiPost()` helper.
+- The fix applies to Random Videos, Random Shorts and the Latest from your subscriptions popup.
+- No database migration or clean installation is required.
+
 ## Version 2.3.2
 
 Latest-video popup interface refresh.

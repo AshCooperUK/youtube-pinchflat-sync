@@ -2568,34 +2568,22 @@ async function likeVideoOnYouTube(button, item) {
   button.textContent = "Liking…";
 
   try {
-    const response = await fetch("/api/youtube/video/like", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        video_id: item.video_id,
-        title: item.title || "YouTube video",
-        channel_id: item.channel_id || "",
-        channel_title: item.channel_title || "YouTube"
-      })
+    await apiPost("/api/youtube/video/like", {
+      video_id: item.video_id,
+      title: item.title || "YouTube video",
+      channel_id: item.channel_id || "",
+      channel_title: item.channel_title || "YouTube"
     });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || `HTTP ${response.status}`);
-    }
 
     button.textContent = "✓ Liked on YouTube";
     button.classList.add("active");
     button.title = "This video is liked on your YouTube account";
+    button.disabled = true;
   } catch (err) {
     button.textContent = original;
     button.disabled = false;
     alert(`YouTube Like failed: ${err.message || String(err)}`);
-    return;
   }
-
-  button.disabled = true;
 }
 
 function likeCurrentShortOnYouTube() {
