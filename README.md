@@ -2,6 +2,20 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.3.2
+
+Latest-video popup interface refresh.
+
+- Changes the popup header title to the YouTube channel name.
+- Changes the header subtitle to the selected video title.
+- Adds the channel avatar to the right-hand information panel.
+- Keeps the channel name and view/publish statistics together in a compact channel summary.
+- Rebuilds the action area as a two-column equal-size button grid.
+- `Favourite video`, `Favourite channel`, `Like on YouTube`, and `Open on YouTube` now share the same height and width.
+- Moves the video description into its own clearly labelled section below the actions.
+- Improves mobile layout by changing the action grid to one column on narrow screens.
+- Retains the v2.3.1 YouTube embedded-player referrer fix.
+
 ## Version 2.3.1
 
 YouTube embedded-player identity fix.
