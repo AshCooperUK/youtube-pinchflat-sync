@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.7.1"
+VERSION = "2.7.2"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -5730,6 +5730,94 @@ def pinchflat_download_overview(queue_limit=100):
             "Pinchflat.Downloading.MediaDownloadWorker"
         )
 
+        # Oban schemas vary between Pinchflat / Oban releases. Build the
+        # ordering expression only from columns which really exist.
+        order_time_columns = [
+            name
+            for name in (
+                "scheduled_at",
+                "inserted_at",
+                "attempted_at",
+            )
+            if name in job_columns
+        ]
+
+        if len(order_time_columns) > 1:
+            order_time_expr = (
+                "COALESCE("
+                + ", ".join(order_time_columns)
+                + ")"
+            )
+        elif order_time_columns:
+            order_time_expr = order_time_columns[0]
+        else:
+            order_time_expr = "id"
+
+        # Count the full queue independently from the display LIMIT so the
+        # summary tiles remain correct even with a large Pinchflat queue.
+        state_count_rows = conn.execute(
+            """
+            SELECT state, COUNT(*) AS count
+            FROM oban_jobs
+            WHERE worker = ?
+              AND state IN (
+                'executing',
+                'available',
+                'scheduled',
+                'retryable'
+              )
+            GROUP BY state
+            """,
+            (media_worker,),
+        ).fetchall()
+
+        state_counts = {
+            str(row["state"]): int(row["count"] or 0)
+            for row in state_count_rows
+        }
+
+        total_active_count = state_counts.get(
+            "executing",
+            0,
+        )
+
+        total_waiting_count = sum(
+            state_counts.get(state, 0)
+            for state in (
+                "available",
+                "scheduled",
+                "retryable",
+            )
+        )
+
+        if "attempt" in job_columns:
+            retry_count_row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM oban_jobs
+                WHERE worker = ?
+                  AND state IN (
+                    'available',
+                    'scheduled',
+                    'retryable'
+                  )
+                  AND (
+                    state = 'retryable'
+                    OR attempt > 1
+                  )
+                """,
+                (media_worker,),
+            ).fetchone()
+
+            total_retry_count = int(
+                retry_count_row["count"] or 0
+            )
+        else:
+            total_retry_count = state_counts.get(
+                "retryable",
+                0,
+            )
+
         job_rows = conn.execute(
             f"""
             SELECT {", ".join(selected_job_columns)}
@@ -5749,11 +5837,7 @@ def pinchflat_download_overview(queue_limit=100):
                 WHEN 'scheduled' THEN 3
                 ELSE 9
               END,
-              COALESCE(
-                scheduled_at,
-                inserted_at,
-                updated_at
-              ) ASC,
+              {order_time_expr} ASC,
               id ASC
             LIMIT ?
             """,
@@ -6219,23 +6303,20 @@ def pinchflat_download_overview(queue_limit=100):
                         ),
                     }
 
-        retry_count = sum(
-            1
-            for item in waiting_all
-            if item.get("state") == "retryable"
-            or int(item.get("attempt") or 0) > 1
-        )
-
         return {
             "active": active,
             "waiting": waiting,
             "summary": {
-                "active": len(active),
-                "waiting": len(waiting_all),
-                "retries": retry_count,
+                "active": total_active_count,
+                "waiting": total_waiting_count,
+                "retries": total_retry_count,
             },
             "last_downloaded": last_downloaded,
             "worker": media_worker,
+            "schema": {
+                "job_columns": sorted(job_columns),
+                "order_expression": order_time_expr,
+            },
         }
 
     finally:

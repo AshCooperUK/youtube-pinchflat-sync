@@ -3573,6 +3573,12 @@ async function loadPinchflatDownloadOverview(force=false) {
   } catch (error) {
     const target = document.getElementById("pinchflat-active-downloads");
     const summary = document.getElementById("pinchflat-download-summary");
+    const queueBody = document.getElementById("pinchflat-queue-body");
+    const waitingTarget = document.getElementById("queue-summary-waiting");
+    const activeTarget = document.getElementById("queue-summary-active");
+    const retriesTarget = document.getElementById("queue-summary-retries");
+
+    const message = error.message || String(error);
 
     if (summary) {
       summary.textContent = "Pinchflat download status unavailable";
@@ -3583,8 +3589,26 @@ async function loadPinchflatDownloadOverview(force=false) {
 
       const empty = document.createElement("div");
       empty.className = "pinchflat-download-empty";
-      empty.textContent = error.message || String(error);
+      empty.textContent = message;
       target.appendChild(empty);
+    }
+
+    if (waitingTarget) waitingTarget.textContent = "—";
+    if (activeTarget) activeTarget.textContent = "—";
+    if (retriesTarget) retriesTarget.textContent = "—";
+
+    if (queueBody) {
+      queueBody.innerHTML = "";
+
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+
+      cell.colSpan = 6;
+      cell.className = "muted";
+      cell.textContent = `Queue unavailable: ${message}`;
+
+      row.appendChild(cell);
+      queueBody.appendChild(row);
     }
   } finally {
     if (refresh) {

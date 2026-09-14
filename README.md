@@ -2,6 +2,20 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.7.2
+
+Pinchflat queue schema compatibility fix.
+
+- Fixes `no such column: updated_at` from the Pinchflat downloads dashboard.
+- The Oban queue query now builds its sort expression only from columns present in the installed Pinchflat database.
+- Supports Oban schemas with or without `scheduled_at`, `inserted_at`, `attempted_at` or `updated_at`.
+- Removes the hard dependency on the Oban `updated_at` column.
+- Queue summary counts are now calculated with dedicated COUNT queries rather than from the first page of queue rows.
+- Waiting, Active and Retries therefore remain accurate when more than 100 jobs are queued.
+- The queue popup now displays the real API error instead of remaining stuck on `Loading queue...` with zero counters when an error occurs.
+- Adds the detected Oban column list to the internal API response for easier future schema diagnostics.
+
+
 ## Version 2.7.1
 
 Pinchflat database path compatibility fix.
