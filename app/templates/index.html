@@ -3331,6 +3331,82 @@
           </form>
         {% endif %}
 
+        <details class="profile-section" style="margin-top:14px">
+          <summary>
+            <strong>Advanced Pinchflat</strong>
+            <span class="muted small">Docker and download worker settings</span>
+          </summary>
+
+          <div class="section-help" style="margin-top:10px">
+            Settings here apply to the Pinchflat application rather than an individual Media Profile.
+          </div>
+
+          <form
+            method="post"
+            action="/settings/pinchflat/advanced"
+            style="margin-top:12px"
+          >
+            <input
+              type="hidden"
+              name="_csrf"
+              value="{{ csrf_token() }}"
+            >
+
+            <div class="profile-settings-grid">
+              <div class="compact-setting">
+                <label>
+                  Concurrent downloads
+                  <select
+                    name="yt_dlp_worker_concurrency"
+                    {% if not pinchflat_container.control_available or not pinchflat_container.exists %}disabled{% endif %}
+                  >
+                    {% for value in pinchflat_worker_concurrency_options %}
+                      <option
+                        value="{{ value }}"
+                        {% if pinchflat_worker_concurrency|int == value %}selected{% endif %}
+                      >{{ value }}{% if value == 2 %} (Pinchflat default){% endif %}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+
+                <div class="profile-control-help">
+                  Controls Pinchflat's <code>YT_DLP_WORKER_CONCURRENCY</code>.
+                  Higher values allow more yt-dlp download jobs to run at the same time.
+                </div>
+              </div>
+
+              <div class="compact-setting">
+                <div class="mini-stat-grid" style="grid-template-columns:1fr">
+                  <div>
+                    <span class="muted small">Currently applied</span>
+                    <strong>
+                      {% if pinchflat_container.worker_concurrency %}
+                        {{ pinchflat_container.worker_concurrency }} concurrent download{{ '' if pinchflat_container.worker_concurrency == 1 else 's' }}
+                      {% else %}
+                        Unavailable
+                      {% endif %}
+                    </strong>
+                  </div>
+                </div>
+
+                <div class="profile-control-help" style="margin-top:8px">
+                  Applying a new value recreates and restarts the Pinchflat Docker container while keeping its existing bind-mounted configuration and downloads.
+                </div>
+              </div>
+            </div>
+
+            <div class="actions" style="margin-top:12px">
+              <button
+                class="btn"
+                type="submit"
+                {% if not pinchflat_container.control_available or not pinchflat_container.exists %}disabled{% endif %}
+              >
+                Apply concurrent downloads
+              </button>
+            </div>
+          </form>
+        </details>
+
         <div class="profile-stats-footer">
           <h3>Pinchflat stats</h3>
           <div class="mini-stat-grid">

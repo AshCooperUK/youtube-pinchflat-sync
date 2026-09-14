@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.10.1"
+VERSION = "2.11.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -5567,6 +5567,524 @@ def decode_docker_log_stream(body):
     )
 
 
+def docker_container_inspect(container_name):
+    name = quote(
+        str(container_name or "").strip(),
+        safe="",
+    )
+
+    if not name:
+        raise RuntimeError(
+            "Docker container name is empty."
+        )
+
+    status, _headers, body = docker_request(
+        "GET",
+        f"/containers/{name}/json",
+        timeout=20,
+    )
+
+    if status == 404:
+        raise RuntimeError(
+            f"Docker container {container_name!r} was not found."
+        )
+
+    if status >= 400:
+        raise RuntimeError(
+            f"Docker returned HTTP {status}: "
+            f"{body.decode('utf-8', 'replace')[:500]}"
+        )
+
+    return json.loads(
+        body.decode(
+            "utf-8",
+            "replace",
+        )
+    )
+
+
+def docker_env_dict(env_values):
+    result = {}
+
+    for entry in env_values or []:
+        text = str(entry or "")
+
+        if "=" in text:
+            key, value = text.split(
+                "=",
+                1,
+            )
+        else:
+            key, value = text, ""
+
+        key = key.strip()
+
+        if key:
+            result[key] = value
+
+    return result
+
+
+def docker_env_list_with_updates(env_values, updates):
+    current = docker_env_dict(
+        env_values
+    )
+
+    for key, value in updates.items():
+        current[str(key)] = str(value)
+
+    return [
+        f"{key}={value}"
+        for key, value in current.items()
+    ]
+
+
+def pinchflat_worker_concurrency_from_info(info):
+    env = docker_env_dict(
+        (info.get("Config") or {}).get(
+            "Env",
+            [],
+        )
+    )
+
+    raw = str(
+        env.get(
+            "YT_DLP_WORKER_CONCURRENCY",
+            "2",
+        )
+        or "2"
+    ).strip()
+
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 2
+
+    return max(
+        1,
+        min(
+            value,
+            32,
+        ),
+    )
+
+
+def docker_rename_container(
+    current_name,
+    new_name,
+):
+    status, _headers, body = docker_request(
+        "POST",
+        (
+            f"/containers/{quote(current_name, safe='')}/rename?"
+            + urlencode(
+                {
+                    "name": new_name,
+                }
+            )
+        ),
+        timeout=30,
+    )
+
+    if status not in (204,):
+        raise RuntimeError(
+            f"Docker could not rename {current_name!r}. "
+            f"HTTP {status}: "
+            f"{body.decode('utf-8', 'replace')[:500]}"
+        )
+
+
+def docker_remove_container(
+    container_name,
+    force=False,
+):
+    query = urlencode(
+        {
+            "force": "1" if force else "0",
+            "v": "0",
+        }
+    )
+
+    status, _headers, body = docker_request(
+        "DELETE",
+        (
+            f"/containers/{quote(container_name, safe='')}"
+            f"?{query}"
+        ),
+        timeout=30,
+    )
+
+    if status not in (
+        204,
+        404,
+    ):
+        raise RuntimeError(
+            f"Docker could not remove {container_name!r}. "
+            f"HTTP {status}: "
+            f"{body.decode('utf-8', 'replace')[:500]}"
+        )
+
+
+def docker_start_named_container(
+    container_name,
+):
+    status, _headers, body = docker_request(
+        "POST",
+        f"/containers/{quote(container_name, safe='')}/start",
+        timeout=30,
+    )
+
+    if status not in (
+        204,
+        304,
+    ):
+        raise RuntimeError(
+            f"Docker could not start {container_name!r}. "
+            f"HTTP {status}: "
+            f"{body.decode('utf-8', 'replace')[:500]}"
+        )
+
+
+def docker_stop_named_container(
+    container_name,
+    timeout_seconds=20,
+):
+    status, _headers, body = docker_request(
+        "POST",
+        (
+            f"/containers/{quote(container_name, safe='')}/stop?"
+            + urlencode(
+                {
+                    "t": str(
+                        max(
+                            1,
+                            int(timeout_seconds),
+                        )
+                    ),
+                }
+            )
+        ),
+        timeout=max(
+            30,
+            int(timeout_seconds) + 10,
+        ),
+    )
+
+    if status not in (
+        204,
+        304,
+    ):
+        raise RuntimeError(
+            f"Docker could not stop {container_name!r}. "
+            f"HTTP {status}: "
+            f"{body.decode('utf-8', 'replace')[:500]}"
+        )
+
+
+def pinchflat_recreate_with_worker_concurrency(
+    concurrency,
+):
+    concurrency = int(concurrency)
+
+    if not 1 <= concurrency <= 16:
+        raise RuntimeError(
+            "Concurrent downloads must be between 1 and 16."
+        )
+
+    if not DOCKER_SOCKET_PATH.exists():
+        raise RuntimeError(
+            "Docker control is unavailable."
+        )
+
+    original_name = PINCHFLAT_CONTAINER_NAME
+    info = docker_container_inspect(
+        original_name
+    )
+
+    old_concurrency = (
+        pinchflat_worker_concurrency_from_info(
+            info
+        )
+    )
+
+    if old_concurrency == concurrency:
+        return {
+            "changed": False,
+            "old": old_concurrency,
+            "new": concurrency,
+            "state": pinchflat_container_status(),
+        }
+
+    state = info.get("State") or {}
+    was_running = bool(
+        state.get("Running")
+    )
+
+    old_host_config = (
+        info.get("HostConfig")
+        or {}
+    )
+
+    if old_host_config.get("AutoRemove"):
+        raise RuntimeError(
+            "Pinchflat uses Docker AutoRemove and cannot be recreated safely."
+        )
+
+    config_source = (
+        info.get("Config")
+        or {}
+    )
+
+    config_keys = (
+        "Domainname",
+        "User",
+        "AttachStdin",
+        "AttachStdout",
+        "AttachStderr",
+        "ExposedPorts",
+        "Tty",
+        "OpenStdin",
+        "StdinOnce",
+        "Cmd",
+        "Healthcheck",
+        "ArgsEscaped",
+        "Image",
+        "Volumes",
+        "WorkingDir",
+        "Entrypoint",
+        "NetworkDisabled",
+        "MacAddress",
+        "OnBuild",
+        "Labels",
+        "StopSignal",
+        "StopTimeout",
+        "Shell",
+    )
+
+    create_payload = {
+        key: config_source.get(key)
+        for key in config_keys
+        if key in config_source
+    }
+
+    create_payload["Env"] = (
+        docker_env_list_with_updates(
+            config_source.get(
+                "Env",
+                [],
+            ),
+            {
+                "YT_DLP_WORKER_CONCURRENCY":
+                    str(concurrency),
+            },
+        )
+    )
+
+    # HostConfig returned by Docker closely matches the HostConfig accepted
+    # by /containers/create and preserves bind mounts, published ports,
+    # resource limits, restart policy and the Compose network mode.
+    create_payload["HostConfig"] = json.loads(
+        json.dumps(
+            old_host_config
+        )
+    )
+
+    network_settings = (
+        info.get("NetworkSettings")
+        or {}
+    )
+
+    old_networks = (
+        network_settings.get("Networks")
+        or {}
+    )
+
+    endpoints = {}
+
+    for network_name, endpoint in old_networks.items():
+        endpoint = endpoint or {}
+        endpoint_config = {}
+
+        aliases = [
+            alias
+            for alias in (
+                endpoint.get("Aliases")
+                or []
+            )
+            if alias
+        ]
+
+        if aliases:
+            endpoint_config["Aliases"] = aliases
+
+        ipam = endpoint.get(
+            "IPAMConfig"
+        )
+
+        if ipam:
+            endpoint_config["IPAMConfig"] = ipam
+
+        links = endpoint.get(
+            "Links"
+        )
+
+        if links:
+            endpoint_config["Links"] = links
+
+        driver_opts = endpoint.get(
+            "DriverOpts"
+        )
+
+        if driver_opts:
+            endpoint_config["DriverOpts"] = (
+                driver_opts
+            )
+
+        endpoints[
+            network_name
+        ] = endpoint_config
+
+    if endpoints:
+        create_payload[
+            "NetworkingConfig"
+        ] = {
+            "EndpointsConfig": endpoints,
+        }
+
+    backup_name = (
+        f"{original_name}-worker-backup-"
+        f"{int(time.time())}"
+    )
+
+    old_renamed = False
+    new_created = False
+
+    try:
+        if was_running:
+            docker_stop_named_container(
+                original_name,
+                20,
+            )
+
+        docker_rename_container(
+            original_name,
+            backup_name,
+        )
+
+        old_renamed = True
+
+        status, _headers, body = docker_request(
+            "POST",
+            (
+                "/containers/create?"
+                + urlencode(
+                    {
+                        "name": original_name,
+                    }
+                )
+            ),
+            payload=create_payload,
+            timeout=60,
+        )
+
+        if status not in (
+            201,
+        ):
+            raise RuntimeError(
+                "Docker could not create the replacement Pinchflat "
+                f"container. HTTP {status}: "
+                f"{body.decode('utf-8', 'replace')[:1000]}"
+            )
+
+        new_created = True
+
+        if was_running:
+            docker_start_named_container(
+                original_name
+            )
+
+            deadline = time.time() + 90
+
+            while time.time() < deadline:
+                if pinchflat_health_http_only(
+                    timeout=3
+                ):
+                    break
+
+                time.sleep(1)
+            else:
+                raise RuntimeError(
+                    "The replacement Pinchflat container started but "
+                    "did not become available within 90 seconds."
+                )
+
+        new_info = docker_container_inspect(
+            original_name
+        )
+
+        applied = (
+            pinchflat_worker_concurrency_from_info(
+                new_info
+            )
+        )
+
+        if applied != concurrency:
+            raise RuntimeError(
+                "Pinchflat restarted, but Docker did not report the "
+                "requested worker concurrency."
+            )
+
+        # The old stopped container is no longer required. Its bind-mounted
+        # Pinchflat config and downloaded media are not removed.
+        docker_remove_container(
+            backup_name,
+            force=True,
+        )
+
+        return {
+            "changed": True,
+            "old": old_concurrency,
+            "new": applied,
+            "state": pinchflat_container_status(),
+        }
+
+    except Exception:
+        # Roll back to the original container if any part of recreation fails.
+        try:
+            if new_created:
+                try:
+                    docker_stop_named_container(
+                        original_name,
+                        5,
+                    )
+                except Exception:
+                    pass
+
+                docker_remove_container(
+                    original_name,
+                    force=True,
+                )
+        except Exception:
+            pass
+
+        if old_renamed:
+            try:
+                docker_rename_container(
+                    backup_name,
+                    original_name,
+                )
+
+                if was_running:
+                    docker_start_named_container(
+                        original_name
+                    )
+            except Exception:
+                pass
+
+        raise
+
+
+
 def pinchflat_container_logs(tail=250):
     if not DOCKER_SOCKET_PATH.exists():
         raise RuntimeError(
@@ -5632,6 +6150,7 @@ def pinchflat_container_status():
             "running": pinchflat_health_http_only(),
             "status": "unavailable",
             "error": "Docker socket is not mounted.",
+            "worker_concurrency": None,
         }
 
     try:
@@ -5649,6 +6168,7 @@ def pinchflat_container_status():
                 "running": False,
                 "status": "not found",
                 "error": "",
+                "worker_concurrency": None,
             }
 
         if status >= 400:
@@ -5666,6 +6186,11 @@ def pinchflat_container_status():
             "running": bool(state.get("Running")),
             "status": state.get("Status") or "unknown",
             "error": state.get("Error") or "",
+            "worker_concurrency": (
+                pinchflat_worker_concurrency_from_info(
+                    info
+                )
+            ),
         }
 
     except Exception as exc:
@@ -5675,6 +6200,7 @@ def pinchflat_container_status():
             "running": pinchflat_health_http_only(),
             "status": "unavailable",
             "error": str(exc),
+            "worker_concurrency": None,
         }
 
 
@@ -9833,6 +10359,29 @@ def index():
         sponsorblock_common_categories=SPONSORBLOCK_COMMON_CATEGORIES,
         pinchflat_online=pinchflat_health(),
         pinchflat_container=pinchflat_container,
+        pinchflat_worker_concurrency=(
+            pinchflat_container.get(
+                "worker_concurrency"
+            )
+            or setting_int(
+                "pinchflat_worker_concurrency",
+                2,
+                1,
+                16,
+            )
+        ),
+        pinchflat_worker_concurrency_options=(
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            8,
+            10,
+            12,
+            16,
+        ),
         pinchflat_profile_ready=profile_status["ready"],
         pinchflat_profile_message=profile_status["message"],
         pinchflat_stats=pinchflat_stats,
@@ -10849,6 +11398,83 @@ def save_pinchflat_settings():
     )
     flash("Pinchflat settings saved.", "success")
     return redirect(url_for("index") + "#pinchflat")
+
+
+@app.post("/settings/pinchflat/advanced")
+def save_pinchflat_advanced_settings():
+    raw = request.form.get(
+        "yt_dlp_worker_concurrency",
+        "2",
+    ).strip()
+
+    try:
+        concurrency = int(raw)
+    except (TypeError, ValueError):
+        concurrency = 2
+
+    if not 1 <= concurrency <= 16:
+        flash(
+            "Concurrent downloads must be between 1 and 16.",
+            "error",
+        )
+        return redirect(
+            url_for("index")
+            + "#pinchflat"
+        )
+
+    try:
+        result = (
+            pinchflat_recreate_with_worker_concurrency(
+                concurrency
+            )
+        )
+
+        set_setting(
+            "pinchflat_worker_concurrency",
+            str(concurrency),
+        )
+
+        if result["changed"]:
+            message = (
+                "Pinchflat concurrent downloads changed "
+                f"from {result['old']} to {result['new']}."
+            )
+        else:
+            message = (
+                "Pinchflat concurrent downloads is already "
+                f"set to {concurrency}."
+            )
+
+        log_activity(
+            "settings",
+            "Pinchflat concurrent downloads updated",
+            message,
+            "success",
+        )
+
+        flash(
+            message,
+            "success",
+        )
+
+    except Exception as exc:
+        log_activity(
+            "settings",
+            "Pinchflat concurrent downloads update failed",
+            str(exc),
+            "error",
+        )
+
+        flash(
+            "Pinchflat concurrent downloads could not be changed: "
+            f"{exc}",
+            "error",
+        )
+
+    return redirect(
+        url_for("index")
+        + "#pinchflat"
+    )
 
 
 @app.post("/settings/pinchflat/profile/create")

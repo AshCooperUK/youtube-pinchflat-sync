@@ -9,6 +9,7 @@ services:
       TZ: Europe/London
       LOG_LEVEL: info
       UMASK: "022"
+      YT_DLP_WORKER_CONCURRENCY: "2"
     ports:
       - target: 8945
         published: "8945"
@@ -156,7 +157,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.10.1"
+  version: "2.11.0"
   update_at: "2026-09-13"
   release_notes:
     en_US: v2.6 streamlines source control, moves favourites and logs into Settings, expands Pinchflat profile editing, improves one-time downloads, and adds Subscribe controls to in-app video playback.

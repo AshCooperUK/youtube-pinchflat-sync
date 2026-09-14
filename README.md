@@ -2,6 +2,22 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.11.0
+
+Pinchflat concurrent download control.
+
+- Adds `Settings → Pinchflat → Advanced Pinchflat`.
+- Adds a Concurrent downloads selector for Pinchflat's `YT_DLP_WORKER_CONCURRENCY`.
+- Supports 1, 2, 3, 4, 5, 6, 8, 10, 12 and 16 concurrent yt-dlp workers.
+- Displays the value currently applied to the running Pinchflat Docker container.
+- Applying a different value safely recreates the Pinchflat container because Docker environment variables cannot be modified in place.
+- Preserves the Pinchflat image, environment, bind mounts, ports, restart policy, labels, resource settings and network aliases.
+- Keeps the original container as a temporary rollback copy until the replacement starts successfully.
+- Automatically restores the original Pinchflat container if recreation or startup fails.
+- Pinchflat configuration and downloaded media remain in their existing bind-mounted directories.
+- Fresh installs explicitly set the Pinchflat default worker concurrency to 2 in the bundled Compose configuration.
+
+
 ## Version 2.10.1
 
 Dismissible page messages.
