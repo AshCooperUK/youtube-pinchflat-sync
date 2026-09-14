@@ -4399,8 +4399,7 @@ async function loadPinchflatLogs(force=false) {
       `Pinchflat logs are unavailable.\n\n${error.message || String(error)}`;
 
     if (status) {
-      status.textContent =
-        "Check the Docker socket mount and Pinchflat container name.";
+      status.textContent = "";
     }
   } finally {
     if (refresh) refresh.disabled = false;

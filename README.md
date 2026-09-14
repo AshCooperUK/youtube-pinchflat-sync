@@ -2,6 +2,16 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.6.5
+
+Pinchflat log viewer fix.
+
+- Fixes `name 'urlencode' is not defined` when loading Pinchflat Docker logs.
+- Adds the missing `urlencode` import used to build the Docker logs API query string.
+- Removes the `Check the Docker socket mount and Pinchflat container name.` footer from the log viewer.
+- The real Docker or Pinchflat error remains displayed inside the log box if log retrieval genuinely fails.
+
+
 ## Version 2.6.4
 
 Settings form consistency and Pinchflat container logs.
