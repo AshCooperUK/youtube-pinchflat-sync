@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.8.0"
+VERSION = "2.9.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -574,6 +574,32 @@ def init_db():
             "auth_session_timeout_minutes": "720",
             "auth_lockout_attempts": "5",
             "auth_lockout_minutes": "15",
+
+            # Page View defaults
+            "page_load_summary": "1",
+            "page_load_pinchflat_downloads": "1",
+            "page_load_latest_videos": "1",
+            "page_load_subscriptions": "1",
+
+            "page_min_pinchflat_downloads": "1",
+            "page_min_latest_videos": "1",
+            "page_min_subscriptions": "1",
+
+            "page_show_summary_google": "1",
+            "page_show_summary_pinchflat": "1",
+            "page_show_summary_subscriptions": "1",
+            "page_show_summary_downloads": "1",
+            "page_show_summary_errors": "1",
+
+            "page_button_sync": "1",
+            "page_button_refresh_youtube": "1",
+            "page_button_single_download": "1",
+            "page_button_discover": "1",
+            "page_button_favourites": "1",
+            "page_button_logout": "1",
+
+            "page_section_order": "summary,pinchflat,latest,subscriptions",
+            "page_summary_order": "google,pinchflat,subscriptions,downloads,errors",
         }
         for key, value in defaults.items():
             if value:
@@ -654,6 +680,30 @@ def setting_int(key, default, minimum=None, maximum=None):
     if maximum is not None:
         value = min(maximum, value)
     return value
+
+
+def setting_order(key, allowed, default_order):
+    allowed = list(allowed)
+    default_order = list(default_order)
+
+    raw = get_setting(
+        key,
+        ",".join(default_order),
+    )
+
+    requested = [
+        item.strip()
+        for item in str(raw or "").split(",")
+        if item.strip() in allowed
+    ]
+
+    result = []
+
+    for item in requested + default_order + allowed:
+        if item in allowed and item not in result:
+            result.append(item)
+
+    return result
 
 
 def csrf_token():
@@ -9222,6 +9272,115 @@ def delete_user(user_id):
 
 @app.route("/")
 def index():
+    page_view = {
+        "load_summary": setting_bool("page_load_summary", True),
+        "load_pinchflat_downloads": setting_bool(
+            "page_load_pinchflat_downloads",
+            True,
+        ),
+        "load_latest_videos": setting_bool(
+            "page_load_latest_videos",
+            True,
+        ),
+        "load_subscriptions": setting_bool(
+            "page_load_subscriptions",
+            True,
+        ),
+
+        "min_pinchflat_downloads": setting_bool(
+            "page_min_pinchflat_downloads",
+            True,
+        ),
+        "min_latest_videos": setting_bool(
+            "page_min_latest_videos",
+            True,
+        ),
+        "min_subscriptions": setting_bool(
+            "page_min_subscriptions",
+            True,
+        ),
+
+        "show_summary_google": setting_bool(
+            "page_show_summary_google",
+            True,
+        ),
+        "show_summary_pinchflat": setting_bool(
+            "page_show_summary_pinchflat",
+            True,
+        ),
+        "show_summary_subscriptions": setting_bool(
+            "page_show_summary_subscriptions",
+            True,
+        ),
+        "show_summary_downloads": setting_bool(
+            "page_show_summary_downloads",
+            True,
+        ),
+        "show_summary_errors": setting_bool(
+            "page_show_summary_errors",
+            True,
+        ),
+
+        "button_sync": setting_bool(
+            "page_button_sync",
+            True,
+        ),
+        "button_refresh_youtube": setting_bool(
+            "page_button_refresh_youtube",
+            True,
+        ),
+        "button_single_download": setting_bool(
+            "page_button_single_download",
+            True,
+        ),
+        "button_discover": setting_bool(
+            "page_button_discover",
+            True,
+        ),
+        "button_favourites": setting_bool(
+            "page_button_favourites",
+            True,
+        ),
+        "button_logout": setting_bool(
+            "page_button_logout",
+            True,
+        ),
+    }
+
+    page_section_order = setting_order(
+        "page_section_order",
+        (
+            "summary",
+            "pinchflat",
+            "latest",
+            "subscriptions",
+        ),
+        (
+            "summary",
+            "pinchflat",
+            "latest",
+            "subscriptions",
+        ),
+    )
+
+    page_summary_order = setting_order(
+        "page_summary_order",
+        (
+            "google",
+            "pinchflat",
+            "subscriptions",
+            "downloads",
+            "errors",
+        ),
+        (
+            "google",
+            "pinchflat",
+            "subscriptions",
+            "downloads",
+            "errors",
+        ),
+    )
+
     google_connected = False
     google_write_ready = False
 
@@ -9237,13 +9396,31 @@ def index():
             )
 
     with db() as conn:
-        rows = conn.execute(
+        if page_view["load_subscriptions"]:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM subscriptions
+                ORDER BY active DESC, title COLLATE NOCASE ASC
+                """
+            ).fetchall()
+        else:
+            # Do not build hundreds of subscription rows when the section is
+            # disabled in Page View. Summary counts are fetched separately.
+            rows = []
+
+        subscription_counts_row = conn.execute(
             """
-            SELECT *
+            SELECT
+                SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active,
+                SUM(CASE WHEN active = 1 AND download_enabled = 1 THEN 1 ELSE 0 END) AS enabled,
+                SUM(CASE WHEN active = 1 AND download_enabled = 0 THEN 1 ELSE 0 END) AS disabled,
+                SUM(CASE WHEN active = 1 AND pinchflat_added = 0 THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN last_error IS NOT NULL AND TRIM(last_error) != '' THEN 1 ELSE 0 END) AS errors,
+                SUM(CASE WHEN active = 0 THEN 1 ELSE 0 END) AS removed
             FROM subscriptions
-            ORDER BY active DESC, title COLLATE NOCASE ASC
             """
-        ).fetchall()
+        ).fetchone()
 
         last_run = conn.execute(
             "SELECT * FROM runs ORDER BY id DESC LIMIT 1"
@@ -9324,12 +9501,12 @@ def index():
         ).fetchall()
 
     counts = {
-        "active": sum(1 for sub in subs if sub["active"]),
-        "enabled": sum(1 for sub in subs if sub["active"] and sub["download_enabled"]),
-        "disabled": sum(1 for sub in subs if sub["active"] and not sub["download_enabled"]),
-        "pending": sum(1 for sub in subs if sub["active"] and not sub["pinchflat_added"]),
-        "errors": sum(1 for sub in subs if sub.get("last_error")),
-        "removed": sum(1 for sub in subs if not sub["active"]),
+        "active": int(subscription_counts_row["active"] or 0),
+        "enabled": int(subscription_counts_row["enabled"] or 0),
+        "disabled": int(subscription_counts_row["disabled"] or 0),
+        "pending": int(subscription_counts_row["pending"] or 0),
+        "errors": int(subscription_counts_row["errors"] or 0),
+        "removed": int(subscription_counts_row["removed"] or 0),
     }
 
     next_youtube_sync = None
@@ -9432,6 +9609,10 @@ def index():
         lockout_attempts=lockout_attempt_limit(),
         lockout_minutes=lockout_minutes(),
         password_min=PASSWORD_MIN_LENGTH,
+
+        page_view=page_view,
+        page_section_order=page_section_order,
+        page_summary_order=page_summary_order,
     )
 
 
@@ -10048,6 +10229,134 @@ def save_general_settings():
     )
     flash("General settings saved.", "success")
     return redirect(url_for("index") + "#subscriptions")
+
+
+@app.post("/settings/page-view")
+def save_page_view_settings():
+    boolean_settings = {
+        "page_load_summary",
+        "page_load_pinchflat_downloads",
+        "page_load_latest_videos",
+        "page_load_subscriptions",
+
+        "page_min_pinchflat_downloads",
+        "page_min_latest_videos",
+        "page_min_subscriptions",
+
+        "page_show_summary_google",
+        "page_show_summary_pinchflat",
+        "page_show_summary_subscriptions",
+        "page_show_summary_downloads",
+        "page_show_summary_errors",
+
+        "page_button_sync",
+        "page_button_refresh_youtube",
+        "page_button_single_download",
+        "page_button_discover",
+        "page_button_favourites",
+        "page_button_logout",
+    }
+
+    for key in boolean_settings:
+        set_setting(
+            key,
+            "1" if request.form.get(key) == "1" else "0",
+        )
+
+    section_order = [
+        item
+        for item in (
+            request.form.get(
+                "page_section_order",
+                "",
+            )
+            or ""
+        ).split(",")
+        if item
+        in {
+            "summary",
+            "pinchflat",
+            "latest",
+            "subscriptions",
+        }
+    ]
+
+    summary_order = [
+        item
+        for item in (
+            request.form.get(
+                "page_summary_order",
+                "",
+            )
+            or ""
+        ).split(",")
+        if item
+        in {
+            "google",
+            "pinchflat",
+            "subscriptions",
+            "downloads",
+            "errors",
+        }
+    ]
+
+    # Preserve the validated drag-and-drop order and append any missing
+    # sections so future upgrades remain backwards compatible.
+    valid_sections = [
+        "summary",
+        "pinchflat",
+        "latest",
+        "subscriptions",
+    ]
+    section_order = [
+        item
+        for item in section_order
+        if item in valid_sections
+    ]
+    for item in valid_sections:
+        if item not in section_order:
+            section_order.append(item)
+
+    valid_summary = [
+        "google",
+        "pinchflat",
+        "subscriptions",
+        "downloads",
+        "errors",
+    ]
+    summary_order = [
+        item
+        for item in summary_order
+        if item in valid_summary
+    ]
+    for item in valid_summary:
+        if item not in summary_order:
+            summary_order.append(item)
+
+    set_setting(
+        "page_section_order",
+        ",".join(section_order),
+    )
+    set_setting(
+        "page_summary_order",
+        ",".join(summary_order),
+    )
+
+    log_activity(
+        "settings",
+        "Page View settings updated",
+        "Dashboard sections, header buttons and page order were updated.",
+    )
+
+    flash(
+        "Page View settings saved.",
+        "success",
+    )
+
+    return redirect(
+        url_for("index")
+        + "#pageview"
+    )
 
 
 @app.post("/settings/automation")

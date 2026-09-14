@@ -2,6 +2,45 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.9.1
+
+Discover Downloaded live-refresh fix.
+
+- Fixes switching from Random Videos back to Downloaded leaving the Random Videos tiles visible until Refresh was pressed.
+- Changing Discover tabs now immediately renders the cached content for the selected tab.
+- Switching back to Downloaded silently checks Pinchflat for newly completed downloads.
+- While Discover is open on Downloaded, the app checks for new completed Pinchflat downloads every four seconds.
+- The background check keeps the existing tiles visible while it runs, so the grid does not flash or disappear.
+- Downloaded redraws only when the latest-100 result has changed.
+- If the main Pinchflat Downloads poll spots a different Last downloaded video, an open Downloaded view refreshes immediately.
+- Automatic Downloaded refreshes read Pinchflat only and use no YouTube search quota.
+- Closing Discover or pressing Escape stops the Downloaded background timer.
+
+
+## Version 2.9.0
+
+Page View customisation and Pinchflat queue refresh fix.
+
+- Adds `Settings → Page View`.
+- Each major dashboard section can be enabled or completely disabled.
+- Disabled Pinchflat Downloads does not start its four-second background poll.
+- Disabled Latest from subscriptions does not make its background YouTube latest-video request.
+- Disabled Subscriptions does not build the full channel-management table or calculate per-channel disk usage during the page request.
+- Adds default minimise/restore settings for Pinchflat Downloads, Latest from subscriptions and Subscriptions.
+- Adds individual visibility controls for the Google, Pinchflat, Subscriptions, Downloads and Errors status tiles.
+- Adds visibility controls for every top-page button except Settings.
+- Adds native drag-and-drop ordering for the main dashboard sections.
+- Adds native drag-and-drop ordering for the five status tiles.
+- Settings always remains visible so Page View can always be changed.
+- The page applies saved section and status-tile order on every load.
+- Fixes the Pinchflat Download Queue flicker introduced in v2.8.0. The four-second dashboard poll no longer redraws or clears the queue popup.
+- The queue keeps its existing contents visible during its independent ten-second refresh.
+- Makes the displayed YouTube channel name clickable in Current downloads, Last downloaded and Pinchflat Queue rows.
+- Channel links open the source YouTube channel in a new tab.
+- Cleans up the duplicated Discover tile click branch from v2.8.0.
+- Downloaded Discover tiles now also use the metadata-enriched media player when opened with the keyboard.
+
+
 ## Version 2.8.0
 
 Dashboard loading, Discover history, queue and subscription AJAX update.

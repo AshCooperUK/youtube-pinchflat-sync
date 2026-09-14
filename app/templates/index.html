@@ -723,6 +723,109 @@
       background:#175a35;
     }
 
+    #dashboard-sections {
+      display:flex;
+      flex-direction:column;
+    }
+
+    .page-view-grid {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:12px;
+    }
+
+    .page-view-option {
+      display:flex;
+      align-items:flex-start;
+      gap:10px;
+      min-height:48px;
+      padding:12px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#0b1626;
+      margin:0;
+    }
+
+    .page-view-option input[type="checkbox"] {
+      flex:0 0 auto;
+      margin-top:3px;
+    }
+
+    .page-view-option strong {
+      display:block;
+      margin-bottom:2px;
+    }
+
+    .page-view-option .muted {
+      display:block;
+    }
+
+    .page-order-list {
+      display:grid;
+      gap:8px;
+      margin-top:10px;
+    }
+
+    .page-order-item {
+      display:grid;
+      grid-template-columns:34px minmax(0,1fr);
+      align-items:center;
+      gap:10px;
+      min-height:48px;
+      padding:8px 12px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#0b1626;
+      cursor:grab;
+      user-select:none;
+    }
+
+    .page-order-item:active {
+      cursor:grabbing;
+    }
+
+    .page-order-item.dragging {
+      opacity:.45;
+    }
+
+    .page-order-handle {
+      width:28px;
+      height:28px;
+      display:grid;
+      place-items:center;
+      border-radius:7px;
+      color:#9fb1ca;
+      font-size:18px;
+      line-height:1;
+    }
+
+    .page-order-item:hover .page-order-handle {
+      background:#1a2b44;
+      color:#fff;
+    }
+
+    .page-order-item small {
+      display:block;
+      margin-top:2px;
+      color:var(--muted);
+    }
+
+    .pinchflat-channel-link {
+      color:#9fc5ff;
+      text-decoration:none;
+    }
+
+    .pinchflat-channel-link:hover {
+      color:#fff;
+      text-decoration:underline;
+    }
+
+    @media (max-width:760px) {
+      .page-view-grid {
+        grid-template-columns:1fr;
+      }
+    }
+
     .latest-videos-card { transition:padding .16s ease; }
     .latest-videos-card.is-minimised { padding-top:14px; padding-bottom:14px; }
     .latest-videos-card.is-minimised .latest-videos-description { display:none; }
@@ -1627,19 +1730,35 @@
       <div class="version">v{{ version }}</div>
     </div>
     <div class="header-actions">
-      {% if is_admin %}
+      {% if is_admin and page_view.button_sync %}
       <form method="post" action="/sync"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn" {% if not google_connected %}disabled{% endif %}>Pinchflat Sync</button>
       </form>
+      {% endif %}
+
+      {% if is_admin and page_view.button_refresh_youtube %}
       <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
       </form>
+      {% endif %}
+
+      {% if is_admin and page_view.button_single_download %}
       <button class="btn secondary" type="button" onclick="openSingleDownload()" title="One-time download">Single Download</button>
       {% endif %}
+
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
+
+      {% if page_view.button_discover %}
       <button class="btn ghost" type="button" onclick="openDiscover()" {% if not google_connected %}disabled{% endif %}>Discover</button>
+      {% endif %}
+
+      {% if page_view.button_favourites %}
       <button class="btn ghost" type="button" onclick="openFavourites()">Favourites</button>
+      {% endif %}
+
+      {% if page_view.button_logout %}
       <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out {{ current_user.username }}</button></form>
+      {% endif %}
     </div>
   </div>
 
@@ -1655,8 +1774,11 @@
     </div>
   {% endif %}
 
-  <div class="grid">
-    <div class="card">
+  <div id="dashboard-sections">
+  {% if page_view.load_summary %}
+  <div class="grid" data-page-section="summary" id="summary-tiles">
+    {% if page_view.show_summary_google %}
+    <div class="card" data-summary-tile="google">
       <div class="muted small">Google</div>
       {% if google_connected and google_write_ready %}
         <div class="metric ok">Connected</div>
@@ -1671,7 +1793,10 @@
         <div class="metric bad">Setup</div>
       {% endif %}
     </div>
-    <div class="card" id="top">
+    {% endif %}
+
+    {% if page_view.show_summary_pinchflat %}
+    <div class="card" id="top" data-summary-tile="pinchflat">
       <div class="muted small">Pinchflat</div>
       {% if is_admin %}
         <a class="pinchflat-icon-link" href="{{ pinchflat_open_url }}" target="_blank" rel="noopener" title="Open Pinchflat" aria-label="Open Pinchflat">
@@ -1715,27 +1840,43 @@
         <div class="muted small">Docker power control unavailable</div>
       {% endif %}
     </div>
-    <div class="card">
+    {% endif %}
+
+    {% if page_view.show_summary_subscriptions %}
+    <div class="card" data-summary-tile="subscriptions">
       <div class="muted small">Subscriptions</div>
       <div class="metric" id="dashboard-subscriptions-active">{{ counts.active }}</div>
       <div class="muted small" id="dashboard-subscriptions-removed">{{ counts.removed }} removed</div>
     </div>
-    <div class="card">
+    {% endif %}
+
+    {% if page_view.show_summary_downloads %}
+    <div class="card" data-summary-tile="downloads">
       <div class="muted small">Downloads</div>
       <div class="metric ok" id="dashboard-downloads-enabled">{{ counts.enabled }}</div>
       <div class="muted small" id="dashboard-downloads-status">{{ counts.disabled }} disabled · {{ counts.pending }} pending</div>
       <div class="muted small">{{ storage_total }} used · {{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
     </div>
-    <div class="card">
+    {% endif %}
+
+    {% if page_view.show_summary_errors %}
+    <div class="card" data-summary-tile="errors">
       <div class="muted small">Errors</div>
       <div class="metric {% if counts.errors or download_counts.failed %}bad{% else %}ok{% endif %}" id="dashboard-errors">{{ counts.errors + download_counts.failed }}</div>
       <div class="muted small">
         {% if last_run %}Last sync: {{ last_run["status"] }}{% else %}No sync yet{% endif %}
       </div>
     </div>
+    {% endif %}
   </div>
+  {% endif %}
 
-  <div class="card pinchflat-download-card" id="pinchflat-download-card">
+  {% if page_view.load_pinchflat_downloads %}
+  <div
+    class="card pinchflat-download-card"
+    id="pinchflat-download-card"
+    data-page-section="pinchflat"
+  >
     <div class="pinchflat-download-head">
       <div>
         <h2>Pinchflat downloads</h2>
@@ -1800,9 +1941,14 @@
       <div id="pinchflat-last-download" class="pinchflat-last-download hidden"></div>
     </div>
   </div>
+  {% endif %}
 
-  {% if google_connected %}
-  <div class="card latest-videos-card" id="latest-subscription-videos">
+  {% if google_connected and page_view.load_latest_videos %}
+  <div
+    class="card latest-videos-card"
+    id="latest-subscription-videos"
+    data-page-section="latest"
+  >
     <div class="header">
       <div>
         <h2>Latest from your subscriptions</h2>
@@ -1850,7 +1996,12 @@
   </div>
   {% endif %}
 
-  <div class="card subscriptions-card" id="subscriptions">
+  {% if page_view.load_subscriptions %}
+  <div
+    class="card subscriptions-card"
+    id="subscriptions"
+    data-page-section="subscriptions"
+  >
     <div class="header">
       <div>
         <h2>Subscriptions</h2>
@@ -2125,6 +2276,8 @@
       <div class="empty">Connect Google and refresh your subscriptions.</div>
     {% endif %}
     </div>
+  </div>
+  {% endif %}
   </div>
 </div>
 
@@ -2425,6 +2578,7 @@
     <div class="tabs">
       {% if is_admin %}
       <button type="button" class="tab-btn active" data-tab="general" onclick="showTab('general')">General</button>
+      <button type="button" class="tab-btn" data-tab="pageview" onclick="showTab('pageview')">Page View</button>
       <button type="button" class="tab-btn" data-tab="youtube" onclick="showTab('youtube')">YouTube</button>
       <button type="button" class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')">Pinchflat</button>
       <button type="button" class="tab-btn" data-tab="downloads" onclick="showTab('downloads')">Downloads</button>
@@ -2468,6 +2622,198 @@
           <p class="muted small">YouTube is checked every {{ youtube_sync_interval }} minutes. Pinchflat is reconciled every {{ pinchflat_sync_interval }} minutes.</p>
         </div>
       </div>
+    </section>
+
+    <section class="tab-panel" data-panel="pageview">
+      <form
+        id="page-view-settings-form"
+        method="post"
+        action="/settings/page-view"
+      >
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input
+          type="hidden"
+          id="page-section-order-input"
+          name="page_section_order"
+          value="{{ page_section_order|join(',') }}"
+        >
+        <input
+          type="hidden"
+          id="page-summary-order-input"
+          name="page_summary_order"
+          value="{{ page_summary_order|join(',') }}"
+        >
+
+        <div class="setting-box">
+          <h3>Dashboard sections</h3>
+          <p class="muted small">
+            Turn off a section to stop it being rendered or loaded on the main page.
+            Latest YouTube videos and Pinchflat download polling do not make their background requests when disabled.
+          </p>
+
+          <div class="page-view-grid">
+            <label class="page-view-option">
+              <input type="checkbox" name="page_load_summary" value="1" {% if page_view.load_summary %}checked{% endif %}>
+              <span>
+                <strong>Status tiles</strong>
+                <span class="muted small">Google, Pinchflat, subscriptions, downloads and errors.</span>
+              </span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_load_pinchflat_downloads" value="1" {% if page_view.load_pinchflat_downloads %}checked{% endif %}>
+              <span>
+                <strong>Pinchflat downloads</strong>
+                <span class="muted small">Active downloads, last download and queue count.</span>
+              </span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_load_latest_videos" value="1" {% if page_view.load_latest_videos %}checked{% endif %}>
+              <span>
+                <strong>Latest from subscriptions</strong>
+                <span class="muted small">Loads the newest YouTube videos and Shorts in the background.</span>
+              </span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_load_subscriptions" value="1" {% if page_view.load_subscriptions %}checked{% endif %}>
+              <span>
+                <strong>Subscriptions</strong>
+                <span class="muted small">Loads the full channel management table.</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-grid" style="margin-top:14px">
+          <div class="setting-box">
+            <h3>Start minimised</h3>
+            <p class="muted small">Choose how the larger sections look after a fresh page load.</p>
+
+            <label>
+              <input type="checkbox" name="page_min_pinchflat_downloads" value="1" {% if page_view.min_pinchflat_downloads %}checked{% endif %}>
+              Pinchflat downloads
+            </label>
+
+            <label>
+              <input type="checkbox" name="page_min_latest_videos" value="1" {% if page_view.min_latest_videos %}checked{% endif %}>
+              Latest from subscriptions
+            </label>
+
+            <label>
+              <input type="checkbox" name="page_min_subscriptions" value="1" {% if page_view.min_subscriptions %}checked{% endif %}>
+              Subscriptions
+            </label>
+          </div>
+
+          <div class="setting-box">
+            <h3>Status tiles</h3>
+            <p class="muted small">Choose which small status tiles appear when Status tiles is enabled.</p>
+
+            <label><input type="checkbox" name="page_show_summary_google" value="1" {% if page_view.show_summary_google %}checked{% endif %}> Google</label>
+            <label><input type="checkbox" name="page_show_summary_pinchflat" value="1" {% if page_view.show_summary_pinchflat %}checked{% endif %}> Pinchflat</label>
+            <label><input type="checkbox" name="page_show_summary_subscriptions" value="1" {% if page_view.show_summary_subscriptions %}checked{% endif %}> Subscriptions</label>
+            <label><input type="checkbox" name="page_show_summary_downloads" value="1" {% if page_view.show_summary_downloads %}checked{% endif %}> Downloads</label>
+            <label><input type="checkbox" name="page_show_summary_errors" value="1" {% if page_view.show_summary_errors %}checked{% endif %}> Errors</label>
+          </div>
+        </div>
+
+        <div class="setting-box" style="margin-top:14px">
+          <h3>Top buttons</h3>
+          <p class="muted small">Settings always remains visible. Choose the other controls you want in the page header.</p>
+
+          <div class="page-view-grid">
+            <label class="page-view-option">
+              <input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}>
+              <span><strong>Pinchflat Sync</strong></span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_button_refresh_youtube" value="1" {% if page_view.button_refresh_youtube %}checked{% endif %}>
+              <span><strong>Refresh YouTube</strong></span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_button_single_download" value="1" {% if page_view.button_single_download %}checked{% endif %}>
+              <span><strong>Single Download</strong></span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_button_discover" value="1" {% if page_view.button_discover %}checked{% endif %}>
+              <span><strong>Discover</strong></span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_button_favourites" value="1" {% if page_view.button_favourites %}checked{% endif %}>
+              <span><strong>Favourites</strong></span>
+            </label>
+
+            <label class="page-view-option">
+              <input type="checkbox" name="page_button_logout" value="1" {% if page_view.button_logout %}checked{% endif %}>
+              <span><strong>Log out</strong></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-grid" style="margin-top:14px">
+          <div class="setting-box">
+            <h3>Main page order</h3>
+            <p class="muted small">Drag the rows into the order you want on the dashboard.</p>
+
+            <div class="page-order-list" id="page-section-order-list">
+              {% for item in page_section_order %}
+              <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
+                <span class="page-order-handle" aria-hidden="true">☰</span>
+                <span>
+                  <strong>
+                    {% if item == "summary" %}Status tiles
+                    {% elif item == "pinchflat" %}Pinchflat downloads
+                    {% elif item == "latest" %}Latest from subscriptions
+                    {% elif item == "subscriptions" %}Subscriptions
+                    {% endif %}
+                  </strong>
+                  <small>
+                    {% if item == "summary" %}Small dashboard status cards.
+                    {% elif item == "pinchflat" %}Current and completed Pinchflat downloads.
+                    {% elif item == "latest" %}Newest YouTube videos and Shorts.
+                    {% elif item == "subscriptions" %}Channel management list.
+                    {% endif %}
+                  </small>
+                </span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="setting-box">
+            <h3>Status tile order</h3>
+            <p class="muted small">Drag the small status tiles into your preferred order.</p>
+
+            <div class="page-order-list" id="page-summary-order-list">
+              {% for item in page_summary_order %}
+              <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
+                <span class="page-order-handle" aria-hidden="true">☰</span>
+                <span>
+                  <strong>
+                    {% if item == "google" %}Google
+                    {% elif item == "pinchflat" %}Pinchflat
+                    {% elif item == "subscriptions" %}Subscriptions
+                    {% elif item == "downloads" %}Downloads
+                    {% elif item == "errors" %}Errors
+                    {% endif %}
+                  </strong>
+                </span>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <div class="actions" style="margin-top:16px">
+          <button class="btn">Save Page View</button>
+        </div>
+      </form>
     </section>
 
     <section class="tab-panel" data-panel="youtube">
@@ -3283,6 +3629,9 @@ let latestSubscriptionShorts = [];
 let latestPopupVideo = null;
 let discoverMode = "downloaded";
 let discoverResults = {downloaded: [], videos: [], shorts: [], top100: []};
+let discoverDownloadedTimer = null;
+let discoverDownloadedRefreshInFlight = false;
+let discoverDownloadedSignature = "";
 let favouritesState = {channels: [], videos: [], lists: []};
 let favouriteTab = "channels";
 let selectedFavouriteListId = null;
@@ -3566,6 +3915,29 @@ function pinchflatMediaTitleButton(item, className) {
   return button;
 }
 
+function pinchflatChannelElement(item) {
+  const label =
+    item?.channel
+    || item?.channel_title
+    || "Pinchflat";
+
+  if (item?.channel_url) {
+    const link = document.createElement("a");
+    link.className = "pinchflat-channel-link";
+    link.href = item.channel_url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = label;
+    link.title = `Open ${label} on YouTube`;
+    return link;
+  }
+
+  const span = document.createElement("span");
+  span.textContent = label;
+  return span;
+}
+
+
 function renderPinchflatActiveDownloads(data) {
   const target = document.getElementById("pinchflat-active-downloads");
   const summary = document.getElementById("pinchflat-download-summary");
@@ -3629,8 +4001,7 @@ function renderPinchflatActiveDownloads(data) {
     const meta = document.createElement("div");
     meta.className = "pinchflat-active-meta";
 
-    const channel = document.createElement("span");
-    channel.textContent = item.channel || "Pinchflat";
+    const channel = pinchflatChannelElement(item);
 
     const started = document.createElement("span");
     started.textContent = item.started_at
@@ -3792,8 +4163,7 @@ function renderPinchflatQueue(data) {
     const meta = document.createElement("div");
     meta.className = "queue-media-meta";
 
-    const channel = document.createElement("span");
-    channel.textContent = item.channel || "Pinchflat";
+    const channel = pinchflatChannelElement(item);
 
     const queued = document.createElement("span");
     queued.textContent =
@@ -3869,18 +4239,31 @@ async function loadPinchflatDownloadOverview(force=false) {
       );
     }
 
+    const previousLastDownloadedId =
+      pinchflatDownloadSnapshot?.last_downloaded?.youtube_id
+      || "";
+
     pinchflatDownloadSnapshot = data;
 
     renderPinchflatActiveDownloads(data);
     renderPinchflatLastDownload(data);
-    renderPinchflatQueue(data);
+
+    const newLastDownloadedId =
+      data?.last_downloaded?.youtube_id
+      || "";
+
+    if (
+      newLastDownloadedId
+      && newLastDownloadedId !== previousLastDownloadedId
+      && discoverDialog?.open
+      && discoverMode === "downloaded"
+    ) {
+      refreshDownloadedDiscoverIfChanged(false);
+    }
 
   } catch (error) {
     const target = document.getElementById("pinchflat-active-downloads");
     const summary = document.getElementById("pinchflat-download-summary");
-    const queueBody = document.getElementById("pinchflat-queue-body");
-    const waitingTarget = document.getElementById("queue-summary-waiting");
-    const activeTarget = document.getElementById("queue-summary-active");
     const message = error.message || String(error);
 
     if (summary) {
@@ -3896,17 +4279,6 @@ async function loadPinchflatDownloadOverview(force=false) {
       target.appendChild(empty);
     }
 
-    if (waitingTarget) waitingTarget.textContent = "—";
-    if (activeTarget) activeTarget.textContent = "—";
-
-    if (queueBody) {
-      queueBody.innerHTML = "";
-
-      const empty = document.createElement("div");
-      empty.className = "queue-empty";
-      empty.textContent = `Queue unavailable: ${message}`;
-      queueBody.appendChild(empty);
-    }
   } finally {
     if (refresh) {
       refresh.disabled = false;
@@ -5244,14 +5616,47 @@ async function removeVideoFromList(listId, videoId) {
   catch (err) { window.alert(err.message || String(err)); }
 }
 
+function startDownloadedDiscoverPolling() {
+  if (discoverDownloadedTimer) {
+    clearInterval(discoverDownloadedTimer);
+  }
+
+  discoverDownloadedTimer = setInterval(
+    () => {
+      if (
+        discoverDialog?.open
+        && discoverMode === "downloaded"
+      ) {
+        refreshDownloadedDiscoverIfChanged();
+      }
+    },
+    4000
+  );
+}
+
+function stopDownloadedDiscoverPolling() {
+  if (discoverDownloadedTimer) {
+    clearInterval(discoverDownloadedTimer);
+    discoverDownloadedTimer = null;
+  }
+}
+
 function openDiscover() {
-  if (!discoverDialog.open) discoverDialog.showModal();
+  if (!discoverDialog.open) {
+    discoverDialog.showModal();
+  }
+
   showDiscoverMode("downloaded");
+  startDownloadedDiscoverPolling();
 }
 
 function closeDiscover() {
+  stopDownloadedDiscoverPolling();
   discoverDialog.close();
-  try { shortsPlayer?.pauseVideo(); } catch (_) {}
+
+  try {
+    shortsPlayer?.pauseVideo();
+  } catch (_) {}
 }
 
 function ensureYouTubeIframeApi() {
@@ -5272,6 +5677,104 @@ function ensureYouTubeIframeApi() {
   return youtubeIframeApiPromise;
 }
 
+function downloadedDiscoverSignature(items) {
+  return (items || [])
+    .slice(0, 100)
+    .map(item =>
+      [
+        item.video_id || item.youtube_id || "",
+        item.downloaded_at || item.published_at || ""
+      ].join(":")
+    )
+    .join("|");
+}
+
+function renderCurrentDiscoverMode() {
+  if (discoverMode === "downloaded") {
+    document.getElementById("discover-quota").textContent =
+      `${discoverResults.downloaded.length} most recent completed Pinchflat downloads`;
+
+    renderDiscoverTiles(
+      discoverResults.downloaded
+    );
+
+    return;
+  }
+
+  if (discoverMode === "videos") {
+    renderDiscoverTiles(
+      discoverResults.videos
+    );
+    return;
+  }
+
+  if (discoverMode === "top100") {
+    renderTop100Tiles(
+      discoverResults.top100
+    );
+  }
+}
+
+async function refreshDownloadedDiscoverIfChanged(forceRender=false) {
+  if (
+    discoverDownloadedRefreshInFlight
+    || !discoverDialog?.open
+    || discoverMode !== "downloaded"
+  ) {
+    return;
+  }
+
+  discoverDownloadedRefreshInFlight = true;
+
+  try {
+    const response = await fetch(
+      "/api/discover?kind=downloaded&refresh=1",
+      {
+        headers:{
+          "Accept":"application/json"
+        },
+        cache:"no-store"
+      }
+    );
+
+    const data = await response.json();
+
+    if (
+      !response.ok
+      || !data.ok
+    ) {
+      throw new Error(
+        data.error
+        || "Downloaded videos could not be refreshed."
+      );
+    }
+
+    const results = data.results || [];
+    const signature = downloadedDiscoverSignature(
+      results
+    );
+
+    if (
+      forceRender
+      || signature !== discoverDownloadedSignature
+    ) {
+      discoverResults.downloaded = results;
+      discoverDownloadedSignature = signature;
+
+      if (
+        discoverDialog.open
+        && discoverMode === "downloaded"
+      ) {
+        renderCurrentDiscoverMode();
+      }
+    }
+  } catch (_) {
+    // Keep the current Downloaded grid visible if a silent refresh fails.
+  } finally {
+    discoverDownloadedRefreshInFlight = false;
+  }
+}
+
 async function showDiscoverMode(mode) {
   discoverMode = ["downloaded", "videos", "shorts", "top100"].includes(mode)
     ? mode
@@ -5286,23 +5789,77 @@ async function showDiscoverMode(mode) {
     "hidden",
     !["downloaded", "videos"].includes(discoverMode)
   );
-  document.getElementById("discover-shorts-panel").classList.toggle("hidden", discoverMode !== "shorts");
-  document.getElementById("discover-top100-panel").classList.toggle("hidden", discoverMode !== "top100");
+
+  document.getElementById("discover-shorts-panel").classList.toggle(
+    "hidden",
+    discoverMode !== "shorts"
+  );
+
+  document.getElementById("discover-top100-panel").classList.toggle(
+    "hidden",
+    discoverMode !== "top100"
+  );
 
   document.getElementById("discover-downloaded-btn").classList.toggle(
     "secondary",
     discoverMode !== "downloaded"
   );
-  document.getElementById("discover-videos-btn").classList.toggle("secondary", discoverMode !== "videos");
-  document.getElementById("discover-shorts-btn").classList.toggle("secondary", discoverMode !== "shorts");
-  document.getElementById("discover-top100-btn").classList.toggle("secondary", discoverMode !== "top100");
 
-  if (!discoverResults[discoverMode].length) {
-    await loadDiscover(discoverMode);
-  } else if (discoverMode === "shorts") {
+  document.getElementById("discover-videos-btn").classList.toggle(
+    "secondary",
+    discoverMode !== "videos"
+  );
+
+  document.getElementById("discover-shorts-btn").classList.toggle(
+    "secondary",
+    discoverMode !== "shorts"
+  );
+
+  document.getElementById("discover-top100-btn").classList.toggle(
+    "secondary",
+    discoverMode !== "top100"
+  );
+
+  if (discoverMode === "downloaded") {
+    // Replace any Random Videos tiles immediately, then check Pinchflat
+    // silently for a newer completed download.
+    if (discoverResults.downloaded.length) {
+      renderCurrentDiscoverMode();
+      await refreshDownloadedDiscoverIfChanged(false);
+    } else {
+      await loadDiscover("downloaded");
+    }
+
+    return;
+  }
+
+  if (discoverMode === "videos") {
+    if (discoverResults.videos.length) {
+      renderCurrentDiscoverMode();
+    } else {
+      await loadDiscover("videos");
+    }
+
+    return;
+  }
+
+  if (discoverMode === "top100") {
+    if (discoverResults.top100.length) {
+      renderCurrentDiscoverMode();
+    } else {
+      await loadDiscover("top100");
+    }
+
+    return;
+  }
+
+  if (!discoverResults.shorts.length) {
+    await loadDiscover("shorts");
+  } else {
     await playRandomShort(shortsIndex);
   }
 }
+
 
 async function refreshDiscover() {
   await loadDiscover(discoverMode, true);
@@ -5323,9 +5880,17 @@ async function loadDiscover(mode, force=false) {
     discoverResults[mode] = data.results || [];
 
     if (mode === "downloaded") {
+      discoverDownloadedSignature =
+        downloadedDiscoverSignature(
+          discoverResults.downloaded
+        );
+
       document.getElementById("discover-quota").textContent =
         `${discoverResults.downloaded.length} most recent completed Pinchflat downloads`;
-      renderDiscoverTiles(discoverResults.downloaded);
+
+      renderDiscoverTiles(
+        discoverResults.downloaded
+      );
     } else if (mode === "top100") {
       document.getElementById("discover-quota").textContent =
         `Top 100 source: ${data.source || "Wikipedia"}. No YouTube search quota used.`;
@@ -5820,6 +6385,159 @@ async function loadPinchflatLogs(force=false) {
     if (refresh) refresh.disabled = false;
   }
 }
+
+const configuredPageSectionOrder = {{ page_section_order|tojson }};
+const configuredSummaryTileOrder = {{ page_summary_order|tojson }};
+
+function applyConfiguredPageOrder() {
+  configuredPageSectionOrder.forEach(
+    (key, index) => {
+      const element = document.querySelector(
+        `[data-page-section="${key}"]`
+      );
+
+      if (element) {
+        element.style.order = String(index);
+      }
+    }
+  );
+
+  configuredSummaryTileOrder.forEach(
+    (key, index) => {
+      const element = document.querySelector(
+        `[data-summary-tile="${key}"]`
+      );
+
+      if (element) {
+        element.style.order = String(index);
+      }
+    }
+  );
+}
+
+function serialiseOrderList(listId, inputId) {
+  const list = document.getElementById(listId);
+  const input = document.getElementById(inputId);
+
+  if (!list || !input) return;
+
+  input.value = Array.from(
+    list.querySelectorAll(
+      ".page-order-item"
+    )
+  )
+    .map(item => item.dataset.orderKey)
+    .filter(Boolean)
+    .join(",");
+}
+
+function initialiseSortableOrderList(listId, inputId) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+
+  let dragging = null;
+
+  list.querySelectorAll(
+    ".page-order-item"
+  ).forEach(item => {
+    item.addEventListener(
+      "dragstart",
+      event => {
+        dragging = item;
+        item.classList.add("dragging");
+
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData(
+            "text/plain",
+            item.dataset.orderKey || ""
+          );
+        }
+      }
+    );
+
+    item.addEventListener(
+      "dragend",
+      () => {
+        item.classList.remove("dragging");
+        dragging = null;
+
+        serialiseOrderList(
+          listId,
+          inputId
+        );
+      }
+    );
+  });
+
+  list.addEventListener(
+    "dragover",
+    event => {
+      event.preventDefault();
+
+      if (!dragging) return;
+
+      const siblings = Array.from(
+        list.querySelectorAll(
+          ".page-order-item:not(.dragging)"
+        )
+      );
+
+      const next = siblings.find(
+        sibling => {
+          const box =
+            sibling.getBoundingClientRect();
+
+          return (
+            event.clientY
+            < box.top + box.height / 2
+          );
+        }
+      );
+
+      if (next) {
+        list.insertBefore(
+          dragging,
+          next
+        );
+      } else {
+        list.appendChild(
+          dragging
+        );
+      }
+    }
+  );
+}
+
+function initialisePageViewSettings() {
+  initialiseSortableOrderList(
+    "page-section-order-list",
+    "page-section-order-input"
+  );
+
+  initialiseSortableOrderList(
+    "page-summary-order-list",
+    "page-summary-order-input"
+  );
+
+  document.getElementById(
+    "page-view-settings-form"
+  )?.addEventListener(
+    "submit",
+    () => {
+      serialiseOrderList(
+        "page-section-order-list",
+        "page-section-order-input"
+      );
+
+      serialiseOrderList(
+        "page-summary-order-list",
+        "page-summary-order-input"
+      );
+    }
+  );
+}
+
 
 function showTab(name) {
   document.querySelectorAll("#settings-dialog .tab-btn").forEach(
@@ -6481,12 +7199,20 @@ const statusFilter = document.getElementById("status-filter");
 const sortFilter = document.getElementById("sort-filter");
 
 function initialFilter() {
+  if (!search || !statusFilter || !sortFilter) {
+    return;
+  }
+
   search.value = localStorage.getItem("ytpf-search") || "";
   statusFilter.value = localStorage.getItem("ytpf-status") || "{{ 'all' if show_removed else 'active' }}";
   sortFilter.value = localStorage.getItem("ytpf-sort") || "title";
 }
 
 function applyFilters() {
+  if (!search || !statusFilter || !sortFilter) {
+    return;
+  }
+
   localStorage.setItem("ytpf-search", search.value);
   localStorage.setItem("ytpf-status", statusFilter.value);
   localStorage.setItem("ytpf-sort", sortFilter.value);
@@ -6559,35 +7285,60 @@ function confirmBulkAction() {
   return window.confirm(`Apply "${action}" to ${count} selected source(s)?`);
 }
 
+applyConfiguredPageOrder();
+initialisePageViewSettings();
+
+{% if page_view.load_subscriptions %}
 initialFilter();
 applyFilters();
 toggleBulkOptions();
 bindSubscriptionAjaxForms();
 updateSubscriptionDashboardCounts();
+setSubscriptionsMinimised(
+  {{ 'true' if page_view.min_subscriptions else 'false' }}
+);
+{% endif %}
 
-setPinchflatDownloadMinimised(true);
-setSubscriptionsMinimised(true);
-{% if google_connected %}
-setLatestSectionMinimised(true);
+{% if page_view.load_pinchflat_downloads %}
+setPinchflatDownloadMinimised(
+  {{ 'true' if page_view.min_pinchflat_downloads else 'false' }}
+);
+{% endif %}
+
+{% if google_connected and page_view.load_latest_videos %}
+setLatestSectionMinimised(
+  {{ 'true' if page_view.min_latest_videos else 'false' }}
+);
 {% endif %}
 
 (async () => {
+  {% if page_view.load_pinchflat_downloads %}
   await loadPinchflatDownloadOverview(true);
   startPinchflatDownloadPolling();
+  {% endif %}
 
-  {% if google_connected %}
-  // Latest subscriptions deliberately loads after the rest of the dashboard.
+  {% if google_connected and page_view.load_latest_videos %}
+  // Latest subscriptions deliberately starts after all other configured
+  // dashboard sections have had a chance to initialise.
   setTimeout(
     () => loadLatestSubscriptionVideos(false),
     900
   );
   {% endif %}
 })();
-const settingsHashTabs = new Set(["security", "pinchflat", "general", "youtube", "downloads", "automation", "advanced"]);
+const settingsHashTabs = new Set(["security", "pinchflat", "general", "pageview", "youtube", "downloads", "favourites", "automation", "logs", "advanced"]);
 const requestedSettingsTab = window.location.hash.replace("#", "");
 if (settingsHashTabs.has(requestedSettingsTab)) {
   openSettings(requestedSettingsTab);
 }
+
+discoverDialog?.addEventListener(
+  "cancel",
+  event => {
+    event.preventDefault();
+    closeDiscover();
+  }
+);
 
 latestVideoDialog?.addEventListener(
   "cancel",
