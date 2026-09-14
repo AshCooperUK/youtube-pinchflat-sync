@@ -2,6 +2,24 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.7.3
+
+Pinchflat download dashboard media links and queue cleanup.
+
+- Makes the Last downloaded thumbnail and title clickable.
+- Clicking Last downloaded opens the existing in-app YouTube video popup rather than the downloaded local file.
+- Adds YouTube thumbnails to every currently downloading Pinchflat media item.
+- Makes current-download thumbnails and titles open the same in-app YouTube video popup.
+- Removes the Pinchflat download progress bars because Pinchflat currently starts yt-dlp without usable progress output.
+- Stops parsing Pinchflat logs for percentage data every four seconds.
+- Hides retryable Pinchflat media jobs from the user-facing waiting queue and queue badge.
+- Removes the Retries summary tile from the Pinchflat Download Queue.
+- Replaces the queue table with larger media rows matching the current/last-downloaded presentation.
+- Waiting queue thumbnails and titles open the existing in-app YouTube video popup.
+- Removes `Waiting Pinchflat media download jobs. This view is read-only.` from the queue popup.
+- Keeps scheduled and genuinely waiting jobs visible while retryable/private/member-only failures stay out of the queue presentation.
+
+
 ## Version 2.7.2
 
 Pinchflat queue schema compatibility fix.

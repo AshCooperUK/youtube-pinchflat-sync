@@ -360,10 +360,7 @@
     }
 
     .pinchflat-active-item {
-      display:grid;
-      grid-template-columns:minmax(0,1fr) auto;
-      gap:16px;
-      align-items:center;
+      display:block;
       padding:14px;
       border:1px solid var(--line);
       border-radius:12px;
@@ -386,43 +383,80 @@
       font-size:12px;
     }
 
-    .pinchflat-progress-track {
-      position:relative;
-      height:10px;
-      margin-top:12px;
-      border-radius:999px;
+    .pinchflat-download-media {
+      display:grid;
+      grid-template-columns:128px minmax(0,1fr) auto;
+      gap:14px;
+      align-items:center;
+      width:100%;
+    }
+
+    .pinchflat-download-thumb-button,
+    .pinchflat-download-title-button,
+    .pinchflat-last-title-button,
+    .queue-media-title-button,
+    .queue-media-thumb-button {
+      border:0;
+      padding:0;
+      margin:0;
+      background:transparent;
+      color:inherit;
+      font:inherit;
+      text-align:left;
+      cursor:pointer;
+    }
+
+    .pinchflat-download-thumb-button,
+    .queue-media-thumb-button {
+      display:block;
+      width:128px;
+      border-radius:9px;
       overflow:hidden;
-      border:1px solid #30415b;
+      line-height:0;
+    }
+
+    .pinchflat-download-thumb,
+    .queue-media-thumb {
+      display:block;
+      width:128px;
+      aspect-ratio:16/9;
+      object-fit:cover;
+      border-radius:9px;
+      border:1px solid var(--line);
       background:#07101d;
+      transition:transform .15s ease, border-color .15s ease;
     }
 
-    .pinchflat-progress-fill {
-      height:100%;
-      width:0%;
-      border-radius:999px;
-      background:var(--blue);
-      transition:width .3s ease;
+    .pinchflat-download-thumb-button:hover .pinchflat-download-thumb,
+    .queue-media-thumb-button:hover .queue-media-thumb {
+      transform:scale(1.025);
+      border-color:#4b6385;
     }
 
-    .pinchflat-progress-track.indeterminate .pinchflat-progress-fill {
-      width:34%;
-      animation:pinchflat-progress-indeterminate 1.25s ease-in-out infinite;
+    .pinchflat-download-title-button,
+    .pinchflat-last-title-button,
+    .queue-media-title-button {
+      color:var(--text);
+      font-weight:800;
+      line-height:1.3;
+      text-decoration:none;
     }
 
-    @keyframes pinchflat-progress-indeterminate {
-      0% { transform:translateX(-115%); }
-      55% { transform:translateX(160%); }
-      100% { transform:translateX(295%); }
+    .pinchflat-download-title-button:hover,
+    .pinchflat-last-title-button:hover,
+    .queue-media-title-button:hover {
+      color:#9bc0ff;
+      text-decoration:underline;
     }
 
-    .pinchflat-progress-stats {
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px 14px;
-      margin-top:7px;
-      min-height:17px;
-      color:var(--muted);
-      font-size:12px;
+    .pinchflat-download-title-button:disabled,
+    .pinchflat-last-title-button:disabled,
+    .queue-media-title-button:disabled,
+    .pinchflat-download-thumb-button:disabled,
+    .queue-media-thumb-button:disabled {
+      cursor:default;
+      opacity:1;
+      text-decoration:none;
     }
 
     .pinchflat-active-attempt {
@@ -510,70 +544,72 @@
       line-height:1;
     }
 
-    .queue-table-wrap {
-      overflow:auto;
+    .queue-media-list {
+      display:grid;
+      gap:10px;
+    }
+
+    .queue-media-item {
+      display:grid;
+      grid-template-columns:128px minmax(0,1fr) auto;
+      gap:14px;
+      align-items:center;
+      padding:13px;
       border:1px solid var(--line);
       border-radius:12px;
+      background:#0b1626;
     }
 
-    .queue-table {
+    .queue-media-body {
+      min-width:0;
+    }
+
+    .queue-media-title-button {
+      display:block;
       width:100%;
-      min-width:780px;
-      border-collapse:collapse;
+      font-size:14px;
     }
 
-    .queue-table th,
-    .queue-table td {
-      padding:11px 12px;
-      text-align:left;
-      vertical-align:middle;
-      border-bottom:1px solid var(--line);
-    }
-
-    .queue-table th {
-      color:#b9cae3;
-      background:#101d30;
+    .queue-media-meta {
+      display:flex;
+      flex-wrap:wrap;
+      gap:5px 13px;
+      margin-top:6px;
+      color:var(--muted);
       font-size:12px;
-      position:sticky;
-      top:0;
-      z-index:1;
     }
 
-    .queue-table tbody tr:last-child td {
-      border-bottom:0;
+    .queue-media-position {
+      min-width:70px;
+      text-align:right;
+      color:var(--muted);
+      font-size:12px;
     }
 
-    .queue-video-title {
-      max-width:430px;
-      font-weight:700;
-      overflow-wrap:anywhere;
-    }
-
-    .queue-status-pill {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      min-width:78px;
-      min-height:28px;
-      padding:0 9px;
-      border-radius:999px;
-      background:#1b2b43;
-      color:#d9e8fb;
-      font-size:11px;
-      font-weight:800;
-    }
-
-    .queue-status-pill.retry {
-      color:var(--amber);
+    .queue-empty {
+      padding:18px;
+      border:1px dashed #30415b;
+      border-radius:12px;
+      color:var(--muted);
+      text-align:center;
     }
 
     @media (max-width:760px) {
-      .pinchflat-active-item {
+      .pinchflat-download-media,
+      .queue-media-item {
         grid-template-columns:1fr;
       }
 
-      .pinchflat-active-attempt {
+      .pinchflat-active-attempt,
+      .queue-media-position {
         text-align:left;
+      }
+
+      .pinchflat-download-thumb-button,
+      .pinchflat-download-thumb,
+      .queue-media-thumb-button,
+      .queue-media-thumb {
+        width:160px;
       }
 
       .queue-summary-grid {
@@ -2018,7 +2054,6 @@
   <div class="modal-head">
     <div>
       <h2 style="margin:0">Pinchflat Download Queue</h2>
-      <div class="muted small">Waiting Pinchflat media download jobs. This view is read-only.</div>
     </div>
 
     <button
@@ -2030,7 +2065,7 @@
   </div>
 
   <div class="modal-body">
-    <div class="queue-summary-grid">
+    <div class="queue-summary-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
       <div class="queue-summary-tile">
         <div class="muted small">Waiting</div>
         <div class="queue-summary-value" id="queue-summary-waiting">0</div>
@@ -2039,11 +2074,6 @@
       <div class="queue-summary-tile">
         <div class="muted small">Active</div>
         <div class="queue-summary-value" id="queue-summary-active">0</div>
-      </div>
-
-      <div class="queue-summary-tile">
-        <div class="muted small">Retries</div>
-        <div class="queue-summary-value" id="queue-summary-retries">0</div>
       </div>
     </div>
 
@@ -2055,24 +2085,8 @@
       >Refresh queue</button>
     </div>
 
-    <div class="queue-table-wrap">
-      <table class="queue-table">
-        <thead>
-          <tr>
-            <th>Position</th>
-            <th>Video</th>
-            <th>Channel</th>
-            <th>Queued</th>
-            <th>Attempt</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody id="pinchflat-queue-body">
-          <tr>
-            <td colspan="6" class="muted">Loading queue…</td>
-          </tr>
-        </tbody>
-      </table>
+    <div id="pinchflat-queue-body" class="queue-media-list">
+      <div class="queue-empty">Loading queue…</div>
     </div>
   </div>
 </dialog>
@@ -3232,6 +3246,108 @@ function togglePinchflatDownloadSection() {
   );
 }
 
+function pinchflatPopupItem(item) {
+  const videoId = item?.youtube_id || "";
+
+  return {
+    video_id: videoId,
+    title: item?.title || "YouTube video",
+    description: item?.description || "",
+    channel_id: item?.channel_id || "",
+    channel_title: item?.channel || "YouTube channel",
+    channel_url:
+      item?.channel_url
+      || (
+        item?.channel_id
+          ? `https://www.youtube.com/channel/${item.channel_id}`
+          : "https://www.youtube.com"
+      ),
+    channel_thumbnail_url: item?.channel_thumbnail_url || "",
+    video_url:
+      item?.video_url
+      || (
+        videoId
+          ? `https://www.youtube.com/watch?v=${videoId}`
+          : ""
+      ),
+    shorts_url:
+      videoId
+        ? `https://www.youtube.com/shorts/${videoId}`
+        : "",
+    view_count: "",
+    published_at: "",
+    is_short: false,
+    is_favourite_video: false,
+    is_favourite_channel: false,
+    is_subscribed: false
+  };
+}
+
+function openPinchflatMedia(item) {
+  if (!item?.youtube_id) return;
+
+  if (pinchflatQueueDialog?.open) {
+    pinchflatQueueDialog.close();
+  }
+
+  openLatestVideo(
+    pinchflatPopupItem(item)
+  );
+}
+
+function pinchflatMediaThumbnailButton(item, classPrefix="pinchflat-download") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `${classPrefix}-thumb-button`;
+  button.disabled = !item?.youtube_id;
+  button.title = item?.youtube_id
+    ? `Play ${item.title || "video"}`
+    : "YouTube video ID unavailable";
+
+  const img = document.createElement("img");
+  img.className = `${classPrefix}-thumb`;
+  img.src =
+    item?.thumbnail_url
+    || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+  img.alt = item?.title || "YouTube video";
+  img.loading = "lazy";
+  img.referrerPolicy = "no-referrer";
+  img.onerror = () => {
+    img.src = "{{ url_for('static', filename='channel-placeholder.svg') }}";
+  };
+
+  button.appendChild(img);
+
+  if (item?.youtube_id) {
+    button.addEventListener(
+      "click",
+      () => openPinchflatMedia(item)
+    );
+  }
+
+  return button;
+}
+
+function pinchflatMediaTitleButton(item, className) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = item?.title || "YouTube video";
+  button.disabled = !item?.youtube_id;
+  button.title = item?.youtube_id
+    ? `Play ${item.title || "video"}`
+    : "YouTube video ID unavailable";
+
+  if (item?.youtube_id) {
+    button.addEventListener(
+      "click",
+      () => openPinchflatMedia(item)
+    );
+  }
+
+  return button;
+}
+
 function renderPinchflatActiveDownloads(data) {
   const target = document.getElementById("pinchflat-active-downloads");
   const summary = document.getElementById("pinchflat-download-summary");
@@ -3273,11 +3389,24 @@ function renderPinchflatActiveDownloads(data) {
     const card = document.createElement("div");
     card.className = "pinchflat-active-item";
 
-    const main = document.createElement("div");
+    const mediaRow = document.createElement("div");
+    mediaRow.className = "pinchflat-download-media";
 
-    const title = document.createElement("div");
-    title.className = "pinchflat-active-title";
-    title.textContent = item.title || "Downloading media";
+    const thumb = pinchflatMediaThumbnailButton(
+      item,
+      "pinchflat-download"
+    );
+
+    const body = document.createElement("div");
+
+    const label = document.createElement("div");
+    label.className = "pinchflat-last-label";
+    label.textContent = "Downloading";
+
+    const title = pinchflatMediaTitleButton(
+      item,
+      "pinchflat-download-title-button"
+    );
 
     const meta = document.createElement("div");
     meta.className = "pinchflat-active-meta";
@@ -3297,63 +3426,10 @@ function renderPinchflatActiveDownloads(data) {
     meta.append(channel, started);
     if (elapsed.textContent) meta.appendChild(elapsed);
 
-    const track = document.createElement("div");
-    track.className = "pinchflat-progress-track";
-
-    const fill = document.createElement("div");
-    fill.className = "pinchflat-progress-fill";
-    track.appendChild(fill);
-
-    const stats = document.createElement("div");
-    stats.className = "pinchflat-progress-stats";
-
-    const progress = item.progress || null;
-    const percent = Number(progress?.percent);
-
-    if (
-      progress
-      && Number.isFinite(percent)
-    ) {
-      fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-
-      const progressText = document.createElement("span");
-      progressText.textContent = `${percent.toFixed(1)}%`;
-      stats.appendChild(progressText);
-
-      if (progress.total) {
-        const total = document.createElement("span");
-        total.textContent = progress.total;
-        stats.appendChild(total);
-      }
-
-      if (progress.speed) {
-        const speed = document.createElement("span");
-        speed.textContent = progress.speed;
-        stats.appendChild(speed);
-      }
-
-      if (progress.eta) {
-        const eta = document.createElement("span");
-        eta.textContent = `ETA ${progress.eta}`;
-        stats.appendChild(eta);
-      }
-    } else {
-      track.classList.add("indeterminate");
-
-      const status = document.createElement("span");
-      status.textContent = "Downloading";
-      stats.appendChild(status);
-
-      const note = document.createElement("span");
-      note.textContent = "Pinchflat does not currently expose a percentage for this job.";
-      stats.appendChild(note);
-    }
-
-    main.append(
+    body.append(
+      label,
       title,
-      meta,
-      track,
-      stats
+      meta
     );
 
     const attempt = document.createElement("div");
@@ -3362,14 +3438,17 @@ function renderPinchflatActiveDownloads(data) {
       ? `Attempt ${item.attempt || 1} of ${item.max_attempts}`
       : `Attempt ${item.attempt || 1}`;
 
-    card.append(
-      main,
+    mediaRow.append(
+      thumb,
+      body,
       attempt
     );
 
+    card.appendChild(mediaRow);
     target.appendChild(card);
   }
 }
+
 
 function renderPinchflatLastDownload(data) {
   const target = document.getElementById("pinchflat-last-download");
@@ -3387,13 +3466,13 @@ function renderPinchflatLastDownload(data) {
   target.classList.remove("hidden");
 
   if (item.thumbnail_url) {
-    const img = document.createElement("img");
-    img.className = "pinchflat-last-thumb";
-    img.src = item.thumbnail_url;
-    img.alt = item.title || "Last downloaded video";
-    img.loading = "lazy";
-    img.referrerPolicy = "no-referrer";
-    target.appendChild(img);
+    const thumb = pinchflatMediaThumbnailButton(
+      item,
+      "pinchflat-download"
+    );
+
+    thumb.classList.add("pinchflat-last-thumb-button");
+    target.appendChild(thumb);
     target.classList.remove("no-image");
   } else {
     target.classList.add("no-image");
@@ -3405,9 +3484,10 @@ function renderPinchflatLastDownload(data) {
   label.className = "pinchflat-last-label";
   label.textContent = "Last downloaded";
 
-  const title = document.createElement("div");
-  title.className = "pinchflat-last-title";
-  title.textContent = item.title || "Downloaded media";
+  const title = pinchflatMediaTitleButton(
+    item,
+    "pinchflat-last-title-button"
+  );
 
   const meta = document.createElement("div");
   meta.className = "pinchflat-active-meta";
@@ -3440,10 +3520,10 @@ function renderPinchflatLastDownload(data) {
   target.appendChild(body);
 }
 
+
 function renderPinchflatQueue(data) {
   const waitingTarget = document.getElementById("queue-summary-waiting");
   const activeTarget = document.getElementById("queue-summary-active");
-  const retriesTarget = document.getElementById("queue-summary-retries");
   const body = document.getElementById("pinchflat-queue-body");
 
   if (!body) return;
@@ -3460,12 +3540,6 @@ function renderPinchflatQueue(data) {
     );
   }
 
-  if (retriesTarget) {
-    retriesTarget.textContent = String(
-      data.summary?.retries || 0
-    );
-  }
-
   body.innerHTML = "";
 
   const waiting = Array.isArray(data.waiting)
@@ -3473,63 +3547,76 @@ function renderPinchflatQueue(data) {
     : [];
 
   if (!waiting.length) {
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 6;
-    cell.className = "muted";
-    cell.textContent = "There are no waiting Pinchflat media downloads.";
-    row.appendChild(cell);
-    body.appendChild(row);
+    const empty = document.createElement("div");
+    empty.className = "queue-empty";
+    empty.textContent = "There are no waiting Pinchflat media downloads.";
+    body.appendChild(empty);
     return;
   }
 
   waiting.forEach((item, index) => {
-    const row = document.createElement("tr");
+    const row = document.createElement("div");
+    row.className = "queue-media-item";
 
-    const position = document.createElement("td");
-    position.textContent = String(index + 1);
-
-    const video = document.createElement("td");
-    video.className = "queue-video-title";
-    video.textContent = item.title || "Pinchflat media";
-
-    const channel = document.createElement("td");
-    channel.textContent = item.channel || "Pinchflat";
-
-    const queued = document.createElement("td");
-    queued.textContent = safeDateTime(
-      item.scheduled_at
-      || item.queued_at
+    const thumb = pinchflatMediaThumbnailButton(
+      item,
+      "queue-media"
     );
 
-    const attempt = document.createElement("td");
-    attempt.textContent = item.max_attempts
-      ? `${item.attempt || 0} / ${item.max_attempts}`
-      : String(item.attempt || 0);
+    const content = document.createElement("div");
+    content.className = "queue-media-body";
 
-    const status = document.createElement("td");
-    const pill = document.createElement("span");
-    pill.className = "queue-status-pill";
+    const title = pinchflatMediaTitleButton(
+      item,
+      "queue-media-title-button"
+    );
 
-    if (item.state === "retryable") {
-      pill.classList.add("retry");
-    }
+    const meta = document.createElement("div");
+    meta.className = "queue-media-meta";
 
-    pill.textContent = item.status || "Waiting";
-    status.appendChild(pill);
+    const channel = document.createElement("span");
+    channel.textContent = item.channel || "Pinchflat";
 
-    row.append(
-      position,
-      video,
+    const queued = document.createElement("span");
+    queued.textContent =
+      `Queued ${safeDateTime(item.scheduled_at || item.queued_at)}`;
+
+    const status = document.createElement("span");
+    status.textContent = item.state === "scheduled"
+      ? "Scheduled"
+      : "Waiting";
+
+    meta.append(
       channel,
       queued,
-      attempt,
       status
+    );
+
+    if (Number(item.attempt || 0) > 1) {
+      const attempt = document.createElement("span");
+      attempt.textContent = `Attempt ${item.attempt}`;
+      meta.appendChild(attempt);
+    }
+
+    content.append(
+      title,
+      meta
+    );
+
+    const position = document.createElement("div");
+    position.className = "queue-media-position";
+    position.textContent = `#${index + 1}`;
+
+    row.append(
+      thumb,
+      content,
+      position
     );
 
     body.appendChild(row);
   });
 }
+
 
 async function loadPinchflatDownloadOverview(force=false) {
   if (
@@ -3576,8 +3663,6 @@ async function loadPinchflatDownloadOverview(force=false) {
     const queueBody = document.getElementById("pinchflat-queue-body");
     const waitingTarget = document.getElementById("queue-summary-waiting");
     const activeTarget = document.getElementById("queue-summary-active");
-    const retriesTarget = document.getElementById("queue-summary-retries");
-
     const message = error.message || String(error);
 
     if (summary) {
@@ -3595,20 +3680,14 @@ async function loadPinchflatDownloadOverview(force=false) {
 
     if (waitingTarget) waitingTarget.textContent = "—";
     if (activeTarget) activeTarget.textContent = "—";
-    if (retriesTarget) retriesTarget.textContent = "—";
 
     if (queueBody) {
       queueBody.innerHTML = "";
 
-      const row = document.createElement("tr");
-      const cell = document.createElement("td");
-
-      cell.colSpan = 6;
-      cell.className = "muted";
-      cell.textContent = `Queue unavailable: ${message}`;
-
-      row.appendChild(cell);
-      queueBody.appendChild(row);
+      const empty = document.createElement("div");
+      empty.className = "queue-empty";
+      empty.textContent = `Queue unavailable: ${message}`;
+      queueBody.appendChild(empty);
     }
   } finally {
     if (refresh) {

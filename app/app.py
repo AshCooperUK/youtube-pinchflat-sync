@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.7.2"
+VERSION = "2.7.3"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -5763,8 +5763,7 @@ def pinchflat_download_overview(queue_limit=100):
               AND state IN (
                 'executing',
                 'available',
-                'scheduled',
-                'retryable'
+                'scheduled'
               )
             GROUP BY state
             """,
@@ -5786,37 +5785,8 @@ def pinchflat_download_overview(queue_limit=100):
             for state in (
                 "available",
                 "scheduled",
-                "retryable",
             )
         )
-
-        if "attempt" in job_columns:
-            retry_count_row = conn.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM oban_jobs
-                WHERE worker = ?
-                  AND state IN (
-                    'available',
-                    'scheduled',
-                    'retryable'
-                  )
-                  AND (
-                    state = 'retryable'
-                    OR attempt > 1
-                  )
-                """,
-                (media_worker,),
-            ).fetchone()
-
-            total_retry_count = int(
-                retry_count_row["count"] or 0
-            )
-        else:
-            total_retry_count = state_counts.get(
-                "retryable",
-                0,
-            )
 
         job_rows = conn.execute(
             f"""
@@ -5826,15 +5796,13 @@ def pinchflat_download_overview(queue_limit=100):
               AND state IN (
                 'executing',
                 'available',
-                'scheduled',
-                'retryable'
+                'scheduled'
               )
             ORDER BY
               CASE state
                 WHEN 'executing' THEN 0
                 WHEN 'available' THEN 1
-                WHEN 'retryable' THEN 2
-                WHEN 'scheduled' THEN 3
+                WHEN 'scheduled' THEN 2
                 ELSE 9
               END,
               {order_time_expr} ASC,
@@ -5954,6 +5922,7 @@ def pinchflat_download_overview(queue_limit=100):
                     "id",
                     "custom_name",
                     "collection_name",
+                    "collection_id",
                     "original_url",
                 )
                 if column in source_columns
@@ -6038,11 +6007,39 @@ def pinchflat_download_overview(queue_limit=100):
                 media
             )
 
+            channel_id = str(
+                pinchflat_row_value(
+                    source,
+                    "collection_id",
+                )
+                or ""
+            )
+
+            channel_url = str(
+                pinchflat_row_value(
+                    source,
+                    "original_url",
+                )
+                or (
+                    f"https://www.youtube.com/channel/{channel_id}"
+                    if channel_id
+                    else ""
+                )
+            )
+
+            video_url = (
+                f"https://www.youtube.com/watch?v={youtube_id}"
+                if youtube_id
+                else ""
+            )
+
             return {
                 "job_id": job.get("id"),
                 "media_item_id": media_id,
                 "title": str(title),
                 "channel": str(channel),
+                "channel_id": channel_id,
+                "channel_url": channel_url,
                 "state": state,
                 "status": status_labels.get(
                     state,
@@ -6069,6 +6066,7 @@ def pinchflat_download_overview(queue_limit=100):
                     or ""
                 ),
                 "youtube_id": youtube_id,
+                "video_url": video_url,
                 "thumbnail_url": (
                     f"https://i.ytimg.com/vi/"
                     f"{youtube_id}/hqdefault.jpg"
@@ -6098,16 +6096,6 @@ def pinchflat_download_overview(queue_limit=100):
                 ),
             )
         ]
-
-        progress = pinchflat_download_progress_from_logs(
-            len(active)
-        )
-
-        if progress and active:
-            active[0]["progress"] = progress
-        else:
-            for item in active:
-                item["progress"] = None
 
         active_media_ids = {
             int(item["media_item_id"])
@@ -6228,6 +6216,8 @@ def pinchflat_download_overview(queue_limit=100):
                                     "id",
                                     "custom_name",
                                     "collection_name",
+                                    "collection_id",
+                                    "original_url",
                                 )
                                 if name in source_columns
                             ]
@@ -6256,6 +6246,32 @@ def pinchflat_download_overview(queue_limit=100):
                         media
                     )
 
+                    channel_id = str(
+                        pinchflat_row_value(
+                            source,
+                            "collection_id",
+                        )
+                        or ""
+                    )
+
+                    channel_url = str(
+                        pinchflat_row_value(
+                            source,
+                            "original_url",
+                        )
+                        or (
+                            f"https://www.youtube.com/channel/{channel_id}"
+                            if channel_id
+                            else ""
+                        )
+                    )
+
+                    video_url = (
+                        f"https://www.youtube.com/watch?v={youtube_id}"
+                        if youtube_id
+                        else ""
+                    )
+
                     last_downloaded = {
                         "media_item_id": media.get("id"),
                         "title": (
@@ -6273,6 +6289,9 @@ def pinchflat_download_overview(queue_limit=100):
                             )
                             or "Pinchflat"
                         ),
+                        "channel_id": channel_id,
+                        "channel_url": channel_url,
+                        "video_url": video_url,
                         "completed_at": (
                             pinchflat_row_value(
                                 media,
@@ -6309,7 +6328,6 @@ def pinchflat_download_overview(queue_limit=100):
             "summary": {
                 "active": total_active_count,
                 "waiting": total_waiting_count,
-                "retries": total_retry_count,
             },
             "last_downloaded": last_downloaded,
             "worker": media_worker,
@@ -10215,7 +10233,6 @@ def pinchflat_download_overview_api():
                 "summary": {
                     "active": 0,
                     "waiting": 0,
-                    "retries": 0,
                 },
                 "last_downloaded": None,
             }
