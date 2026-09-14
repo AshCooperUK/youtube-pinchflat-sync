@@ -265,6 +265,330 @@
     .source-save-actions { min-width:96px; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
     .source-save-actions .btn { width:104px; min-width:104px; height:var(--control-height); min-height:var(--control-height); padding:0 10px; font-size:12px; }
 
+    .pinchflat-download-card {
+      margin-top:16px;
+      overflow:hidden;
+    }
+
+    .pinchflat-download-card.is-minimised {
+      padding-top:14px;
+      padding-bottom:14px;
+    }
+
+    .pinchflat-download-card.is-minimised .pinchflat-download-body {
+      display:none;
+    }
+
+    .pinchflat-download-head {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+    }
+
+    .pinchflat-download-head h2 {
+      margin:0 0 4px;
+    }
+
+    .pinchflat-download-controls {
+      display:flex;
+      gap:3px;
+      align-items:center;
+      flex:0 0 auto;
+    }
+
+    .pinchflat-download-control {
+      position:relative;
+      width:46px;
+      min-width:46px;
+      height:34px;
+      min-height:34px;
+      padding:0;
+      border:0;
+      border-radius:6px;
+      background:transparent;
+      color:#dce7f8;
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+      transition:background .13s ease, color .13s ease;
+    }
+
+    .pinchflat-download-control:hover {
+      background:#2a3b55;
+      color:#fff;
+    }
+
+    .pinchflat-download-control svg {
+      width:17px;
+      height:17px;
+      stroke:currentColor;
+      fill:none;
+      stroke-width:1.8;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+    }
+
+    .queue-count-badge {
+      position:absolute;
+      top:-5px;
+      right:-5px;
+      min-width:18px;
+      height:18px;
+      padding:0 5px;
+      border-radius:999px;
+      background:var(--blue);
+      color:#fff;
+      font-size:10px;
+      line-height:18px;
+      font-weight:800;
+      text-align:center;
+      border:2px solid var(--card);
+    }
+
+    .queue-count-badge.hidden {
+      display:none;
+    }
+
+    .pinchflat-download-body {
+      margin-top:16px;
+    }
+
+    .pinchflat-active-list {
+      display:grid;
+      gap:12px;
+    }
+
+    .pinchflat-active-item {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:16px;
+      align-items:center;
+      padding:14px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:#0b1626;
+    }
+
+    .pinchflat-active-title {
+      font-weight:800;
+      font-size:15px;
+      line-height:1.3;
+      overflow-wrap:anywhere;
+    }
+
+    .pinchflat-active-meta {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 14px;
+      margin-top:5px;
+      color:var(--muted);
+      font-size:12px;
+    }
+
+    .pinchflat-progress-track {
+      position:relative;
+      height:10px;
+      margin-top:12px;
+      border-radius:999px;
+      overflow:hidden;
+      border:1px solid #30415b;
+      background:#07101d;
+    }
+
+    .pinchflat-progress-fill {
+      height:100%;
+      width:0%;
+      border-radius:999px;
+      background:var(--blue);
+      transition:width .3s ease;
+    }
+
+    .pinchflat-progress-track.indeterminate .pinchflat-progress-fill {
+      width:34%;
+      animation:pinchflat-progress-indeterminate 1.25s ease-in-out infinite;
+    }
+
+    @keyframes pinchflat-progress-indeterminate {
+      0% { transform:translateX(-115%); }
+      55% { transform:translateX(160%); }
+      100% { transform:translateX(295%); }
+    }
+
+    .pinchflat-progress-stats {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px 14px;
+      margin-top:7px;
+      min-height:17px;
+      color:var(--muted);
+      font-size:12px;
+    }
+
+    .pinchflat-active-attempt {
+      min-width:78px;
+      text-align:right;
+      color:var(--muted);
+      font-size:12px;
+    }
+
+    .pinchflat-last-download {
+      display:grid;
+      grid-template-columns:96px minmax(0,1fr);
+      gap:12px;
+      align-items:center;
+      margin-top:14px;
+      padding-top:14px;
+      border-top:1px solid var(--line);
+    }
+
+    .pinchflat-last-download.no-image {
+      grid-template-columns:1fr;
+    }
+
+    .pinchflat-last-thumb {
+      width:96px;
+      aspect-ratio:16/9;
+      object-fit:cover;
+      border-radius:9px;
+      border:1px solid var(--line);
+      background:#07101d;
+    }
+
+    .pinchflat-last-label {
+      color:var(--muted);
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      font-weight:800;
+    }
+
+    .pinchflat-last-title {
+      margin-top:3px;
+      color:var(--text);
+      font-weight:800;
+      line-height:1.3;
+    }
+
+    .pinchflat-download-empty {
+      padding:16px;
+      border:1px dashed #30415b;
+      border-radius:12px;
+      color:var(--muted);
+      text-align:center;
+      background:rgba(255,255,255,.012);
+    }
+
+    #pinchflat-queue-dialog {
+      width:min(1040px,95vw);
+      max-height:88vh;
+    }
+
+    #pinchflat-queue-dialog .modal-body {
+      max-height:calc(88vh - 76px);
+      overflow-y:auto;
+    }
+
+    .queue-summary-grid {
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:10px;
+      margin-bottom:14px;
+    }
+
+    .queue-summary-tile {
+      padding:13px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:#0b1626;
+    }
+
+    .queue-summary-value {
+      margin-top:4px;
+      font-size:24px;
+      font-weight:850;
+      line-height:1;
+    }
+
+    .queue-table-wrap {
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:12px;
+    }
+
+    .queue-table {
+      width:100%;
+      min-width:780px;
+      border-collapse:collapse;
+    }
+
+    .queue-table th,
+    .queue-table td {
+      padding:11px 12px;
+      text-align:left;
+      vertical-align:middle;
+      border-bottom:1px solid var(--line);
+    }
+
+    .queue-table th {
+      color:#b9cae3;
+      background:#101d30;
+      font-size:12px;
+      position:sticky;
+      top:0;
+      z-index:1;
+    }
+
+    .queue-table tbody tr:last-child td {
+      border-bottom:0;
+    }
+
+    .queue-video-title {
+      max-width:430px;
+      font-weight:700;
+      overflow-wrap:anywhere;
+    }
+
+    .queue-status-pill {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:78px;
+      min-height:28px;
+      padding:0 9px;
+      border-radius:999px;
+      background:#1b2b43;
+      color:#d9e8fb;
+      font-size:11px;
+      font-weight:800;
+    }
+
+    .queue-status-pill.retry {
+      color:var(--amber);
+    }
+
+    @media (max-width:760px) {
+      .pinchflat-active-item {
+        grid-template-columns:1fr;
+      }
+
+      .pinchflat-active-attempt {
+        text-align:left;
+      }
+
+      .queue-summary-grid {
+        grid-template-columns:1fr;
+      }
+
+      .pinchflat-last-download {
+        grid-template-columns:1fr;
+      }
+
+      .pinchflat-last-thumb {
+        width:140px;
+      }
+    }
+
     .latest-videos-card { transition:padding .16s ease; }
     .latest-videos-card.is-minimised { padding-top:14px; padding-bottom:14px; }
     .latest-videos-card.is-minimised .latest-videos-description { display:none; }
@@ -1277,6 +1601,72 @@
     </div>
   </div>
 
+  <div class="card pinchflat-download-card" id="pinchflat-download-card">
+    <div class="pinchflat-download-head">
+      <div>
+        <h2>Pinchflat downloads</h2>
+        <div class="muted small" id="pinchflat-download-summary">
+          Loading current Pinchflat download activity…
+        </div>
+      </div>
+
+      <div class="pinchflat-download-controls" aria-label="Pinchflat download controls">
+        <button
+          class="pinchflat-download-control"
+          type="button"
+          onclick="openPinchflatQueue()"
+          title="Show waiting downloads"
+          aria-label="Show waiting downloads"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 7h10"></path>
+            <path d="M7 12h10"></path>
+            <path d="M7 17h10"></path>
+            <path d="M4 7h.01"></path>
+            <path d="M4 12h.01"></path>
+            <path d="M4 17h.01"></path>
+          </svg>
+          <span id="pinchflat-queue-badge" class="queue-count-badge hidden">0</span>
+        </button>
+
+        <button
+          class="pinchflat-download-control"
+          type="button"
+          id="pinchflat-download-refresh"
+          onclick="loadPinchflatDownloadOverview(true)"
+          title="Refresh Pinchflat downloads"
+          aria-label="Refresh Pinchflat downloads"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 11a8 8 0 1 0-2.34 5.66"></path>
+            <path d="M20 4v7h-7"></path>
+          </svg>
+        </button>
+
+        <button
+          class="pinchflat-download-control"
+          type="button"
+          id="pinchflat-download-minimise"
+          onclick="togglePinchflatDownloadSection()"
+          title="Minimise Pinchflat downloads"
+          aria-label="Minimise Pinchflat downloads"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 17h12"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="pinchflat-download-body" id="pinchflat-download-body">
+      <div id="pinchflat-active-downloads" class="pinchflat-active-list">
+        <div class="pinchflat-download-empty">Checking Pinchflat for active downloads…</div>
+      </div>
+
+      <div id="pinchflat-last-download" class="pinchflat-last-download hidden"></div>
+    </div>
+  </div>
+
   {% if google_connected %}
   <div class="card latest-videos-card" id="latest-subscription-videos">
     <div class="header">
@@ -1620,6 +2010,69 @@
         <div class="latest-popup-section-label">Description</div>
         <div id="latest-popup-description" class="latest-popup-description"></div>
       </div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="pinchflat-queue-dialog">
+  <div class="modal-head">
+    <div>
+      <h2 style="margin:0">Pinchflat Download Queue</h2>
+      <div class="muted small">Waiting Pinchflat media download jobs. This view is read-only.</div>
+    </div>
+
+    <button
+      class="modal-close"
+      type="button"
+      onclick="closePinchflatQueue()"
+      aria-label="Close"
+    >×</button>
+  </div>
+
+  <div class="modal-body">
+    <div class="queue-summary-grid">
+      <div class="queue-summary-tile">
+        <div class="muted small">Waiting</div>
+        <div class="queue-summary-value" id="queue-summary-waiting">0</div>
+      </div>
+
+      <div class="queue-summary-tile">
+        <div class="muted small">Active</div>
+        <div class="queue-summary-value" id="queue-summary-active">0</div>
+      </div>
+
+      <div class="queue-summary-tile">
+        <div class="muted small">Retries</div>
+        <div class="queue-summary-value" id="queue-summary-retries">0</div>
+      </div>
+    </div>
+
+    <div class="actions" style="justify-content:flex-end;margin-bottom:10px">
+      <button
+        class="btn secondary"
+        type="button"
+        onclick="loadPinchflatDownloadOverview(true)"
+      >Refresh queue</button>
+    </div>
+
+    <div class="queue-table-wrap">
+      <table class="queue-table">
+        <thead>
+          <tr>
+            <th>Position</th>
+            <th>Video</th>
+            <th>Channel</th>
+            <th>Queued</th>
+            <th>Attempt</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="pinchflat-queue-body">
+          <tr>
+            <td colspan="6" class="muted">Loading queue…</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </dialog>
@@ -2666,6 +3119,7 @@
 <script>
 const settingsDialog = document.getElementById("settings-dialog");
 const singleDownloadDialog = document.getElementById("single-download-dialog");
+const pinchflatQueueDialog = document.getElementById("pinchflat-queue-dialog");
 const profileTemplateHelpDialog = document.getElementById("profile-template-help-dialog");
 const discoverDialog = document.getElementById("discover-dialog");
 const favouritesDialog = document.getElementById("favourites-dialog");
@@ -2686,6 +3140,513 @@ let shortsIndex = 0;
 let shortsPlayer = null;
 let shortsMuted = true;
 let youtubeIframeApiPromise = null;
+
+
+let pinchflatDownloadTimer = null;
+let pinchflatDownloadSnapshot = null;
+
+function safeDateTime(value) {
+  if (!value) return "—";
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString([], {
+    hour:"2-digit",
+    minute:"2-digit",
+    day:"2-digit",
+    month:"short"
+  });
+}
+
+function elapsedFrom(value) {
+  if (!value) return "";
+
+  const started = new Date(value);
+  if (Number.isNaN(started.getTime())) {
+    return "";
+  }
+
+  const seconds = Math.max(
+    0,
+    Math.floor(
+      (Date.now() - started.getTime()) / 1000
+    )
+  );
+
+  if (seconds < 60) {
+    return `${seconds}s elapsed`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes}m ${seconds % 60}s elapsed`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m elapsed`;
+}
+
+function setPinchflatDownloadMinimised(minimised) {
+  const card = document.getElementById("pinchflat-download-card");
+  const body = document.getElementById("pinchflat-download-body");
+  const button = document.getElementById("pinchflat-download-minimise");
+
+  if (!card || !body || !button) return;
+
+  body.classList.toggle("hidden", minimised);
+  card.classList.toggle("is-minimised", minimised);
+
+  button.innerHTML = minimised
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true">
+         <rect x="7" y="7" width="10" height="10" rx="1"></rect>
+       </svg>`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true">
+         <path d="M6 17h12"></path>
+       </svg>`;
+
+  button.title = minimised
+    ? "Restore Pinchflat downloads"
+    : "Minimise Pinchflat downloads";
+
+  button.setAttribute(
+    "aria-label",
+    button.title
+  );
+
+  localStorage.setItem(
+    "pinchflatDownloadsMinimised",
+    minimised ? "1" : "0"
+  );
+}
+
+function togglePinchflatDownloadSection() {
+  const body = document.getElementById("pinchflat-download-body");
+  if (!body) return;
+
+  setPinchflatDownloadMinimised(
+    !body.classList.contains("hidden")
+  );
+}
+
+function renderPinchflatActiveDownloads(data) {
+  const target = document.getElementById("pinchflat-active-downloads");
+  const summary = document.getElementById("pinchflat-download-summary");
+  const badge = document.getElementById("pinchflat-queue-badge");
+
+  if (!target || !summary || !badge) return;
+
+  const active = Array.isArray(data.active)
+    ? data.active
+    : [];
+
+  const waiting = Number(
+    data.summary?.waiting || 0
+  );
+
+  summary.textContent = active.length
+    ? `${active.length} active · ${waiting} waiting`
+    : `No active downloads · ${waiting} waiting`;
+
+  badge.textContent = String(waiting);
+  badge.classList.toggle(
+    "hidden",
+    waiting <= 0
+  );
+
+  target.innerHTML = "";
+
+  if (!active.length) {
+    const empty = document.createElement("div");
+    empty.className = "pinchflat-download-empty";
+    empty.textContent = waiting
+      ? `${waiting} download${waiting === 1 ? "" : "s"} waiting in Pinchflat.`
+      : "No active Pinchflat downloads.";
+    target.appendChild(empty);
+    return;
+  }
+
+  for (const item of active) {
+    const card = document.createElement("div");
+    card.className = "pinchflat-active-item";
+
+    const main = document.createElement("div");
+
+    const title = document.createElement("div");
+    title.className = "pinchflat-active-title";
+    title.textContent = item.title || "Downloading media";
+
+    const meta = document.createElement("div");
+    meta.className = "pinchflat-active-meta";
+
+    const channel = document.createElement("span");
+    channel.textContent = item.channel || "Pinchflat";
+
+    const started = document.createElement("span");
+    started.textContent = item.started_at
+      ? `Started ${safeDateTime(item.started_at)}`
+      : "Starting";
+
+    const elapsed = document.createElement("span");
+    elapsed.dataset.startedAt = item.started_at || "";
+    elapsed.textContent = elapsedFrom(item.started_at);
+
+    meta.append(channel, started);
+    if (elapsed.textContent) meta.appendChild(elapsed);
+
+    const track = document.createElement("div");
+    track.className = "pinchflat-progress-track";
+
+    const fill = document.createElement("div");
+    fill.className = "pinchflat-progress-fill";
+    track.appendChild(fill);
+
+    const stats = document.createElement("div");
+    stats.className = "pinchflat-progress-stats";
+
+    const progress = item.progress || null;
+    const percent = Number(progress?.percent);
+
+    if (
+      progress
+      && Number.isFinite(percent)
+    ) {
+      fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+
+      const progressText = document.createElement("span");
+      progressText.textContent = `${percent.toFixed(1)}%`;
+      stats.appendChild(progressText);
+
+      if (progress.total) {
+        const total = document.createElement("span");
+        total.textContent = progress.total;
+        stats.appendChild(total);
+      }
+
+      if (progress.speed) {
+        const speed = document.createElement("span");
+        speed.textContent = progress.speed;
+        stats.appendChild(speed);
+      }
+
+      if (progress.eta) {
+        const eta = document.createElement("span");
+        eta.textContent = `ETA ${progress.eta}`;
+        stats.appendChild(eta);
+      }
+    } else {
+      track.classList.add("indeterminate");
+
+      const status = document.createElement("span");
+      status.textContent = "Downloading";
+      stats.appendChild(status);
+
+      const note = document.createElement("span");
+      note.textContent = "Pinchflat does not currently expose a percentage for this job.";
+      stats.appendChild(note);
+    }
+
+    main.append(
+      title,
+      meta,
+      track,
+      stats
+    );
+
+    const attempt = document.createElement("div");
+    attempt.className = "pinchflat-active-attempt";
+    attempt.textContent = item.max_attempts
+      ? `Attempt ${item.attempt || 1} of ${item.max_attempts}`
+      : `Attempt ${item.attempt || 1}`;
+
+    card.append(
+      main,
+      attempt
+    );
+
+    target.appendChild(card);
+  }
+}
+
+function renderPinchflatLastDownload(data) {
+  const target = document.getElementById("pinchflat-last-download");
+  if (!target) return;
+
+  const item = data.last_downloaded;
+
+  target.innerHTML = "";
+
+  if (!item) {
+    target.classList.add("hidden");
+    return;
+  }
+
+  target.classList.remove("hidden");
+
+  if (item.thumbnail_url) {
+    const img = document.createElement("img");
+    img.className = "pinchflat-last-thumb";
+    img.src = item.thumbnail_url;
+    img.alt = item.title || "Last downloaded video";
+    img.loading = "lazy";
+    img.referrerPolicy = "no-referrer";
+    target.appendChild(img);
+    target.classList.remove("no-image");
+  } else {
+    target.classList.add("no-image");
+  }
+
+  const body = document.createElement("div");
+
+  const label = document.createElement("div");
+  label.className = "pinchflat-last-label";
+  label.textContent = "Last downloaded";
+
+  const title = document.createElement("div");
+  title.className = "pinchflat-last-title";
+  title.textContent = item.title || "Downloaded media";
+
+  const meta = document.createElement("div");
+  meta.className = "pinchflat-active-meta";
+
+  const channel = document.createElement("span");
+  channel.textContent = item.channel || "Pinchflat";
+
+  const completed = document.createElement("span");
+  completed.textContent = item.completed_at
+    ? `Completed ${safeDateTime(item.completed_at)}`
+    : "Completed";
+
+  meta.append(
+    channel,
+    completed
+  );
+
+  if (item.file_size_text && item.file_size_text !== "0 B") {
+    const size = document.createElement("span");
+    size.textContent = item.file_size_text;
+    meta.appendChild(size);
+  }
+
+  body.append(
+    label,
+    title,
+    meta
+  );
+
+  target.appendChild(body);
+}
+
+function renderPinchflatQueue(data) {
+  const waitingTarget = document.getElementById("queue-summary-waiting");
+  const activeTarget = document.getElementById("queue-summary-active");
+  const retriesTarget = document.getElementById("queue-summary-retries");
+  const body = document.getElementById("pinchflat-queue-body");
+
+  if (!body) return;
+
+  if (waitingTarget) {
+    waitingTarget.textContent = String(
+      data.summary?.waiting || 0
+    );
+  }
+
+  if (activeTarget) {
+    activeTarget.textContent = String(
+      data.summary?.active || 0
+    );
+  }
+
+  if (retriesTarget) {
+    retriesTarget.textContent = String(
+      data.summary?.retries || 0
+    );
+  }
+
+  body.innerHTML = "";
+
+  const waiting = Array.isArray(data.waiting)
+    ? data.waiting
+    : [];
+
+  if (!waiting.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.className = "muted";
+    cell.textContent = "There are no waiting Pinchflat media downloads.";
+    row.appendChild(cell);
+    body.appendChild(row);
+    return;
+  }
+
+  waiting.forEach((item, index) => {
+    const row = document.createElement("tr");
+
+    const position = document.createElement("td");
+    position.textContent = String(index + 1);
+
+    const video = document.createElement("td");
+    video.className = "queue-video-title";
+    video.textContent = item.title || "Pinchflat media";
+
+    const channel = document.createElement("td");
+    channel.textContent = item.channel || "Pinchflat";
+
+    const queued = document.createElement("td");
+    queued.textContent = safeDateTime(
+      item.scheduled_at
+      || item.queued_at
+    );
+
+    const attempt = document.createElement("td");
+    attempt.textContent = item.max_attempts
+      ? `${item.attempt || 0} / ${item.max_attempts}`
+      : String(item.attempt || 0);
+
+    const status = document.createElement("td");
+    const pill = document.createElement("span");
+    pill.className = "queue-status-pill";
+
+    if (item.state === "retryable") {
+      pill.classList.add("retry");
+    }
+
+    pill.textContent = item.status || "Waiting";
+    status.appendChild(pill);
+
+    row.append(
+      position,
+      video,
+      channel,
+      queued,
+      attempt,
+      status
+    );
+
+    body.appendChild(row);
+  });
+}
+
+async function loadPinchflatDownloadOverview(force=false) {
+  if (
+    !force
+    && document.hidden
+  ) {
+    return;
+  }
+
+  const refresh = document.getElementById("pinchflat-download-refresh");
+
+  if (refresh && force) {
+    refresh.disabled = true;
+  }
+
+  try {
+    const response = await fetch(
+      "/api/pinchflat/download-overview?limit=100",
+      {
+        headers:{
+          "Accept":"application/json"
+        }
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error
+        || `Pinchflat download status returned HTTP ${response.status}`
+      );
+    }
+
+    pinchflatDownloadSnapshot = data;
+
+    renderPinchflatActiveDownloads(data);
+    renderPinchflatLastDownload(data);
+    renderPinchflatQueue(data);
+
+  } catch (error) {
+    const target = document.getElementById("pinchflat-active-downloads");
+    const summary = document.getElementById("pinchflat-download-summary");
+
+    if (summary) {
+      summary.textContent = "Pinchflat download status unavailable";
+    }
+
+    if (target) {
+      target.innerHTML = "";
+
+      const empty = document.createElement("div");
+      empty.className = "pinchflat-download-empty";
+      empty.textContent = error.message || String(error);
+      target.appendChild(empty);
+    }
+  } finally {
+    if (refresh) {
+      refresh.disabled = false;
+    }
+  }
+}
+
+function openPinchflatQueue() {
+  if (!pinchflatQueueDialog.open) {
+    pinchflatQueueDialog.showModal();
+  }
+
+  if (pinchflatDownloadSnapshot) {
+    renderPinchflatQueue(
+      pinchflatDownloadSnapshot
+    );
+  }
+
+  loadPinchflatDownloadOverview(true);
+}
+
+function closePinchflatQueue() {
+  pinchflatQueueDialog.close();
+}
+
+function startPinchflatDownloadPolling() {
+  if (pinchflatDownloadTimer) {
+    clearInterval(
+      pinchflatDownloadTimer
+    );
+  }
+
+  pinchflatDownloadTimer = setInterval(
+    () => loadPinchflatDownloadOverview(false),
+    4000
+  );
+}
+
+document.addEventListener(
+  "visibilitychange",
+  () => {
+    if (!document.hidden) {
+      loadPinchflatDownloadOverview(true);
+    }
+  }
+);
+
+function refreshPinchflatElapsedLabels() {
+  document.querySelectorAll(
+    ".pinchflat-active-meta [data-started-at]"
+  ).forEach(element => {
+    element.textContent = elapsedFrom(
+      element.dataset.startedAt
+    );
+  });
+}
+
+setInterval(
+  refreshPinchflatElapsedLabels,
+  1000
+);
 
 
 function setLatestSectionMinimised(minimised) {
@@ -4592,6 +5553,12 @@ function confirmBulkAction() {
 initialFilter();
 applyFilters();
 toggleBulkOptions();
+
+setPinchflatDownloadMinimised(
+  localStorage.getItem("pinchflatDownloadsMinimised") === "1"
+);
+loadPinchflatDownloadOverview(true);
+startPinchflatDownloadPolling();
 {% if google_connected %}
 setLatestSectionMinimised(localStorage.getItem("latestVideosMinimised") === "1");
 loadLatestSubscriptionVideos(false);
@@ -4602,7 +5569,7 @@ if (settingsHashTabs.has(requestedSettingsTab)) {
   openSettings(requestedSettingsTab);
 }
 
-[settingsDialog, activityDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
+[settingsDialog, activityDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
   d?.addEventListener("click", event => {
     if (event.target === d) d.close();
   });

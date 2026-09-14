@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.6.5"
+VERSION = "2.7.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -5402,6 +5402,795 @@ def pinchflat_source_exists_direct(
 
 
 
+def pinchflat_table_columns(conn, table_name):
+    try:
+        rows = conn.execute(
+            f'PRAGMA table_info("{table_name}")'
+        ).fetchall()
+        return {
+            str(row["name"])
+            for row in rows
+        }
+    except Exception:
+        return set()
+
+
+def pinchflat_table_names(conn):
+    try:
+        rows = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            """
+        ).fetchall()
+        return {
+            str(row["name"])
+            for row in rows
+        }
+    except Exception:
+        return set()
+
+
+def pinchflat_json_value(value):
+    if isinstance(value, (dict, list)):
+        return value
+
+    if value in (None, ""):
+        return {}
+
+    try:
+        return json.loads(value)
+    except Exception:
+        return {}
+
+
+def pinchflat_media_item_id_from_args(value):
+    payload = pinchflat_json_value(value)
+
+    if isinstance(payload, dict):
+        for key in (
+            "id",
+            "media_item_id",
+            "media_id",
+        ):
+            candidate = payload.get(key)
+            if candidate not in (None, ""):
+                try:
+                    return int(candidate)
+                except (TypeError, ValueError):
+                    pass
+
+        for nested in payload.values():
+            found = pinchflat_media_item_id_from_args(
+                nested
+            )
+            if found is not None:
+                return found
+
+    elif isinstance(payload, list):
+        for nested in payload:
+            found = pinchflat_media_item_id_from_args(
+                nested
+            )
+            if found is not None:
+                return found
+
+    return None
+
+
+def pinchflat_row_value(row, *names):
+    if row is None:
+        return None
+
+    data = (
+        dict(row)
+        if not isinstance(row, dict)
+        else row
+    )
+
+    for name in names:
+        if name in data:
+            value = data.get(name)
+            if value not in (None, ""):
+                return value
+
+    return None
+
+
+def pinchflat_extract_youtube_id(media):
+    if not media:
+        return ""
+
+    for key in (
+        "media_id",
+        "youtube_id",
+        "youtube_video_id",
+        "video_id",
+        "collection_id",
+    ):
+        value = str(media.get(key) or "").strip()
+        if re.fullmatch(r"[A-Za-z0-9_-]{11}", value):
+            return value
+
+    for key in (
+        "original_url",
+        "webpage_url",
+        "url",
+        "media_url",
+    ):
+        value = str(media.get(key) or "").strip()
+        if not value:
+            continue
+
+        match = re.search(
+            r"(?:v=|youtu\.be/|shorts/|embed/)([A-Za-z0-9_-]{11})",
+            value,
+        )
+        if match:
+            return match.group(1)
+
+    return ""
+
+
+def pinchflat_shared_download_path(value):
+    if not value:
+        return None
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    if raw.startswith("/downloads/"):
+        return DOWNLOAD_ROOT / raw[len("/downloads/"):]
+
+    if raw == "/downloads":
+        return DOWNLOAD_ROOT
+
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+
+    return DOWNLOAD_ROOT / raw.lstrip("/")
+
+
+def pinchflat_file_size(value):
+    path = pinchflat_shared_download_path(value)
+    if path is None:
+        return 0
+
+    try:
+        if path.is_file():
+            return path.stat().st_size
+    except Exception:
+        pass
+
+    return 0
+
+
+def pinchflat_download_progress_from_logs(active_count):
+    """
+    Pinchflat normally runs yt-dlp with --no-progress, so percentage data is
+    often unavailable. If a current/future Pinchflat build emits standard
+    yt-dlp progress lines, use the latest line when only one download is
+    active. Otherwise the UI uses an indeterminate progress bar.
+    """
+    if int(active_count or 0) != 1:
+        return None
+
+    try:
+        logs = pinchflat_container_logs(500)
+    except Exception:
+        return None
+
+    progress_re = re.compile(
+        r"\[download\]\s+"
+        r"(?P<percent>\d{1,3}(?:\.\d+)?)%"
+        r"(?:\s+of\s+(?P<total>~?\S+))?"
+        r"(?:\s+at\s+(?P<speed>\S+/s))?"
+        r"(?:\s+ETA\s+(?P<eta>\S+))?",
+        re.IGNORECASE,
+    )
+
+    for line in reversed(logs.splitlines()):
+        match = progress_re.search(line)
+        if not match:
+            continue
+
+        try:
+            percent = max(
+                0.0,
+                min(
+                    100.0,
+                    float(match.group("percent")),
+                ),
+            )
+        except Exception:
+            percent = None
+
+        return {
+            "percent": percent,
+            "total": match.group("total") or "",
+            "speed": match.group("speed") or "",
+            "eta": match.group("eta") or "",
+        }
+
+    return None
+
+
+def pinchflat_download_overview(queue_limit=100):
+    conn = pinchflat_db_readonly()
+
+    if conn is None:
+        raise RuntimeError(
+            "Pinchflat database is unavailable."
+        )
+
+    try:
+        tables = pinchflat_table_names(conn)
+
+        if "oban_jobs" not in tables:
+            raise RuntimeError(
+                "Pinchflat Oban job table was not found."
+            )
+
+        job_columns = pinchflat_table_columns(
+            conn,
+            "oban_jobs",
+        )
+
+        required = {
+            "id",
+            "state",
+            "worker",
+            "args",
+        }
+
+        if not required.issubset(job_columns):
+            raise RuntimeError(
+                "Pinchflat job table does not contain the expected columns."
+            )
+
+        optional_job_columns = [
+            name
+            for name in (
+                "attempt",
+                "max_attempts",
+                "attempted_at",
+                "scheduled_at",
+                "inserted_at",
+                "updated_at",
+                "queue",
+                "errors",
+                "tags",
+            )
+            if name in job_columns
+        ]
+
+        selected_job_columns = [
+            "id",
+            "state",
+            "worker",
+            "args",
+            *optional_job_columns,
+        ]
+
+        media_worker = (
+            "Pinchflat.Downloading.MediaDownloadWorker"
+        )
+
+        job_rows = conn.execute(
+            f"""
+            SELECT {", ".join(selected_job_columns)}
+            FROM oban_jobs
+            WHERE worker = ?
+              AND state IN (
+                'executing',
+                'available',
+                'scheduled',
+                'retryable'
+              )
+            ORDER BY
+              CASE state
+                WHEN 'executing' THEN 0
+                WHEN 'available' THEN 1
+                WHEN 'retryable' THEN 2
+                WHEN 'scheduled' THEN 3
+                ELSE 9
+              END,
+              COALESCE(
+                scheduled_at,
+                inserted_at,
+                updated_at
+              ) ASC,
+              id ASC
+            LIMIT ?
+            """,
+            (
+                media_worker,
+                max(
+                    20,
+                    min(
+                        int(queue_limit or 100) + 20,
+                        300,
+                    ),
+                ),
+            ),
+        ).fetchall()
+
+        jobs = [
+            dict(row)
+            for row in job_rows
+        ]
+
+        media_ids = []
+        for job in jobs:
+            media_id = pinchflat_media_item_id_from_args(
+                job.get("args")
+            )
+            job["media_item_id"] = media_id
+            if media_id is not None:
+                media_ids.append(media_id)
+
+        media_map = {}
+        media_columns = set()
+
+        if (
+            "media_items" in tables
+            and media_ids
+        ):
+            media_columns = pinchflat_table_columns(
+                conn,
+                "media_items",
+            )
+
+            wanted = [
+                column
+                for column in (
+                    "id",
+                    "uuid",
+                    "title",
+                    "media_id",
+                    "youtube_id",
+                    "youtube_video_id",
+                    "video_id",
+                    "original_url",
+                    "webpage_url",
+                    "url",
+                    "media_url",
+                    "source_id",
+                    "media_filepath",
+                    "filepath",
+                    "file_path",
+                    "thumbnail_filepath",
+                    "inserted_at",
+                    "updated_at",
+                    "downloaded_at",
+                    "upload_date",
+                    "duration_seconds",
+                )
+                if column in media_columns
+            ]
+
+            placeholders = ",".join(
+                "?"
+                for _ in set(media_ids)
+            )
+
+            if wanted and placeholders:
+                rows = conn.execute(
+                    f"""
+                    SELECT {", ".join(wanted)}
+                    FROM media_items
+                    WHERE id IN ({placeholders})
+                    """,
+                    tuple(
+                        sorted(
+                            set(media_ids)
+                        )
+                    ),
+                ).fetchall()
+
+                media_map = {
+                    int(row["id"]): dict(row)
+                    for row in rows
+                }
+
+        source_map = {}
+        source_ids = {
+            int(media.get("source_id"))
+            for media in media_map.values()
+            if media.get("source_id")
+            not in (None, "")
+        }
+
+        if (
+            "sources" in tables
+            and source_ids
+        ):
+            source_columns = pinchflat_table_columns(
+                conn,
+                "sources",
+            )
+
+            source_wanted = [
+                column
+                for column in (
+                    "id",
+                    "custom_name",
+                    "collection_name",
+                    "original_url",
+                )
+                if column in source_columns
+            ]
+
+            placeholders = ",".join(
+                "?"
+                for _ in source_ids
+            )
+
+            rows = conn.execute(
+                f"""
+                SELECT {", ".join(source_wanted)}
+                FROM sources
+                WHERE id IN ({placeholders})
+                """,
+                tuple(
+                    sorted(source_ids)
+                ),
+            ).fetchall()
+
+            source_map = {
+                int(row["id"]): dict(row)
+                for row in rows
+            }
+
+        def job_view(job):
+            media_id = job.get("media_item_id")
+            media = media_map.get(
+                int(media_id)
+                if media_id is not None
+                else -1,
+                {},
+            )
+
+            source = {}
+            source_id = media.get("source_id")
+
+            if source_id not in (None, ""):
+                try:
+                    source = source_map.get(
+                        int(source_id),
+                        {},
+                    )
+                except Exception:
+                    source = {}
+
+            title = (
+                pinchflat_row_value(
+                    media,
+                    "title",
+                )
+                or (
+                    f"Media item #{media_id}"
+                    if media_id is not None
+                    else "Pinchflat media"
+                )
+            )
+
+            channel = (
+                pinchflat_row_value(
+                    source,
+                    "custom_name",
+                    "collection_name",
+                )
+                or "Pinchflat"
+            )
+
+            state = str(
+                job.get("state")
+                or ""
+            )
+
+            status_labels = {
+                "executing": "Downloading",
+                "available": "Waiting",
+                "scheduled": "Scheduled",
+                "retryable": "Retry",
+            }
+
+            youtube_id = pinchflat_extract_youtube_id(
+                media
+            )
+
+            return {
+                "job_id": job.get("id"),
+                "media_item_id": media_id,
+                "title": str(title),
+                "channel": str(channel),
+                "state": state,
+                "status": status_labels.get(
+                    state,
+                    state.title() or "Waiting",
+                ),
+                "attempt": int(
+                    job.get("attempt")
+                    or 0
+                ),
+                "max_attempts": int(
+                    job.get("max_attempts")
+                    or 0
+                ),
+                "started_at": (
+                    job.get("attempted_at")
+                    or ""
+                ),
+                "queued_at": (
+                    job.get("inserted_at")
+                    or ""
+                ),
+                "scheduled_at": (
+                    job.get("scheduled_at")
+                    or ""
+                ),
+                "youtube_id": youtube_id,
+                "thumbnail_url": (
+                    f"https://i.ytimg.com/vi/"
+                    f"{youtube_id}/hqdefault.jpg"
+                    if youtube_id
+                    else ""
+                ),
+            }
+
+        active = [
+            job_view(job)
+            for job in jobs
+            if job.get("state") == "executing"
+        ]
+
+        waiting_all = [
+            job_view(job)
+            for job in jobs
+            if job.get("state") != "executing"
+        ]
+
+        waiting = waiting_all[
+            :max(
+                1,
+                min(
+                    int(queue_limit or 100),
+                    200,
+                ),
+            )
+        ]
+
+        progress = pinchflat_download_progress_from_logs(
+            len(active)
+        )
+
+        if progress and active:
+            active[0]["progress"] = progress
+        else:
+            for item in active:
+                item["progress"] = None
+
+        active_media_ids = {
+            int(item["media_item_id"])
+            for item in active
+            if item.get("media_item_id") is not None
+        }
+
+        last_downloaded = None
+
+        if "media_items" in tables:
+            if not media_columns:
+                media_columns = pinchflat_table_columns(
+                    conn,
+                    "media_items",
+                )
+
+            filepath_column = next(
+                (
+                    name
+                    for name in (
+                        "media_filepath",
+                        "filepath",
+                        "file_path",
+                    )
+                    if name in media_columns
+                ),
+                None,
+            )
+
+            if filepath_column:
+                last_wanted = [
+                    column
+                    for column in (
+                        "id",
+                        "uuid",
+                        "title",
+                        "media_id",
+                        "youtube_id",
+                        "youtube_video_id",
+                        "video_id",
+                        "original_url",
+                        "webpage_url",
+                        "url",
+                        "media_url",
+                        "source_id",
+                        "media_filepath",
+                        "filepath",
+                        "file_path",
+                        "thumbnail_filepath",
+                        "inserted_at",
+                        "updated_at",
+                        "downloaded_at",
+                        "upload_date",
+                        "duration_seconds",
+                    )
+                    if column in media_columns
+                ]
+
+                order_column = next(
+                    (
+                        name
+                        for name in (
+                            "downloaded_at",
+                            "updated_at",
+                            "inserted_at",
+                            "id",
+                        )
+                        if name in media_columns
+                    ),
+                    "id",
+                )
+
+                excluded_clause = ""
+                params = []
+
+                if active_media_ids:
+                    placeholders = ",".join(
+                        "?"
+                        for _ in active_media_ids
+                    )
+                    excluded_clause = (
+                        f" AND id NOT IN ({placeholders})"
+                    )
+                    params.extend(
+                        sorted(active_media_ids)
+                    )
+
+                row = conn.execute(
+                    f"""
+                    SELECT {", ".join(last_wanted)}
+                    FROM media_items
+                    WHERE {filepath_column} IS NOT NULL
+                      AND TRIM({filepath_column}) != ''
+                      {excluded_clause}
+                    ORDER BY {order_column} DESC, id DESC
+                    LIMIT 1
+                    """,
+                    tuple(params),
+                ).fetchone()
+
+                if row:
+                    media = dict(row)
+                    source = {}
+                    source_id = media.get("source_id")
+
+                    if (
+                        source_id not in (None, "")
+                        and "sources" in tables
+                    ):
+                        try:
+                            source_columns = pinchflat_table_columns(
+                                conn,
+                                "sources",
+                            )
+                            source_wanted = [
+                                name
+                                for name in (
+                                    "id",
+                                    "custom_name",
+                                    "collection_name",
+                                )
+                                if name in source_columns
+                            ]
+
+                            source_row = conn.execute(
+                                f"""
+                                SELECT {", ".join(source_wanted)}
+                                FROM sources
+                                WHERE id = ?
+                                LIMIT 1
+                                """,
+                                (source_id,),
+                            ).fetchone()
+
+                            if source_row:
+                                source = dict(source_row)
+                        except Exception:
+                            source = {}
+
+                    filepath = pinchflat_row_value(
+                        media,
+                        filepath_column,
+                    )
+
+                    youtube_id = pinchflat_extract_youtube_id(
+                        media
+                    )
+
+                    last_downloaded = {
+                        "media_item_id": media.get("id"),
+                        "title": (
+                            pinchflat_row_value(
+                                media,
+                                "title",
+                            )
+                            or "Downloaded media"
+                        ),
+                        "channel": (
+                            pinchflat_row_value(
+                                source,
+                                "custom_name",
+                                "collection_name",
+                            )
+                            or "Pinchflat"
+                        ),
+                        "completed_at": (
+                            pinchflat_row_value(
+                                media,
+                                "downloaded_at",
+                                "updated_at",
+                                "inserted_at",
+                            )
+                            or ""
+                        ),
+                        "filepath": str(
+                            filepath
+                            or ""
+                        ),
+                        "file_size": pinchflat_file_size(
+                            filepath
+                        ),
+                        "file_size_text": format_bytes(
+                            pinchflat_file_size(
+                                filepath
+                            )
+                        ),
+                        "youtube_id": youtube_id,
+                        "thumbnail_url": (
+                            f"https://i.ytimg.com/vi/"
+                            f"{youtube_id}/hqdefault.jpg"
+                            if youtube_id
+                            else ""
+                        ),
+                    }
+
+        retry_count = sum(
+            1
+            for item in waiting_all
+            if item.get("state") == "retryable"
+            or int(item.get("attempt") or 0) > 1
+        )
+
+        return {
+            "active": active,
+            "waiting": waiting,
+            "summary": {
+                "active": len(active),
+                "waiting": len(waiting_all),
+                "retries": retry_count,
+            },
+            "last_downloaded": last_downloaded,
+            "worker": media_worker,
+        }
+
+    finally:
+        conn.close()
+
+
 def pinchflat_db_readonly():
     if not PINCHFLAT_DB_PATH.exists():
         return None
@@ -9259,6 +10048,41 @@ def single_download_start():
         )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/pinchflat/download-overview")
+def pinchflat_download_overview_api():
+    try:
+        limit = request.args.get(
+            "limit",
+            "100",
+        )
+
+        data = pinchflat_download_overview(
+            limit
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                **data,
+            }
+        )
+    except Exception as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+                "active": [],
+                "waiting": [],
+                "summary": {
+                    "active": 0,
+                    "waiting": 0,
+                    "retries": 0,
+                },
+                "last_downloaded": None,
+            }
+        ), 503
 
 
 @app.get("/api/pinchflat/logs")
