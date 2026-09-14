@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.7.0"
+VERSION = "2.7.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -69,9 +69,43 @@ PINCHFLAT_PUBLIC_URL = os.getenv(
     "PINCHFLAT_PUBLIC_URL",
     "http://localhost:8945",
 ).rstrip("/")
-PINCHFLAT_DB_PATH = Path(
-    os.getenv("PINCHFLAT_DB_PATH", "/pinchflat-config/pinchflat.db")
+PINCHFLAT_DB_PATH_OVERRIDE = os.getenv(
+    "PINCHFLAT_DB_PATH",
+    "",
+).strip()
+
+PINCHFLAT_DB_CANDIDATES = (
+    Path("/pinchflat-config/db/pinchflat.db"),
+    Path("/pinchflat-config/pinchflat.db"),
 )
+
+
+def resolve_pinchflat_db_path():
+    """
+    Find the mounted Pinchflat SQLite database.
+
+    New Pinchflat installs normally use:
+        /config/db/pinchflat.db
+
+    The Pinchflat config directory is mounted into this app at:
+        /pinchflat-config
+
+    Older layouts used the database directly inside the config directory.
+    """
+    if PINCHFLAT_DB_PATH_OVERRIDE:
+        override = Path(PINCHFLAT_DB_PATH_OVERRIDE)
+        if override.exists():
+            return override
+
+    for candidate in PINCHFLAT_DB_CANDIDATES:
+        if candidate.exists():
+            return candidate
+
+    # Use the current layout as the diagnostic/default path if neither exists.
+    return PINCHFLAT_DB_CANDIDATES[0]
+
+
+PINCHFLAT_DB_PATH = resolve_pinchflat_db_path()
 DOCKER_SOCKET_PATH = Path(
     os.getenv("DOCKER_SOCKET_PATH", "/var/run/docker.sock")
 )
@@ -5622,8 +5656,25 @@ def pinchflat_download_overview(queue_limit=100):
     conn = pinchflat_db_readonly()
 
     if conn is None:
+        checked_paths = []
+
+        if PINCHFLAT_DB_PATH_OVERRIDE:
+            checked_paths.append(
+                PINCHFLAT_DB_PATH_OVERRIDE
+            )
+
+        checked_paths.extend(
+            str(path)
+            for path in PINCHFLAT_DB_CANDIDATES
+        )
+
         raise RuntimeError(
-            "Pinchflat database is unavailable."
+            "Pinchflat database is unavailable. Checked: "
+            + ", ".join(
+                dict.fromkeys(
+                    checked_paths
+                )
+            )
         )
 
     try:
@@ -6192,12 +6243,14 @@ def pinchflat_download_overview(queue_limit=100):
 
 
 def pinchflat_db_readonly():
-    if not PINCHFLAT_DB_PATH.exists():
+    db_path = resolve_pinchflat_db_path()
+
+    if not db_path.exists():
         return None
 
     try:
         conn = sqlite3.connect(
-            f"file:{PINCHFLAT_DB_PATH}?mode=ro",
+            f"file:{db_path}?mode=ro",
             uri=True,
             timeout=5,
         )
@@ -10065,6 +10118,9 @@ def pinchflat_download_overview_api():
         return jsonify(
             {
                 "ok": True,
+                "database_path": str(
+                    resolve_pinchflat_db_path()
+                ),
                 **data,
             }
         )

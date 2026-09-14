@@ -2,6 +2,19 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.7.1
+
+Pinchflat database path compatibility fix.
+
+- Fixes `Pinchflat database is unavailable` in the v2.7 download dashboard.
+- Uses `/pinchflat-config/db/pinchflat.db` for current Pinchflat installs.
+- Falls back automatically to `/pinchflat-config/pinchflat.db` for older layouts.
+- Still honours an explicit `PINCHFLAT_DB_PATH` environment variable when the configured file exists.
+- Re-checks the database location on every read, so no clean reinstall is required.
+- Updates the supplied Docker compose files to the current Pinchflat database location.
+- The existing Pinchflat config mount remains unchanged.
+
+
 ## Version 2.7.0
 
 Live Pinchflat download dashboard and waiting queue.
