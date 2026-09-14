@@ -645,6 +645,84 @@
       }
     }
 
+    .subscriptions-card {
+      transition:padding .16s ease;
+    }
+
+    .subscriptions-card.is-minimised {
+      padding-top:14px;
+      padding-bottom:14px;
+    }
+
+    .subscriptions-card.is-minimised #subscriptions-content {
+      display:none;
+    }
+
+    .section-window-controls {
+      display:flex;
+      align-items:center;
+      gap:4px;
+      flex:0 0 auto;
+    }
+
+    .section-count-badge {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:30px;
+      height:24px;
+      padding:0 8px;
+      border-radius:999px;
+      background:var(--blue);
+      color:#fff;
+      font-size:11px;
+      font-weight:850;
+      line-height:1;
+    }
+
+    .source-row.saving {
+      opacity:.72;
+      pointer-events:none;
+    }
+
+    .source-row.ajax-removing {
+      opacity:0;
+      transform:translateY(-4px);
+      transition:opacity .22s ease, transform .22s ease;
+    }
+
+    .ajax-toast {
+      position:fixed;
+      right:20px;
+      bottom:20px;
+      z-index:10000;
+      max-width:min(440px,calc(100vw - 40px));
+      padding:12px 15px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:#173154;
+      color:#fff;
+      box-shadow:0 12px 35px rgba(0,0,0,.38);
+      font-size:13px;
+      opacity:0;
+      transform:translateY(10px);
+      pointer-events:none;
+      transition:opacity .16s ease, transform .16s ease;
+    }
+
+    .ajax-toast.show {
+      opacity:1;
+      transform:translateY(0);
+    }
+
+    .ajax-toast.error {
+      background:#7a252d;
+    }
+
+    .ajax-toast.success {
+      background:#175a35;
+    }
+
     .latest-videos-card { transition:padding .16s ease; }
     .latest-videos-card.is-minimised { padding-top:14px; padding-bottom:14px; }
     .latest-videos-card.is-minimised .latest-videos-description { display:none; }
@@ -1639,18 +1717,18 @@
     </div>
     <div class="card">
       <div class="muted small">Subscriptions</div>
-      <div class="metric">{{ counts.active }}</div>
-      <div class="muted small">{{ counts.removed }} removed</div>
+      <div class="metric" id="dashboard-subscriptions-active">{{ counts.active }}</div>
+      <div class="muted small" id="dashboard-subscriptions-removed">{{ counts.removed }} removed</div>
     </div>
     <div class="card">
       <div class="muted small">Downloads</div>
-      <div class="metric ok">{{ counts.enabled }}</div>
-      <div class="muted small">{{ counts.disabled }} disabled · {{ counts.pending }} pending</div>
+      <div class="metric ok" id="dashboard-downloads-enabled">{{ counts.enabled }}</div>
+      <div class="muted small" id="dashboard-downloads-status">{{ counts.disabled }} disabled · {{ counts.pending }} pending</div>
       <div class="muted small">{{ storage_total }} used · {{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
     </div>
     <div class="card">
       <div class="muted small">Errors</div>
-      <div class="metric {% if counts.errors or download_counts.failed %}bad{% else %}ok{% endif %}">{{ counts.errors + download_counts.failed }}</div>
+      <div class="metric {% if counts.errors or download_counts.failed %}bad{% else %}ok{% endif %}" id="dashboard-errors">{{ counts.errors + download_counts.failed }}</div>
       <div class="muted small">
         {% if last_run %}Last sync: {{ last_run["status"] }}{% else %}No sync yet{% endif %}
       </div>
@@ -1772,14 +1850,36 @@
   </div>
   {% endif %}
 
-  <div class="card" id="subscriptions">
+  <div class="card subscriptions-card" id="subscriptions">
     <div class="header">
       <div>
         <h2>Subscriptions</h2>
         <div class="muted small">New subscriptions follow the policy in Settings. Filters and sorting are remembered in this browser.</div>
       </div>
+
+      <div class="section-window-controls">
+        <span
+          id="subscriptions-count-badge"
+          class="section-count-badge"
+          title="Subscriptions currently shown"
+        >{{ counts.active }}</span>
+
+        <button
+          class="latest-window-btn"
+          type="button"
+          id="subscriptions-minimise"
+          onclick="toggleSubscriptionsSection()"
+          title="Minimise subscriptions"
+          aria-label="Minimise subscriptions"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 17h12"></path>
+          </svg>
+        </button>
+      </div>
     </div>
 
+    <div id="subscriptions-content">
     <div class="toolbar">
       <div class="grow">
         <input id="source-search" type="text" placeholder="Search channels…" oninput="applyFilters()">
@@ -1804,12 +1904,11 @@
           <option value="storage">Disk usage</option>
         </select>
       </div>
-      <span class="muted small" id="visible-count"></span>
     </div>
 
     {% if subs %}
     {% if is_admin %}
-    <form id="bulk-form" method="post" action="/subscriptions/bulk" onsubmit="return confirmBulkAction()"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"></form>
+    <form id="bulk-form" method="post" action="/subscriptions/bulk"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"></form>
     <div class="toolbar">
       <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(true)">Select visible</button>
       <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(false)">Clear</button>
@@ -1872,6 +1971,7 @@
             data-status="{{ sub['ui_status'] }}"
             data-active="{{ 1 if sub['active'] else 0 }}"
             data-error="{{ 1 if sub['last_error'] else 0 }}"
+            data-download-enabled="{{ 1 if sub['download_enabled'] else 0 }}"
             data-first-seen="{{ sub['first_seen_at'] }}"
             data-storage="{{ sub['disk_bytes'] }}"
             data-favourite="{{ 1 if sub['is_favourite'] else 0 }}"
@@ -1880,7 +1980,13 @@
             <td>
               {% if is_admin %}
                 <input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">
-                <form id="{{ row_form_id }}" method="post" action="/subscriptions/{{ sub['channel_id'] }}/save">
+                <form
+                  id="{{ row_form_id }}"
+                  class="source-row-form"
+                  data-channel-id="{{ sub['channel_id'] }}"
+                  method="post"
+                  action="/subscriptions/{{ sub['channel_id'] }}/save"
+                >
                   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                 </form>
               {% endif %}
@@ -1984,7 +2090,7 @@
 
             <td class="storage-value">{{ sub['disk_usage'] }}</td>
 
-            <td>
+            <td class="source-error-cell">
               {% if sub['last_error'] %}
                 <div class="error-text">{{ sub['last_error'] }}</div>
               {% else %}
@@ -1997,7 +2103,12 @@
                 <div class="source-save-actions">
                   <button class="btn source-save-btn" type="submit" form="{{ row_form_id }}">Save</button>
                   {% if sub['active'] %}
-                    <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" onsubmit="return confirm('Unsubscribe from this channel on YouTube? The configured unsubscribe policy will then be applied.')">
+                    <form
+                      class="source-unsubscribe-form"
+                      data-channel-id="{{ sub['channel_id'] }}"
+                      method="post"
+                      action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe"
+                    >
                       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
                       <button class="btn ghost smallbtn" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
                     </form>
@@ -2013,8 +2124,11 @@
     {% else %}
       <div class="empty">Connect Google and refresh your subscriptions.</div>
     {% endif %}
+    </div>
   </div>
 </div>
+
+<div id="ajax-toast" class="ajax-toast" role="status" aria-live="polite"></div>
 
 <dialog id="latest-video-dialog">
   <div class="modal-head">
@@ -2101,7 +2215,7 @@
       <button
         class="btn secondary"
         type="button"
-        onclick="loadPinchflatDownloadOverview(true)"
+        onclick="loadPinchflatQueue(true)"
       >Refresh queue</button>
     </div>
 
@@ -2144,7 +2258,8 @@
   </div>
   <div class="modal-body">
     <div class="discover-toolbar">
-      <button id="discover-videos-btn" class="btn" type="button" onclick="showDiscoverMode('videos')">Random Videos</button>
+      <button id="discover-downloaded-btn" class="btn" type="button" onclick="showDiscoverMode('downloaded')">Downloaded</button>
+      <button id="discover-videos-btn" class="btn secondary" type="button" onclick="showDiscoverMode('videos')">Random Videos</button>
       <button id="discover-shorts-btn" class="btn secondary" type="button" onclick="showDiscoverMode('shorts')">Random Shorts</button>
       <button id="discover-top100-btn" class="btn secondary" type="button" onclick="showDiscoverMode('top100')">Top 100</button>
       <button class="btn ghost" type="button" onclick="refreshDiscover()">Refresh</button>
@@ -3166,8 +3281,8 @@ let singleDownloadTimer = null;
 let latestSubscriptionVideos = [];
 let latestSubscriptionShorts = [];
 let latestPopupVideo = null;
-let discoverMode = "videos";
-let discoverResults = {videos: [], shorts: [], top100: []};
+let discoverMode = "downloaded";
+let discoverResults = {downloaded: [], videos: [], shorts: [], top100: []};
 let favouritesState = {channels: [], videos: [], lists: []};
 let favouriteTab = "channels";
 let selectedFavouriteListId = null;
@@ -3180,6 +3295,7 @@ let youtubeIframeApiPromise = null;
 
 
 let pinchflatDownloadTimer = null;
+let pinchflatQueueTimer = null;
 let pinchflatDownloadSnapshot = null;
 
 function safeDateTime(value) {
@@ -3306,8 +3422,68 @@ function pinchflatPopupItem(item) {
   };
 }
 
-function openPinchflatMedia(item) {
-  if (!item?.youtube_id) return;
+async function fetchCompleteVideoMetadata(item) {
+  if (!item?.video_id && !item?.youtube_id) {
+    return item;
+  }
+
+  const videoId =
+    item.video_id
+    || item.youtube_id;
+
+  if (item.metadata_complete) {
+    return {
+      ...item,
+      video_id: videoId
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `/api/youtube/video-metadata/${encodeURIComponent(videoId)}`,
+      {
+        headers:{
+          "Accept":"application/json"
+        }
+      }
+    );
+
+    const data = await response.json();
+
+    if (
+      !response.ok
+      || !data.ok
+      || !data.video
+    ) {
+      throw new Error(
+        data.error
+        || "YouTube metadata could not be loaded."
+      );
+    }
+
+    return {
+      ...item,
+      ...data.video,
+      video_id: videoId,
+      youtube_id: videoId,
+      metadata_complete: true
+    };
+  } catch (_) {
+    return {
+      ...item,
+      video_id: videoId,
+      youtube_id: videoId
+    };
+  }
+}
+
+async function openPinchflatMedia(item) {
+  const videoId =
+    item?.youtube_id
+    || item?.video_id
+    || "";
+
+  if (!videoId) return;
 
   const openedFromQueue = Boolean(
     pinchflatQueueDialog?.open
@@ -3326,10 +3502,16 @@ function openPinchflatMedia(item) {
     pinchflatQueueDialog.close();
   }
 
-  openLatestVideo(
-    pinchflatPopupItem(item)
-  );
+  const enriched = await fetchCompleteVideoMetadata({
+    ...pinchflatPopupItem(item),
+    ...item,
+    video_id: videoId,
+    youtube_id: videoId
+  });
+
+  openLatestVideo(enriched);
 }
+
 
 function pinchflatMediaThumbnailButton(item, classPrefix="pinchflat-download") {
   const button = document.createElement("button");
@@ -3670,7 +3852,7 @@ async function loadPinchflatDownloadOverview(force=false) {
 
   try {
     const response = await fetch(
-      "/api/pinchflat/download-overview?limit=100",
+      "/api/pinchflat/download-overview?limit=0",
       {
         headers:{
           "Accept":"application/json"
@@ -3732,23 +3914,91 @@ async function loadPinchflatDownloadOverview(force=false) {
   }
 }
 
+async function loadPinchflatQueue(force=false) {
+  const body = document.getElementById(
+    "pinchflat-queue-body"
+  );
+
+  if (!body) return;
+
+  if (force) {
+    body.innerHTML = "";
+
+    const loading = document.createElement("div");
+    loading.className = "queue-empty";
+    loading.textContent = "Loading complete Pinchflat queue…";
+    body.appendChild(loading);
+  }
+
+  try {
+    const response = await fetch(
+      "/api/pinchflat/download-overview?all=1",
+      {
+        headers:{
+          "Accept":"application/json"
+        }
+      }
+    );
+
+    const data = await response.json();
+
+    if (
+      !response.ok
+      || !data.ok
+    ) {
+      throw new Error(
+        data.error
+        || "The Pinchflat queue could not be loaded."
+      );
+    }
+
+    renderPinchflatQueue(data);
+  } catch (error) {
+    body.innerHTML = "";
+
+    const empty = document.createElement("div");
+    empty.className = "queue-empty";
+    empty.textContent =
+      `Queue unavailable: ${error.message || String(error)}`;
+
+    body.appendChild(empty);
+  }
+}
+
 function openPinchflatQueue() {
   if (!pinchflatQueueDialog.open) {
     pinchflatQueueDialog.showModal();
   }
 
-  if (pinchflatDownloadSnapshot) {
-    renderPinchflatQueue(
-      pinchflatDownloadSnapshot
+  loadPinchflatQueue(true);
+
+  if (pinchflatQueueTimer) {
+    clearInterval(
+      pinchflatQueueTimer
     );
   }
 
-  loadPinchflatDownloadOverview(true);
+  pinchflatQueueTimer = setInterval(
+    () => {
+      if (pinchflatQueueDialog.open) {
+        loadPinchflatQueue(false);
+      }
+    },
+    10000
+  );
 }
 
 function closePinchflatQueue() {
+  if (pinchflatQueueTimer) {
+    clearInterval(
+      pinchflatQueueTimer
+    );
+    pinchflatQueueTimer = null;
+  }
+
   pinchflatQueueDialog.close();
 }
+
 
 function startPinchflatDownloadPolling() {
   if (pinchflatDownloadTimer) {
@@ -4081,6 +4331,7 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       const heart = row.querySelector(`.heart-btn[data-channel-id="${CSS.escape(channelId)}"]`);
       if (heart) row.dataset.favourite = data.favourite ? "1" : "0";
     });
+    discoverResults.downloaded.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     discoverResults.videos.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     discoverResults.shorts.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     discoverResults.top100.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
@@ -4108,7 +4359,7 @@ async function toggleVideoFavourite(button, item) {
       button.classList.toggle("active", !!data.favourite);
       button.textContent = data.favourite ? "♥ Video" : "♡ Video";
     }
-    [discoverResults.videos, discoverResults.shorts, latestSubscriptionVideos].forEach(items => items.forEach(v => {
+    [discoverResults.downloaded, discoverResults.videos, discoverResults.shorts, latestSubscriptionVideos].forEach(items => items.forEach(v => {
       if (v.video_id === item.video_id) v.is_favourite_video = data.favourite;
     }));
     if (latestPopupVideo?.video_id === item.video_id) {
@@ -4325,6 +4576,20 @@ function closeLatestVideo() {
     && !pinchflatQueueDialog.open
   ) {
     pinchflatQueueDialog.showModal();
+    loadPinchflatQueue(false);
+
+    if (pinchflatQueueTimer) {
+      clearInterval(pinchflatQueueTimer);
+    }
+
+    pinchflatQueueTimer = setInterval(
+      () => {
+        if (pinchflatQueueDialog.open) {
+          loadPinchflatQueue(false);
+        }
+      },
+      10000
+    );
 
     requestAnimationFrame(() => {
       const queueBody = pinchflatQueueDialog.querySelector(
@@ -4981,7 +5246,7 @@ async function removeVideoFromList(listId, videoId) {
 
 function openDiscover() {
   if (!discoverDialog.open) discoverDialog.showModal();
-  showDiscoverMode("videos");
+  showDiscoverMode("downloaded");
 }
 
 function closeDiscover() {
@@ -5008,17 +5273,26 @@ function ensureYouTubeIframeApi() {
 }
 
 async function showDiscoverMode(mode) {
-  discoverMode = ["videos", "shorts", "top100"].includes(mode) ? mode : "videos";
+  discoverMode = ["downloaded", "videos", "shorts", "top100"].includes(mode)
+    ? mode
+    : "downloaded";
 
   discoverDialog.classList.toggle(
     "shorts-mode",
     discoverMode === "shorts"
   );
 
-  document.getElementById("discover-videos-panel").classList.toggle("hidden", discoverMode !== "videos");
+  document.getElementById("discover-videos-panel").classList.toggle(
+    "hidden",
+    !["downloaded", "videos"].includes(discoverMode)
+  );
   document.getElementById("discover-shorts-panel").classList.toggle("hidden", discoverMode !== "shorts");
   document.getElementById("discover-top100-panel").classList.toggle("hidden", discoverMode !== "top100");
 
+  document.getElementById("discover-downloaded-btn").classList.toggle(
+    "secondary",
+    discoverMode !== "downloaded"
+  );
   document.getElementById("discover-videos-btn").classList.toggle("secondary", discoverMode !== "videos");
   document.getElementById("discover-shorts-btn").classList.toggle("secondary", discoverMode !== "shorts");
   document.getElementById("discover-top100-btn").classList.toggle("secondary", discoverMode !== "top100");
@@ -5048,7 +5322,11 @@ async function loadDiscover(mode, force=false) {
 
     discoverResults[mode] = data.results || [];
 
-    if (mode === "top100") {
+    if (mode === "downloaded") {
+      document.getElementById("discover-quota").textContent =
+        `${discoverResults.downloaded.length} most recent completed Pinchflat downloads`;
+      renderDiscoverTiles(discoverResults.downloaded);
+    } else if (mode === "top100") {
       document.getElementById("discover-quota").textContent =
         `Top 100 source: ${data.source || "Wikipedia"}. No YouTube search quota used.`;
       renderTop100Tiles(discoverResults.top100);
@@ -5178,14 +5456,22 @@ function renderDiscoverTiles(items) {
     card.addEventListener("click", event => {
       if (event.target.closest(".discover-channel-heart")) return;
 
-      openLatestVideo({
-        ...item,
-        is_short: false,
-        channel_thumbnail_url:
-          item.channel_thumbnail_url ||
-          item.channel_avatar_url ||
-          ""
-      });
+      if (item.from_pinchflat || item.metadata_complete === false) {
+        openPinchflatMedia(item);
+      } else {
+        if (item.from_pinchflat || item.metadata_complete === false) {
+          openPinchflatMedia(item);
+        } else {
+          openLatestVideo({
+            ...item,
+            is_short: false,
+            channel_thumbnail_url:
+              item.channel_thumbnail_url ||
+              item.channel_avatar_url ||
+              ""
+          });
+        }
+      }
     });
 
     card.addEventListener("keydown", event => {
@@ -5571,6 +5857,551 @@ function toggleSponsorBlockCategories() {
 }
 toggleSponsorBlockCategories();
 
+function setSubscriptionsMinimised(minimised) {
+  const card = document.getElementById("subscriptions");
+  const content = document.getElementById("subscriptions-content");
+  const button = document.getElementById("subscriptions-minimise");
+
+  if (!card || !content || !button) return;
+
+  content.classList.toggle(
+    "hidden",
+    minimised
+  );
+
+  card.classList.toggle(
+    "is-minimised",
+    minimised
+  );
+
+  button.innerHTML = minimised
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true">
+         <rect x="7" y="7" width="10" height="10" rx="1"></rect>
+       </svg>`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true">
+         <path d="M6 17h12"></path>
+       </svg>`;
+
+  button.title = minimised
+    ? "Restore subscriptions"
+    : "Minimise subscriptions";
+
+  button.setAttribute(
+    "aria-label",
+    button.title
+  );
+}
+
+function toggleSubscriptionsSection() {
+  const content = document.getElementById(
+    "subscriptions-content"
+  );
+
+  if (!content) return;
+
+  setSubscriptionsMinimised(
+    !content.classList.contains("hidden")
+  );
+}
+
+let ajaxToastTimer = null;
+
+function showAjaxToast(message, type="success") {
+  const toast = document.getElementById("ajax-toast");
+  if (!toast || !message) return;
+
+  toast.textContent = message;
+  toast.classList.remove(
+    "error",
+    "success"
+  );
+  toast.classList.add(type);
+  toast.classList.add("show");
+
+  if (ajaxToastTimer) {
+    clearTimeout(ajaxToastTimer);
+  }
+
+  ajaxToastTimer = setTimeout(
+    () => toast.classList.remove("show"),
+    2600
+  );
+}
+
+function updateSubscriptionDashboardCounts() {
+  const rows = Array.from(
+    document.querySelectorAll(
+      ".source-row"
+    )
+  );
+
+  const active = rows.filter(
+    row => row.dataset.active === "1"
+  ).length;
+
+  const removed = rows.length - active;
+
+  const enabled = rows.filter(
+    row =>
+      row.dataset.active === "1"
+      && row.dataset.downloadEnabled === "1"
+  ).length;
+
+  const disabled = rows.filter(
+    row =>
+      row.dataset.active === "1"
+      && row.dataset.downloadEnabled !== "1"
+  ).length;
+
+  const pending = rows.filter(
+    row =>
+      row.dataset.active === "1"
+      && row.dataset.status === "pending"
+  ).length;
+
+  const errors = rows.filter(
+    row => row.dataset.error === "1"
+  ).length;
+
+  const activeMetric = document.getElementById(
+    "dashboard-subscriptions-active"
+  );
+  const removedMetric = document.getElementById(
+    "dashboard-subscriptions-removed"
+  );
+  const enabledMetric = document.getElementById(
+    "dashboard-downloads-enabled"
+  );
+  const downloadStatus = document.getElementById(
+    "dashboard-downloads-status"
+  );
+  const errorMetric = document.getElementById(
+    "dashboard-errors"
+  );
+
+  if (activeMetric) {
+    activeMetric.textContent = String(active);
+  }
+
+  if (removedMetric) {
+    removedMetric.textContent = `${removed} removed`;
+  }
+
+  if (enabledMetric) {
+    enabledMetric.textContent = String(enabled);
+  }
+
+  if (downloadStatus) {
+    downloadStatus.textContent =
+      `${disabled} disabled · ${pending} pending`;
+  }
+
+  if (errorMetric) {
+    const localDownloadFailures = Number(
+      "{{ download_counts.failed }}"
+      || 0
+    );
+
+    errorMetric.textContent = String(
+      errors + localDownloadFailures
+    );
+
+    errorMetric.classList.toggle(
+      "bad",
+      errors + localDownloadFailures > 0
+    );
+
+    errorMetric.classList.toggle(
+      "ok",
+      errors + localDownloadFailures === 0
+    );
+  }
+}
+
+function updateSubscriptionRowFromData(row, item) {
+  if (!row || !item) return;
+
+  row.dataset.status =
+    item.ui_status || "";
+
+  row.dataset.active =
+    item.active ? "1" : "0";
+
+  row.dataset.error =
+    item.last_error ? "1" : "0";
+
+  row.dataset.downloadEnabled =
+    item.download_enabled ? "1" : "0";
+
+  const enabled = row.querySelector(
+    'input[name="download_enabled"]'
+  );
+
+  if (enabled) {
+    enabled.checked = !!item.download_enabled;
+  }
+
+  const toggleText = row.querySelector(
+    ".source-toggle-text"
+  );
+
+  if (toggleText) {
+    toggleText.textContent =
+      item.download_enabled
+        ? "Enabled"
+        : "Disabled";
+  }
+
+  const cutoff = row.querySelector(
+    ".cutoff-cell code"
+  );
+
+  if (cutoff) {
+    cutoff.textContent =
+      item.cutoff || "";
+  }
+
+  const historyLabel = row.querySelector(
+    ".cutoff-cell .small"
+  );
+
+  if (historyLabel) {
+    historyLabel.textContent =
+      item.history_label || "";
+  }
+
+  const errorCell = row.querySelector(
+    ".source-error-cell"
+  );
+
+  if (errorCell) {
+    errorCell.replaceChildren();
+
+    if (item.last_error) {
+      const error = document.createElement("div");
+      error.className = "error-text";
+      error.textContent = item.last_error;
+      errorCell.appendChild(error);
+    } else {
+      const clear = document.createElement("span");
+      clear.className = "small muted";
+      clear.textContent = "No error";
+      errorCell.appendChild(clear);
+    }
+  }
+
+  row.classList.remove(
+    "dirty",
+    "saving"
+  );
+
+  const save = row.querySelector(
+    ".source-save-btn"
+  );
+
+  if (save) {
+    save.disabled = false;
+    save.textContent = "Saved ✓";
+
+    setTimeout(
+      () => {
+        if (!row.classList.contains("dirty")) {
+          save.textContent = "Save";
+        }
+      },
+      1300
+    );
+  }
+}
+
+async function saveSubscriptionRowAjax(event) {
+  event.preventDefault();
+
+  const form = event.currentTarget;
+  const row = form.closest(".source-row");
+
+  if (!row || row.classList.contains("saving")) {
+    return;
+  }
+
+  const save = row.querySelector(
+    ".source-save-btn"
+  );
+
+  row.classList.add("saving");
+
+  if (save) {
+    save.disabled = true;
+    save.textContent = "Saving…";
+  }
+
+  try {
+    const response = await fetch(
+      form.action,
+      {
+        method:"POST",
+        headers:{
+          "Accept":"application/json",
+          "X-Requested-With":"XMLHttpRequest"
+        },
+        body:new FormData(form)
+      }
+    );
+
+    const data = await response.json();
+
+    if (data.subscription) {
+      updateSubscriptionRowFromData(
+        row,
+        data.subscription
+      );
+    }
+
+    updateSubscriptionDashboardCounts();
+    applyFilters();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error
+        || data.message
+        || "The source could not be saved."
+      );
+    }
+
+    showAjaxToast(
+      data.message || "Source saved.",
+      "success"
+    );
+  } catch (error) {
+    row.classList.remove("saving");
+
+    if (save) {
+      save.disabled = false;
+      save.textContent = "Save changes";
+    }
+
+    showAjaxToast(
+      error.message || String(error),
+      "error"
+    );
+  }
+}
+
+async function unsubscribeSubscriptionAjax(event) {
+  event.preventDefault();
+
+  const form = event.currentTarget;
+  const row = form.closest(".source-row");
+
+  if (!row) return;
+
+  const title = row.querySelector(
+    ".channel-title"
+  )?.textContent?.trim() || "this channel";
+
+  if (
+    !window.confirm(
+      `Unsubscribe from ${title} on YouTube? The configured unsubscribe policy will then be applied.`
+    )
+  ) {
+    return;
+  }
+
+  try {
+    row.classList.add("saving");
+
+    const response = await fetch(
+      form.action,
+      {
+        method:"POST",
+        headers:{
+          "Accept":"application/json",
+          "X-Requested-With":"XMLHttpRequest"
+        },
+        body:new FormData(form)
+      }
+    );
+
+    const data = await response.json();
+
+    if (
+      !response.ok
+      || !data.ok
+    ) {
+      throw new Error(
+        data.error
+        || "Unsubscribe failed."
+      );
+    }
+
+    if (data.subscription) {
+      updateSubscriptionRowFromData(
+        row,
+        data.subscription
+      );
+    }
+
+    row.classList.add(
+      "ajax-removing"
+    );
+
+    setTimeout(
+      () => {
+        applyFilters();
+        row.classList.remove(
+          "ajax-removing",
+          "saving"
+        );
+      },
+      220
+    );
+
+    updateSubscriptionDashboardCounts();
+
+    showAjaxToast(
+      data.message || "Unsubscribed.",
+      "success"
+    );
+  } catch (error) {
+    row.classList.remove("saving");
+
+    showAjaxToast(
+      error.message || String(error),
+      "error"
+    );
+  }
+}
+
+async function submitBulkActionAjax(event) {
+  event.preventDefault();
+
+  const form = event.currentTarget;
+  const count = document.querySelectorAll(
+    ".source-select:checked"
+  ).length;
+
+  const action = document.getElementById(
+    "bulk-action"
+  )?.value || "";
+
+  if (
+    !count
+    || !action
+  ) {
+    return;
+  }
+
+  if (
+    !window.confirm(
+      `Apply "${action}" to ${count} selected source(s)?`
+    )
+  ) {
+    return;
+  }
+
+  const applyButton = document.querySelector(
+    'button[type="submit"][form="bulk-form"]'
+  );
+
+  if (applyButton) {
+    applyButton.disabled = true;
+    applyButton.textContent = "Applying…";
+  }
+
+  try {
+    const response = await fetch(
+      form.action,
+      {
+        method:"POST",
+        headers:{
+          "Accept":"application/json",
+          "X-Requested-With":"XMLHttpRequest"
+        },
+        body:new FormData(form)
+      }
+    );
+
+    const data = await response.json();
+
+    for (
+      const item
+      of (data.subscriptions || [])
+    ) {
+      const row = Array.from(
+        document.querySelectorAll(
+          ".source-row"
+        )
+      ).find(
+        candidate =>
+          candidate.querySelector(
+            ".source-select"
+          )?.value === item.channel_id
+      );
+
+      updateSubscriptionRowFromData(
+        row,
+        item
+      );
+    }
+
+    document.querySelectorAll(
+      ".source-select:checked"
+    ).forEach(
+      box => box.checked = false
+    );
+
+    updateSelectedCount();
+    updateSubscriptionDashboardCounts();
+    applyFilters();
+
+    showAjaxToast(
+      data.message
+      || "Bulk action completed.",
+      data.ok === false
+        ? "error"
+        : "success"
+    );
+  } catch (error) {
+    showAjaxToast(
+      error.message || String(error),
+      "error"
+    );
+  } finally {
+    if (applyButton) {
+      applyButton.disabled = false;
+      applyButton.textContent = "Apply";
+    }
+  }
+}
+
+function bindSubscriptionAjaxForms() {
+  document.querySelectorAll(
+    ".source-row-form"
+  ).forEach(
+    form => form.addEventListener(
+      "submit",
+      saveSubscriptionRowAjax
+    )
+  );
+
+  document.querySelectorAll(
+    ".source-unsubscribe-form"
+  ).forEach(
+    form => form.addEventListener(
+      "submit",
+      unsubscribeSubscriptionAjax
+    )
+  );
+
+  document.getElementById(
+    "bulk-form"
+  )?.addEventListener(
+    "submit",
+    submitBulkActionAjax
+  );
+}
+
+
 function toggleSourceDate(select) {
   const row = select.closest(".source-row");
   const input = row?.querySelector(".source-date");
@@ -5686,7 +6517,17 @@ function applyFilters() {
     return a.dataset.title.localeCompare(b.dataset.title);
   });
   visible.forEach(row => body.appendChild(row));
-  document.getElementById("visible-count").textContent = `${visible.length} shown`;
+
+  const badge = document.getElementById(
+    "subscriptions-count-badge"
+  );
+
+  if (badge) {
+    badge.textContent = String(
+      visible.length
+    );
+  }
+
   updateSelectedCount();
 }
 
@@ -5721,16 +6562,27 @@ function confirmBulkAction() {
 initialFilter();
 applyFilters();
 toggleBulkOptions();
+bindSubscriptionAjaxForms();
+updateSubscriptionDashboardCounts();
 
-setPinchflatDownloadMinimised(
-  localStorage.getItem("pinchflatDownloadsMinimised") === "1"
-);
-loadPinchflatDownloadOverview(true);
-startPinchflatDownloadPolling();
+setPinchflatDownloadMinimised(true);
+setSubscriptionsMinimised(true);
 {% if google_connected %}
-setLatestSectionMinimised(localStorage.getItem("latestVideosMinimised") === "1");
-loadLatestSubscriptionVideos(false);
+setLatestSectionMinimised(true);
 {% endif %}
+
+(async () => {
+  await loadPinchflatDownloadOverview(true);
+  startPinchflatDownloadPolling();
+
+  {% if google_connected %}
+  // Latest subscriptions deliberately loads after the rest of the dashboard.
+  setTimeout(
+    () => loadLatestSubscriptionVideos(false),
+    900
+  );
+  {% endif %}
+})();
 const settingsHashTabs = new Set(["security", "pinchflat", "general", "youtube", "downloads", "automation", "advanced"]);
 const requestedSettingsTab = window.location.hash.replace("#", "");
 if (settingsHashTabs.has(requestedSettingsTab)) {

@@ -2,6 +2,31 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.8.0
+
+Dashboard loading, Discover history, queue and subscription AJAX update.
+
+- Adds `Downloaded` as the first and default Discover view.
+- Downloaded shows the 100 most recent completed Pinchflat downloads using the same video-tile style as Random Videos.
+- Clicking a Downloaded tile opens the existing in-app media player.
+- Adds a cached YouTube metadata lookup so videos opened from Pinchflat gain the proper channel logo, description, view count, publication age, favourite state and subscription state.
+- The metadata lookup also improves Current downloads, Last downloaded and Pinchflat Queue playback.
+- Adds minimise/restore to the Subscriptions section using the same window-style control as the other dashboard sections.
+- Replaces the `N shown` text beside subscription sorting with a compact blue count badge in the Subscriptions header.
+- Pinchflat Downloads, Subscriptions and Latest from your subscriptions now start minimised on every fresh page load.
+- Latest from your subscriptions always starts minimised and its YouTube requests are deliberately started after the rest of the dashboard has loaded.
+- The Pinchflat dashboard poll now fetches active jobs and queue counts without returning waiting queue rows.
+- Opening the Pinchflat Queue fetches the complete waiting queue instead of only the first 100 jobs.
+- The complete queue refreshes every 10 seconds while its popup is open.
+- Per-channel Save now uses AJAX and does not reload the page.
+- Saving a channel preserves scroll position, filters, sorting, Pinchflat Downloads and Latest video state.
+- Save buttons show `Saving…` then `Saved ✓`.
+- Enable/disable, range and Media Profile changes are reflected in the affected row without a page refresh.
+- Bulk subscription actions now use AJAX and update only the affected rows.
+- Unsubscribe now uses AJAX, updates/removes the affected row and leaves the rest of the dashboard untouched.
+- Subscription, enabled/disabled/pending and error summary counters update in place after AJAX changes.
+
+
 ## Version 2.7.4
 
 Pinchflat download spacing and queue-navigation fix.

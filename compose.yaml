@@ -156,7 +156,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.7.4"
+  version: "2.8.0"
   update_at: "2026-09-13"
   release_notes:
     en_US: v2.6 streamlines source control, moves favourites and logs into Settings, expands Pinchflat profile editing, improves one-time downloads, and adds Subscribe controls to in-app video playback.

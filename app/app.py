@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.7.4"
+VERSION = "2.8.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -220,6 +220,11 @@ YOUTUBE_ACCOUNT_STATS_CACHE = {
     "data": None,
 }
 YOUTUBE_ACCOUNT_STATS_LOCK = threading.Lock()
+
+YOUTUBE_VIDEO_METADATA_CACHE_SECONDS = 900
+YOUTUBE_VIDEO_METADATA_CACHE = {}
+YOUTUBE_VIDEO_METADATA_LOCK = threading.Lock()
+
 YOUTUBE_CHANNEL_FEED_WORKERS = 24
 
 TOTP_ISSUER = "YouTube Pinchflat Sync"
@@ -1430,6 +1435,194 @@ def youtube_duration_seconds(value):
         + (minutes * 60)
         + seconds
     )
+
+
+def youtube_video_metadata(video_id, force=False):
+    video_id = str(video_id or "").strip()
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+        raise RuntimeError("A valid YouTube video ID is required.")
+
+    now_ts = time.time()
+
+    with YOUTUBE_VIDEO_METADATA_LOCK:
+        cached = YOUTUBE_VIDEO_METADATA_CACHE.get(video_id)
+
+    if (
+        cached
+        and not force
+        and cached.get("expires_at", 0) > now_ts
+    ):
+        return annotate_favourites(
+            [dict(cached["item"])]
+        )[0]
+
+    creds = load_credentials()
+    if not creds:
+        raise RuntimeError("Google account is not connected.")
+
+    response = youtube_api_request(
+        creds,
+        "GET",
+        "videos",
+        "videos.list",
+        1,
+        params={
+            "part": "snippet,statistics,contentDetails",
+            "id": video_id,
+            "maxResults": 1,
+        },
+    )
+
+    videos = response.json().get("items", [])
+    if not videos:
+        raise RuntimeError(
+            "YouTube did not return metadata for this video."
+        )
+
+    video = videos[0]
+    snippet = video.get("snippet") or {}
+    statistics = video.get("statistics") or {}
+    content_details = video.get("contentDetails") or {}
+    thumbnails = snippet.get("thumbnails") or {}
+
+    thumbnail = (
+        thumbnails.get("maxres")
+        or thumbnails.get("standard")
+        or thumbnails.get("high")
+        or thumbnails.get("medium")
+        or thumbnails.get("default")
+        or {}
+    )
+
+    channel_id = snippet.get("channelId") or ""
+    channel_title = snippet.get("channelTitle") or "YouTube channel"
+    channel_thumbnail_url = ""
+    channel_url = (
+        f"https://www.youtube.com/channel/{channel_id}"
+        if channel_id
+        else "https://www.youtube.com"
+    )
+    is_subscribed = False
+
+    if channel_id:
+        with db() as conn:
+            subscription = conn.execute(
+                """
+                SELECT channel_url, thumbnail_url, active
+                FROM subscriptions
+                WHERE channel_id = ?
+                LIMIT 1
+                """,
+                (channel_id,),
+            ).fetchone()
+
+        if subscription:
+            channel_url = (
+                subscription["channel_url"]
+                or channel_url
+            )
+            channel_thumbnail_url = (
+                subscription["thumbnail_url"]
+                or ""
+            )
+            is_subscribed = bool(
+                subscription["active"]
+            )
+
+    if channel_id and not channel_thumbnail_url:
+        try:
+            channel_response = youtube_api_request(
+                creds,
+                "GET",
+                "channels",
+                "channels.list",
+                1,
+                params={
+                    "part": "snippet",
+                    "id": channel_id,
+                    "maxResults": 1,
+                },
+            )
+
+            channel_items = channel_response.json().get(
+                "items",
+                [],
+            )
+
+            if channel_items:
+                channel_snippet = (
+                    channel_items[0].get("snippet")
+                    or {}
+                )
+                channel_thumbnails = (
+                    channel_snippet.get("thumbnails")
+                    or {}
+                )
+                channel_image = (
+                    channel_thumbnails.get("high")
+                    or channel_thumbnails.get("medium")
+                    or channel_thumbnails.get("default")
+                    or {}
+                )
+                channel_thumbnail_url = (
+                    channel_image.get("url")
+                    or ""
+                )
+        except Exception:
+            pass
+
+    raw_duration = (
+        content_details.get("duration")
+        or ""
+    )
+    duration_seconds = youtube_duration_seconds(
+        raw_duration
+    )
+
+    item = {
+        "video_id": video_id,
+        "title": snippet.get("title") or "YouTube video",
+        "description": snippet.get("description") or "",
+        "video_url": (
+            f"https://www.youtube.com/watch?v={video_id}"
+        ),
+        "shorts_url": (
+            f"https://www.youtube.com/shorts/{video_id}"
+        ),
+        "channel_id": channel_id,
+        "channel_title": channel_title,
+        "channel_url": channel_url,
+        "channel_thumbnail_url": channel_thumbnail_url,
+        "thumbnail_url": thumbnail.get("url") or "",
+        "published_at": snippet.get("publishedAt") or "",
+        "view_count": int(
+            statistics.get("viewCount")
+            or 0
+        ),
+        "duration": youtube_duration_label(
+            raw_duration
+        ),
+        "duration_seconds": duration_seconds,
+        "is_short": youtube_video_is_short(
+            snippet.get("title") or "",
+            snippet.get("description") or "",
+            duration_seconds,
+        ),
+        "is_subscribed": is_subscribed,
+        "metadata_complete": True,
+    }
+
+    with YOUTUBE_VIDEO_METADATA_LOCK:
+        YOUTUBE_VIDEO_METADATA_CACHE[video_id] = {
+            "expires_at": (
+                now_ts
+                + YOUTUBE_VIDEO_METADATA_CACHE_SECONDS
+            ),
+            "item": dict(item),
+        }
+
+    return annotate_favourites([item])[0]
 
 
 def youtube_video_is_short(title, description, duration_seconds):
@@ -5811,12 +6004,16 @@ def pinchflat_download_overview(queue_limit=100):
             """,
             (
                 media_worker,
-                max(
-                    20,
-                    min(
-                        int(queue_limit or 100) + 20,
-                        300,
-                    ),
+                (
+                    1000000
+                    if int(queue_limit or 0) < 0
+                    else max(
+                        20,
+                        min(
+                            int(queue_limit or 0) + 20,
+                            500,
+                        ),
+                    )
                 ),
             ),
         ).fetchall()
@@ -6087,15 +6284,20 @@ def pinchflat_download_overview(queue_limit=100):
             if job.get("state") != "executing"
         ]
 
-        waiting = waiting_all[
-            :max(
-                1,
-                min(
-                    int(queue_limit or 100),
-                    200,
-                ),
-            )
-        ]
+        requested_queue_limit = int(
+            queue_limit
+            if queue_limit is not None
+            else 100
+        )
+
+        if requested_queue_limit < 0:
+            waiting = waiting_all
+        elif requested_queue_limit == 0:
+            waiting = []
+        else:
+            waiting = waiting_all[
+                :requested_queue_limit
+            ]
 
         active_media_ids = {
             int(item["media_item_id"])
@@ -6336,6 +6538,262 @@ def pinchflat_download_overview(queue_limit=100):
                 "order_expression": order_time_expr,
             },
         }
+
+    finally:
+        conn.close()
+
+
+def pinchflat_recent_downloaded_videos(limit=100):
+    conn = pinchflat_db_readonly()
+
+    if conn is None:
+        raise RuntimeError(
+            "Pinchflat database is unavailable."
+        )
+
+    try:
+        tables = pinchflat_table_names(conn)
+
+        if "media_items" not in tables:
+            return []
+
+        media_columns = pinchflat_table_columns(
+            conn,
+            "media_items",
+        )
+
+        filepath_column = next(
+            (
+                name
+                for name in (
+                    "media_filepath",
+                    "filepath",
+                    "file_path",
+                )
+                if name in media_columns
+            ),
+            None,
+        )
+
+        if not filepath_column:
+            return []
+
+        wanted = [
+            column
+            for column in (
+                "id",
+                "title",
+                "media_id",
+                "youtube_id",
+                "youtube_video_id",
+                "video_id",
+                "original_url",
+                "webpage_url",
+                "url",
+                "media_url",
+                "source_id",
+                "media_filepath",
+                "filepath",
+                "file_path",
+                "inserted_at",
+                "updated_at",
+                "downloaded_at",
+                "upload_date",
+                "duration_seconds",
+            )
+            if column in media_columns
+        ]
+
+        order_column = next(
+            (
+                name
+                for name in (
+                    "downloaded_at",
+                    "updated_at",
+                    "inserted_at",
+                    "id",
+                )
+                if name in media_columns
+            ),
+            "id",
+        )
+
+        rows = conn.execute(
+            f"""
+            SELECT {", ".join(wanted)}
+            FROM media_items
+            WHERE {filepath_column} IS NOT NULL
+              AND TRIM({filepath_column}) != ''
+            ORDER BY {order_column} DESC, id DESC
+            LIMIT ?
+            """,
+            (
+                max(
+                    1,
+                    min(
+                        int(limit or 100),
+                        500,
+                    ),
+                ),
+            ),
+        ).fetchall()
+
+        media_rows = [
+            dict(row)
+            for row in rows
+        ]
+
+        source_ids = {
+            int(row["source_id"])
+            for row in media_rows
+            if row.get("source_id")
+            not in (None, "")
+        }
+
+        source_map = {}
+
+        if (
+            source_ids
+            and "sources" in tables
+        ):
+            source_columns = pinchflat_table_columns(
+                conn,
+                "sources",
+            )
+
+            source_wanted = [
+                column
+                for column in (
+                    "id",
+                    "custom_name",
+                    "collection_name",
+                    "collection_id",
+                    "original_url",
+                )
+                if column in source_columns
+            ]
+
+            placeholders = ",".join(
+                "?"
+                for _ in source_ids
+            )
+
+            source_rows = conn.execute(
+                f"""
+                SELECT {", ".join(source_wanted)}
+                FROM sources
+                WHERE id IN ({placeholders})
+                """,
+                tuple(sorted(source_ids)),
+            ).fetchall()
+
+            source_map = {
+                int(row["id"]): dict(row)
+                for row in source_rows
+            }
+
+        results = []
+
+        for media in media_rows:
+            youtube_id = pinchflat_extract_youtube_id(
+                media
+            )
+
+            if not youtube_id:
+                continue
+
+            source = {}
+            source_id = media.get("source_id")
+
+            if source_id not in (None, ""):
+                try:
+                    source = source_map.get(
+                        int(source_id),
+                        {},
+                    )
+                except Exception:
+                    source = {}
+
+            channel_id = str(
+                pinchflat_row_value(
+                    source,
+                    "collection_id",
+                )
+                or ""
+            )
+
+            channel_title = str(
+                pinchflat_row_value(
+                    source,
+                    "custom_name",
+                    "collection_name",
+                )
+                or "YouTube channel"
+            )
+
+            channel_url = str(
+                pinchflat_row_value(
+                    source,
+                    "original_url",
+                )
+                or (
+                    f"https://www.youtube.com/channel/{channel_id}"
+                    if channel_id
+                    else "https://www.youtube.com"
+                )
+            )
+
+            completed_at = str(
+                pinchflat_row_value(
+                    media,
+                    "downloaded_at",
+                    "updated_at",
+                    "inserted_at",
+                )
+                or ""
+            )
+
+            results.append(
+                {
+                    "video_id": youtube_id,
+                    "title": (
+                        pinchflat_row_value(
+                            media,
+                            "title",
+                        )
+                        or "YouTube video"
+                    ),
+                    "description": "",
+                    "video_url": (
+                        f"https://www.youtube.com/watch?v={youtube_id}"
+                    ),
+                    "shorts_url": (
+                        f"https://www.youtube.com/shorts/{youtube_id}"
+                    ),
+                    "channel_id": channel_id,
+                    "channel_title": channel_title,
+                    "channel_url": channel_url,
+                    "channel_thumbnail_url": "",
+                    "thumbnail_url": (
+                        f"https://i.ytimg.com/vi/{youtube_id}/hqdefault.jpg"
+                    ),
+                    "published_at": completed_at,
+                    "downloaded_at": completed_at,
+                    "view_count": 0,
+                    "duration": "",
+                    "duration_seconds": int(
+                        media.get("duration_seconds")
+                        or 0
+                    ),
+                    "is_short": False,
+                    "metadata_complete": False,
+                    "from_pinchflat": True,
+                }
+            )
+
+        return annotate_favourites(
+            results[:limit]
+        )
 
     finally:
         conn.close()
@@ -8141,6 +8599,69 @@ def subscription_view(row):
     return item
 
 
+def is_ajax_request():
+    return (
+        request.headers.get(
+            "X-Requested-With",
+            "",
+        ).lower() == "xmlhttprequest"
+        or "application/json"
+        in request.headers.get(
+            "Accept",
+            "",
+        ).lower()
+    )
+
+
+def subscription_ajax_payload(channel_id):
+    with db() as conn:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM subscriptions
+            WHERE channel_id = ?
+            LIMIT 1
+            """,
+            (channel_id,),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    item = subscription_view(row)
+
+    return {
+        "channel_id": item.get("channel_id"),
+        "title": item.get("title") or "",
+        "active": bool(item.get("active")),
+        "download_enabled": bool(
+            item.get("download_enabled")
+        ),
+        "pinchflat_added": bool(
+            item.get("pinchflat_added")
+        ),
+        "ui_status": item.get("ui_status") or "",
+        "last_error": item.get("last_error") or "",
+        "cutoff": item.get("cutoff") or "",
+        "history_label": (
+            item.get("history_label")
+            or ""
+        ),
+        "history_mode": (
+            item.get("history_mode")
+            or "default"
+        ),
+        "history_custom_date": (
+            item.get("history_custom_date")
+            or ""
+        ),
+        "media_profile_id": str(
+            item.get("media_profile_id")
+            or ""
+        ),
+    }
+
+
 @app.after_request
 def security_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -9024,44 +9545,104 @@ def save_default_history():
 @app.post("/subscriptions/<channel_id>/save")
 def save_subscription_row(channel_id):
     """Save one source. Enabled is authoritative for Pinchflat membership."""
-    mode = request.form.get("history_mode", "default").strip()
-    custom_date = request.form.get("history_custom_date", "").strip()
-    profile_id = request.form.get("media_profile_id", "").strip()
-    enabled = "1" in request.form.getlist("download_enabled")
+    ajax = is_ajax_request()
+
+    mode = request.form.get(
+        "history_mode",
+        "default",
+    ).strip()
+
+    custom_date = request.form.get(
+        "history_custom_date",
+        "",
+    ).strip()
+
+    profile_id = request.form.get(
+        "media_profile_id",
+        "",
+    ).strip()
+
+    enabled = (
+        "1"
+        in request.form.getlist(
+            "download_enabled"
+        )
+    )
+
+    def fail(message, status=400):
+        if ajax:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": message,
+                    "subscription": (
+                        subscription_ajax_payload(
+                            channel_id
+                        )
+                    ),
+                }
+            ), status
+
+        flash(message, "error")
+        return redirect(
+            url_for("index")
+            + "#subscriptions"
+        )
 
     if mode not in HISTORY_MODES:
-        flash("Unknown source download range.", "error")
-        return redirect(url_for("index") + "#subscriptions")
+        return fail(
+            "Unknown source download range."
+        )
 
     if mode == "custom_date":
         try:
-            parsed = date.fromisoformat(custom_date)
+            parsed = date.fromisoformat(
+                custom_date
+            )
             if parsed > date.today():
                 raise ValueError
         except ValueError:
-            flash("Choose a valid custom date which is not in the future.", "error")
-            return redirect(url_for("index") + "#subscriptions")
+            return fail(
+                "Choose a valid custom date which is not in the future."
+            )
 
     with db() as conn:
         row = conn.execute(
-            "SELECT * FROM subscriptions WHERE channel_id = ?",
+            """
+            SELECT *
+            FROM subscriptions
+            WHERE channel_id = ?
+            """,
             (channel_id,),
         ).fetchone()
 
     if not row:
-        flash("The YouTube subscription was not found.", "error")
-        return redirect(url_for("index") + "#subscriptions")
+        return fail(
+            "The YouTube subscription was not found.",
+            404,
+        )
 
     current = dict(row)
     prospective = dict(current)
-    prospective.update({
-        "download_enabled": 1 if enabled else 0,
-        "source_authorised": 1 if enabled else 0,
-        "history_mode": mode,
-        "history_custom_date": custom_date,
-        "media_profile_id": profile_id or None,
-        "needs_review": 0,
-    })
+
+    prospective.update(
+        {
+            "download_enabled": (
+                1 if enabled else 0
+            ),
+            "source_authorised": (
+                1 if enabled else 0
+            ),
+            "history_mode": mode,
+            "history_custom_date": (
+                custom_date
+            ),
+            "media_profile_id": (
+                profile_id or None
+            ),
+            "needs_review": 0,
+        }
+    )
 
     with db() as conn:
         conn.execute(
@@ -9086,31 +9667,90 @@ def save_subscription_row(channel_id):
             ),
         )
 
+    ok = True
+    status_code = 200
+
     try:
-        result = apply_subscription_source_authority(prospective, apply_settings=True)
+        result = apply_subscription_source_authority(
+            prospective,
+            apply_settings=True,
+        )
+
         with db() as conn:
             conn.execute(
-                "UPDATE subscriptions SET retry_count = 0 WHERE channel_id = ?",
+                """
+                UPDATE subscriptions
+                SET retry_count = 0
+                WHERE channel_id = ?
+                """,
                 (channel_id,),
             )
 
-        if result["state"] == "disabled" and result.get("pending"):
-            flash(f"{current['title']} saved. Pinchflat source removal is in progress.", "success")
+        if (
+            result["state"] == "disabled"
+            and result.get("pending")
+        ):
+            message = (
+                f"{current['title']} saved. "
+                "Pinchflat source removal is in progress."
+            )
         elif enabled:
-            flash(f"{current['title']} saved and enabled in Pinchflat.", "success")
+            message = (
+                f"{current['title']} saved and enabled in Pinchflat."
+            )
         else:
-            flash(f"{current['title']} saved and removed from Pinchflat. Existing downloaded files were kept.", "success")
+            message = (
+                f"{current['title']} saved and removed from Pinchflat. "
+                "Existing downloaded files were kept."
+            )
+
     except Exception as exc:
+        ok = False
+        status_code = 409
+        message = (
+            "Your choices were saved locally, but Pinchflat could not "
+            f"be reconciled: {exc}"
+        )
+
         with db() as conn:
             conn.execute(
-                "UPDATE subscriptions SET last_error = ?, retry_count = retry_count + 1 WHERE channel_id = ?",
-                (str(exc)[:1000], channel_id),
+                """
+                UPDATE subscriptions
+                SET last_error = ?,
+                    retry_count = retry_count + 1
+                WHERE channel_id = ?
+                """,
+                (
+                    str(exc)[:1000],
+                    channel_id,
+                ),
             )
-        flash(f"Your choices were saved locally, but Pinchflat could not be reconciled: {exc}", "error")
 
-    return redirect(url_for("index") + "#subscriptions")
+    payload = (
+        subscription_ajax_payload(
+            channel_id
+        )
+    )
 
+    if ajax:
+        return jsonify(
+            {
+                "ok": ok,
+                "saved_locally": True,
+                "message": message,
+                "subscription": payload,
+            }
+        ), status_code
 
+    flash(
+        message,
+        "success" if ok else "error",
+    )
+
+    return redirect(
+        url_for("index")
+        + "#subscriptions"
+    )
 
 
 @app.post("/subscriptions/<channel_id>/history")
@@ -9863,12 +10503,27 @@ def retry_subscription(channel_id):
 
 @app.post("/subscriptions/bulk")
 def bulk_subscription_action():
+    ajax = is_ajax_request()
     channel_ids = request.form.getlist("channel_ids")
     action = request.form.get("bulk_action", "").strip()
 
     if not channel_ids:
-        flash("Select at least one source.", "error")
-        return redirect(url_for("index") + "#subscriptions")
+        if ajax:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Select at least one source.",
+                }
+            ), 400
+
+        flash(
+            "Select at least one source.",
+            "error",
+        )
+        return redirect(
+            url_for("index")
+            + "#subscriptions"
+        )
 
     placeholders = ",".join("?" for _ in channel_ids)
     with db() as conn:
@@ -10019,22 +10674,49 @@ def bulk_subscription_action():
         "success" if errors == 0 else "warning",
     )
 
-    if errors:
-        flash(
-            f"Bulk action completed with {errors} error(s).",
-            "error",
+    message = (
+        f"Bulk action completed with {errors} error(s)."
+        if errors
+        else f"Bulk action applied to {changed} source(s)."
+    )
+
+    updated = [
+        payload
+        for payload in (
+            subscription_ajax_payload(
+                channel_id
+            )
+            for channel_id in channel_ids
         )
-    else:
-        flash(
-            f"Bulk action applied to {changed} source(s).",
-            "success",
+        if payload
+    ]
+
+    if ajax:
+        return jsonify(
+            {
+                "ok": errors == 0,
+                "message": message,
+                "changed": changed,
+                "errors": errors,
+                "subscriptions": updated,
+            }
         )
 
-    return redirect(url_for("index") + "#subscriptions")
+    flash(
+        message,
+        "error" if errors else "success",
+    )
+
+    return redirect(
+        url_for("index")
+        + "#subscriptions"
+    )
 
 
 @app.post("/subscriptions/<channel_id>/unsubscribe")
 def unsubscribe_from_youtube(channel_id):
+    ajax = is_ajax_request()
+
     with db() as conn:
         row = conn.execute(
             "SELECT * FROM subscriptions WHERE channel_id = ?",
@@ -10042,8 +10724,22 @@ def unsubscribe_from_youtube(channel_id):
         ).fetchone()
 
     if row is None:
-        flash("Subscription was not found.", "error")
-        return redirect(url_for("index") + "#subscriptions")
+        if ajax:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Subscription was not found.",
+                }
+            ), 404
+
+        flash(
+            "Subscription was not found.",
+            "error",
+        )
+        return redirect(
+            url_for("index")
+            + "#subscriptions"
+        )
 
     row_dict = dict(row)
 
@@ -10153,10 +10849,15 @@ def unsubscribe_from_youtube(channel_id):
             "success",
             channel_id,
         )
-        flash(
-            f"Unsubscribed from {row_dict.get('title') or channel_id} on YouTube.",
-            "success",
+        message = (
+            f"Unsubscribed from {row_dict.get('title') or channel_id} on YouTube."
         )
+
+        if not ajax:
+            flash(
+                message,
+                "success",
+            )
 
     except Exception as exc:
         with db() as conn:
@@ -10176,9 +10877,45 @@ def unsubscribe_from_youtube(channel_id):
             "error",
             channel_id,
         )
-        flash(f"Unsubscribe failed: {exc}", "error")
+        message = (
+            f"Unsubscribe failed: {exc}"
+        )
 
-    return redirect(url_for("index") + "#subscriptions")
+        if ajax:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": message,
+                    "subscription": (
+                        subscription_ajax_payload(
+                            channel_id
+                        )
+                    ),
+                }
+            ), 400
+
+        flash(
+            message,
+            "error",
+        )
+
+    if ajax:
+        return jsonify(
+            {
+                "ok": True,
+                "message": message,
+                "subscription": (
+                    subscription_ajax_payload(
+                        channel_id
+                    )
+                ),
+            }
+        )
+
+    return redirect(
+        url_for("index")
+        + "#subscriptions"
+    )
 
 
 @app.post("/single-download/start")
@@ -10205,10 +10942,16 @@ def single_download_start():
 @app.get("/api/pinchflat/download-overview")
 def pinchflat_download_overview_api():
     try:
-        limit = request.args.get(
-            "limit",
-            "100",
-        )
+        if request.args.get("all", "0") == "1":
+            limit = -1
+        else:
+            limit = int(
+                request.args.get(
+                    "limit",
+                    "0",
+                )
+                or 0
+            )
 
         data = pinchflat_download_overview(
             limit
@@ -10667,15 +11410,53 @@ def like_youtube_video():
         ), 400
 
 
+@app.get("/api/youtube/video-metadata/<video_id>")
+def youtube_video_metadata_api(video_id):
+    try:
+        return jsonify(
+            {
+                "ok": True,
+                "video": youtube_video_metadata(
+                    video_id
+                ),
+            }
+        )
+    except Exception as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+            }
+        ), 400
+
+
 @app.get("/api/discover")
 def discover_videos():
     kind = request.args.get("kind", "videos").strip().lower()
     refresh = request.args.get("refresh", "0") == "1"
 
-    if kind not in {"videos", "shorts", "top100"}:
-        kind = "videos"
+    if kind not in {
+        "downloaded",
+        "videos",
+        "shorts",
+        "top100",
+    }:
+        kind = "downloaded"
 
     try:
+        if kind == "downloaded":
+            stats = api_usage_stats()
+            return jsonify(
+                {
+                    "ok": True,
+                    "results": pinchflat_recent_downloaded_videos(
+                        100
+                    ),
+                    "source": "Pinchflat",
+                    "search_remaining": stats["search_remaining"],
+                }
+            )
+
         if kind == "top100":
             result = youtube_top100_channels(force=refresh)
             result["results"] = annotate_favourites(result.get("results", []))
