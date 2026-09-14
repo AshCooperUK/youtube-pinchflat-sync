@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <title>YouTube → Pinchflat Sync</title>
+  <title>Pinchflat Sync</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
   <style>
     :root {
@@ -41,6 +41,15 @@
     .btn.smallbtn { padding:7px 10px; min-height:34px; font-size:12px; }
     .user-action-btn { width:78px; min-width:78px; }
     .btn[disabled] { opacity:.45; cursor:not-allowed; }
+    .btn:not(.smallbtn) { min-width:126px; height:42px; }
+    .btn.smallbtn { min-width:108px; height:34px; }
+    .tab-btn { min-width:112px; min-height:42px; }
+    .pinchflat-online-row { display:flex; align-items:center; gap:10px; }
+    .pinchflat-icon-link { width:34px; height:34px; border:1px solid var(--line); border-radius:9px; display:grid; place-items:center; text-decoration:none; background:#0b1626; margin-top:5px; }
+    .pinchflat-icon-link img { width:24px; height:24px; object-fit:contain; }
+    .pinchflat-icon-fallback { display:none; width:24px; height:24px; place-items:center; border-radius:50%; background:#1e8f8b; color:#fff; font-weight:900; }
+    .tile-icon-button { position:absolute; top:14px; right:14px; width:36px; height:36px; border-radius:9px; border:1px solid var(--line); background:#182740; color:#fff; font-size:23px; cursor:pointer; display:grid; place-items:center; }
+    .grid .card { position:relative; }
     .grid { display:grid; grid-template-columns:repeat(5,minmax(180px,1fr)); gap:12px; margin:22px 0 14px; }
     .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:17px; }
     .metric { font-size:27px; font-weight:800; margin-top:5px; }
@@ -66,7 +75,7 @@
     tr.hidden-row { display:none; }
     .pill { display:inline-flex; padding:4px 8px; border-radius:999px; background:#24344a; font-size:12px; white-space:nowrap; }
     .pill.enabled { color:var(--green); } .pill.disabled { color:#c8d3e5; }
-    .pill.pending,.pill.review { color:var(--amber); } .pill.error,.pill.removed { color:var(--red); }
+    .pill.pending { color:var(--amber); } .pill.error,.pill.removed { color:var(--red); }
     .channel-cell { width:132px; min-width:132px; text-align:center; }
     .channel-card {
       width:116px; display:flex; flex-direction:column; align-items:center;
@@ -118,10 +127,8 @@
     .power-toggle-wrap { display:flex; align-items:center; gap:9px; margin-top:8px; }
     .power-toggle-wrap form { margin:0; }
     .power-toggle-label { color:var(--muted); font-size:13px; }
-    .approve-state { min-width:116px; }
-    .approve-state .btn { width:100%; }
-    .source-save-actions { min-width:126px; display:flex; flex-direction:column; gap:7px; align-items:stretch; }
-    .source-save-actions .btn { width:100%; min-height:42px; }
+    .source-save-actions { min-width:96px; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+    .source-save-actions .btn { width:96px; min-width:96px; height:34px; min-height:34px; padding:7px 9px; font-size:12px; }
     .cutoff-cell { white-space:nowrap; }
     .cutoff-cell code { white-space:nowrap; overflow-wrap:normal; }
     .storage-value { white-space:nowrap; font-weight:700; }
@@ -740,6 +747,7 @@
     .mini-stat-grid span,
     .mini-stat-grid strong { display:block; }
     .mini-stat-grid strong { margin-top:3px; }
+    textarea { width:100%; background:#08111f; border:1px solid var(--line); color:var(--text); border-radius:8px; padding:10px; resize:vertical; }
     .settings-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:14px; }
     .setting-box { border:1px solid var(--line); border-radius:12px; padding:15px; background:var(--panel); }
     .activity-item { border-bottom:1px solid var(--line); padding:11px 0; }
@@ -776,20 +784,19 @@
 <div class="wrap">
   <div class="header">
     <div>
-      <h1>YouTube → Pinchflat Sync</h1>
-      <div class="subtitle">Automatic YouTube subscription importer</div>
+      <h1>Pinchflat Sync</h1>
       <div class="version">v{{ version }}</div>
     </div>
     <div class="header-actions">
       {% if is_admin %}
       <form method="post" action="/sync"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-        <button class="btn" {% if not google_connected %}disabled{% endif %}>Sync now</button>
+        <button class="btn" {% if not google_connected %}disabled{% endif %}>Pinchflat Sync</button>
       </form>
-      <button class="btn secondary" type="button" onclick="openSingleDownload()">Single Download</button>
+      <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
+      </form>
       {% endif %}
-      <button class="btn secondary" type="button" onclick="openActivity()">Activity</button>
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
-      {% if is_admin %}<a class="btn ghost" href="{{ pinchflat_open_url }}" target="_blank">Open Pinchflat</a>{% endif %}
       <button class="btn ghost" type="button" onclick="openDiscover()" {% if not google_connected %}disabled{% endif %}>Discover</button>
       <button class="btn ghost" type="button" onclick="openFavourites()">Favourites</button>
       <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out {{ current_user.username }}</button></form>
@@ -827,7 +834,15 @@
     <div class="card" id="top">
       <div class="muted small">Pinchflat</div>
       {% if pinchflat_online %}
-        <div class="metric ok">Online</div>
+        <div class="pinchflat-online-row">
+          <div class="metric ok">Online</div>
+          {% if is_admin %}
+          <a class="pinchflat-icon-link" href="{{ pinchflat_open_url }}" target="_blank" title="Open Pinchflat" aria-label="Open Pinchflat">
+            <img src="{{ pinchflat_public_url }}/favicon.ico" alt="Pinchflat" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
+            <span class="pinchflat-icon-fallback" aria-hidden="true">P</span>
+          </a>
+          {% endif %}
+        </div>
       {% elif pinchflat_container.control_available and not pinchflat_container.running %}
         <div class="metric bad">Stopped</div>
       {% else %}
@@ -863,13 +878,16 @@
     <div class="card">
       <div class="muted small">Subscriptions</div>
       <div class="metric">{{ counts.active }}</div>
-      <div class="muted small">{{ counts.removed }} removed · {{ counts.review }} review</div>
+      <div class="muted small">{{ counts.removed }} removed</div>
     </div>
     <div class="card">
       <div class="muted small">Downloads</div>
       <div class="metric ok">{{ counts.enabled }}</div>
       <div class="muted small">{{ counts.disabled }} disabled · {{ counts.pending }} pending</div>
       <div class="muted small">{{ storage_total }} used · {{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
+      {% if is_admin %}
+      <button class="tile-icon-button" type="button" onclick="openSingleDownload()" title="Single download" aria-label="Single download">↓</button>
+      {% endif %}
     </div>
     <div class="card">
       <div class="muted small">Errors</div>
@@ -892,6 +910,7 @@
         </div>
       </div>
       <div class="actions">
+        <button class="btn secondary smallbtn" type="button" id="latest-videos-minimise" onclick="toggleLatestSection()" title="Minimise latest videos">−</button>
         <button
           class="btn secondary smallbtn"
           type="button"
@@ -901,10 +920,12 @@
       </div>
     </div>
 
-    <div id="latest-videos-status" class="latest-videos-status">
-      Loading your newest subscription videos…
+    <div id="latest-videos-content">
+      <div id="latest-videos-status" class="latest-videos-status">
+        Loading your newest subscription videos…
+      </div>
+      <div id="latest-videos-grid" class="latest-videos-grid"></div>
     </div>
-    <div id="latest-videos-grid" class="latest-videos-grid"></div>
   </div>
   {% endif %}
 
@@ -914,13 +935,6 @@
         <h2>Subscriptions</h2>
         <div class="muted small">New subscriptions follow the policy in Settings. Filters and sorting are remembered in this browser.</div>
       </div>
-      {% if is_admin %}
-      <div class="actions">
-        <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-          <button class="btn secondary smallbtn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
-        </form>
-      </div>
-      {% endif %}
     </div>
 
     <div class="toolbar">
@@ -933,7 +947,6 @@
           <option value="enabled">Enabled</option>
           <option value="disabled">Disabled</option>
           <option value="pending">Pending</option>
-          <option value="review">Needs review</option>
           <option value="error">Errors</option>
           <option value="removed">Removed</option>
           <option value="favourites">Favourites</option>
@@ -963,8 +976,6 @@
         <option value="">Bulk action…</option>
         <option value="enable">Enable downloads</option>
         <option value="disable">Disable downloads</option>
-        <option value="approve">Approve review sources</option>
-        <option value="unapprove">Move approved sources back to review</option>
         <option value="range">Set download range</option>
         <option value="profile">Set Media Profile</option>
         <option value="retry">Retry errors</option>
@@ -1001,7 +1012,6 @@
             <th></th>
             <th>Channel</th>
             <th>Enabled</th>
-            <th>Approval</th>
             <th>Range</th>
             <th>Media Profile</th>
             <th>Cutoff</th>
@@ -1029,7 +1039,6 @@
                 <input class="source-select" type="checkbox" name="channel_ids" value="{{ sub['channel_id'] }}" form="bulk-form" onchange="updateSelectedCount()">
                 <form id="{{ row_form_id }}" method="post" action="/subscriptions/{{ sub['channel_id'] }}/save">
                   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                  <input type="hidden" name="approve" value="0">
                 </form>
               {% endif %}
             </td>
@@ -1083,38 +1092,7 @@
               {% endif %}
             </td>
 
-            <td class="approve-state">
-              {% if sub['needs_review'] %}
-                {% if is_admin %}
-                  <button
-                    type="button"
-                    class="btn secondary smallbtn approve-source-btn"
-                    data-form-id="{{ row_form_id }}"
-                    onclick="stageSourceApproval(this)"
-                  >Approve</button>
-                  <div class="small warn approval-note">Waiting for approval</div>
-                {% else %}
-                  <span class="pill review">Review</span>
-                {% endif %}
-              {% else %}
-                <span class="pill enabled">Approved</span>
-                {% if not sub['download_enabled'] %}
-                  <div class="small muted">
-                    {{ 'Removing from Pinchflat' if sub['pinchflat_added'] else 'Not in Pinchflat' }}
-                  </div>
-                {% else %}
-                  <div class="small muted">
-                    {% if sub['pinchflat_added'] %}
-                      In Pinchflat
-                    {% elif sub['source_authorised'] %}
-                      Pending Pinchflat creation
-                    {% else %}
-                      Save to add to Pinchflat
-                    {% endif %}
-                  </div>
-                {% endif %}
-              {% endif %}
-            </td>
+
 
             <td class="source-range">
               {% set current_mode = sub['history_mode'] or 'default' %}
@@ -1175,12 +1153,6 @@
               {% if is_admin %}
                 <div class="source-save-actions">
                   <button class="btn source-save-btn" type="submit" form="{{ row_form_id }}">Save</button>
-                  {% if not sub['needs_review'] %}
-                    <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unapprove" onsubmit="return confirm('Move this channel back to Waiting for approval and remove its Pinchflat source? Existing downloaded files will be kept.')">
-                      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                      <button class="btn secondary smallbtn">Unapprove</button>
-                    </form>
-                  {% endif %}
                   {% if sub['active'] %}
                     <form method="post" action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe" onsubmit="return confirm('Unsubscribe from this channel on YouTube? The configured unsubscribe policy will then be applied.')">
                       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
@@ -1242,6 +1214,7 @@
         <div class="latest-popup-action-grid">
           <button id="latest-popup-video-heart" class="btn secondary" type="button" onclick="toggleLatestPopupVideoFavourite()">♡ Favourite video</button>
           <button id="latest-popup-channel-heart" class="btn secondary" type="button" onclick="toggleLatestPopupChannelFavourite()">♡ Favourite channel</button>
+          <button id="latest-popup-youtube-subscribe" class="btn secondary" type="button" onclick="subscribeLatestPopupChannel()">＋ Subscribe</button>
           <button id="latest-popup-youtube-like" class="btn secondary" type="button" onclick="likeLatestPopupOnYouTube()">👍 Like on YouTube</button>
           <a id="latest-popup-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank" rel="noopener">Open on YouTube</a>
         </div>
@@ -1310,6 +1283,7 @@
             <button id="shorts-sound-btn" class="btn secondary" type="button" onclick="toggleShortsSound()">Sound on</button>
             <button id="shorts-video-heart" class="btn secondary" type="button" onclick="toggleCurrentShortVideoFavourite()">♡ Video</button>
             <button id="shorts-channel-heart" class="btn secondary" type="button" onclick="toggleCurrentShortChannelFavourite()">♡ Channel</button>
+            <button id="shorts-youtube-subscribe" class="btn secondary" type="button" onclick="subscribeCurrentShortChannel()">＋ Subscribe</button>
             <button id="shorts-youtube-like" class="btn secondary" type="button" onclick="likeCurrentShortOnYouTube()">👍 Like on YouTube</button>
             <a id="shorts-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank">Open on YouTube</a>
           </div>
@@ -1328,35 +1302,19 @@
 
 <dialog id="favourites-dialog">
   <div class="modal-head">
-    <div><h2 style="margin:0">Favourites</h2><div class="muted small">Your favourite channels, saved videos and custom video lists.</div></div>
+    <div><h2 style="margin:0">Favourites</h2><div class="muted small">Your favourite channels and saved videos.</div></div>
     <button class="modal-close" onclick="closeFavourites()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
     <div class="tabs">
       <button id="fav-tab-channels" class="tab-btn active" type="button" onclick="showFavouriteTab('channels')">Favourite Channels</button>
       <button id="fav-tab-videos" class="tab-btn" type="button" onclick="showFavouriteTab('videos')">Favourite Videos</button>
-      <button id="fav-tab-lists" class="tab-btn" type="button" onclick="showFavouriteTab('lists')">My Lists</button>
     </div>
     <div id="favourites-loading" class="empty hidden">Loading favourites…</div>
     <div id="favourites-error" class="flash error hidden"></div>
     <section id="fav-panel-channels"><div id="favourite-channels-grid" class="favourites-grid"></div></section>
     <section id="fav-panel-videos" class="hidden"><div id="favourite-videos-grid" class="favourites-grid"></div></section>
-    <section id="fav-panel-lists" class="hidden">
-      <div class="favourite-list-toolbar">
-        <input id="new-favourite-list-name" type="text" placeholder="New list name" style="max-width:320px">
-        <button class="btn" type="button" onclick="createFavouriteList()">Create list</button>
-      </div>
-      <div class="favourite-list-layout">
-        <div id="favourite-list-nav" class="favourite-list-nav"></div>
-        <div>
-          <div id="favourite-list-actions" class="favourite-list-toolbar hidden">
-            <button class="btn" type="button" onclick="downloadSelectedFavouriteList()">Download List</button>
-            <button class="btn danger" type="button" onclick="deleteSelectedFavouriteList()">Delete List</button>
-          </div>
-          <div id="favourite-list-videos" class="favourites-grid"></div>
-        </div>
-      </div>
-    </section>
+
   </div>
 </dialog>
 
@@ -1389,7 +1347,9 @@
       <button type="button" class="tab-btn" data-tab="youtube" onclick="showTab('youtube')">YouTube</button>
       <button type="button" class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')">Pinchflat</button>
       <button type="button" class="tab-btn" data-tab="downloads" onclick="showTab('downloads')">Downloads</button>
+      <button type="button" class="tab-btn" data-tab="favourites" onclick="showTab('favourites')">Favourites</button>
       <button type="button" class="tab-btn" data-tab="automation" onclick="showTab('automation')">Automation</button>
+      <button type="button" class="tab-btn" data-tab="logs" onclick="showTab('logs')">Logs</button>
       <button type="button" class="tab-btn" data-tab="advanced" onclick="showTab('advanced')">Advanced</button>
       {% endif %}
       <button type="button" class="tab-btn {% if not is_admin %}active{% endif %}" data-tab="security" onclick="showTab('security')">Security</button>
@@ -1405,7 +1365,6 @@
               <select name="new_subscription_policy">
                 <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable and download</option>
                 <option value="disabled" {% if new_subscription_policy == "disabled" %}selected{% endif %}>Add to dashboard, disabled</option>
-                <option value="review" {% if new_subscription_policy == "review" %}selected{% endif %}>Wait for approval before adding</option>
               </select>
             </label>
             <label>When you unsubscribe on YouTube
@@ -1491,7 +1450,7 @@
     <section class="tab-panel" data-panel="pinchflat">
       <div class="settings-grid">
         <div class="setting-box">
-          <h3>Default Media Profile</h3>
+          <h3>Media Profile manager</h3>
           <form method="post" action="/settings/pinchflat"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Profile
               <select name="pinchflat_media_profile_id" onchange="this.form.submit()">
@@ -1502,6 +1461,28 @@
             </label>
             <label><input type="checkbox" name="auto_create_media_profile" value="1" {% if auto_create_media_profile %}checked{% endif %}> Automatically create “YouTube Sync” plus 1080p, 720p, Audio Only and 4K profiles</label>
             <button class="btn">Save Pinchflat</button>
+          </form>
+        </div>
+
+        <div class="setting-box">
+          <h3>Create Media Profile</h3>
+          <form method="post" action="/settings/pinchflat/profile/create">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <label>Profile name
+              <input type="text" name="profile_name" placeholder="My YouTube Profile" required maxlength="100">
+            </label>
+            <label>Starting quality
+              <select name="preferred_resolution">
+                <option value="2160p">2160p / 4K</option>
+                <option value="1440p">1440p</option>
+                <option value="1080p" selected>1080p</option>
+                <option value="720p">720p</option>
+                <option value="480p">480p</option>
+                <option value="360p">360p</option>
+                <option value="audio">Audio Only</option>
+              </select>
+            </label>
+            <button class="btn">Create Profile</button>
           </form>
         </div>
 
@@ -1531,6 +1512,10 @@
           {% if not media_profile_settings.error %}
           <form method="post" action="/settings/pinchflat/profile" id="pinchflat-media-profile-form">
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+            <label>Profile name
+              <input type="text" name="profile_name" value="{{ media_profile_settings.name }}" autocomplete="off">
+            </label>
 
             <label>Output path template
               <input
@@ -1615,6 +1600,37 @@
               </div>
             </div>
 
+            {% if media_profile_settings.extra_fields %}
+            <div class="setting-box" style="margin-top:14px">
+              <h3>Additional Pinchflat options</h3>
+              <p class="muted small">These controls are read directly from this Pinchflat version so new profile options appear here automatically.</p>
+              <div class="profile-settings-grid">
+                {% for field in media_profile_settings.extra_fields %}
+                <div class="compact-setting">
+                  {% if field.type == 'select' %}
+                  <label>{{ field.label }}
+                    <select name="pf_extra::{{ field.name }}">
+                      {% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
+                    </select>
+                  </label>
+                  {% elif field.type == 'checkbox' %}
+                  <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                  <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                  {% elif field.type == 'textarea' %}
+                  <label>{{ field.label }}
+                    <textarea name="pf_extra::{{ field.name }}" rows="4">{{ field.value }}</textarea>
+                  </label>
+                  {% else %}
+                  <label>{{ field.label }}
+                    <input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}">
+                  </label>
+                  {% endif %}
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+
             <div class="actions" style="margin-top:16px">
               <button class="btn">Save Profile to {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</button>
               <span class="muted small">Existing downloaded files are not renamed when you change the output template.</span>
@@ -1626,6 +1642,38 @@
     </section>
 
     <section class="tab-panel" data-panel="downloads">
+      <div class="setting-box" style="margin-bottom:14px">
+        <h3>One-time download</h3>
+        <p class="muted small">Defaults used by the Single Download button. yt-dlp output paths stay inside the shared <code>/downloads</code> mount.</p>
+        <form method="post" action="/settings/single-download">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <div class="profile-settings-grid">
+            <label>Download type
+              <select name="single_download_format">
+                {% for value,label in [('best','Best available'),('2160p','2160p / 4K'),('1440p','1440p'),('1080p','1080p'),('720p','720p'),('480p','480p'),('360p','360p'),('audio','Audio only')] %}
+                <option value="{{ value }}" {% if single_download_format == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Audio type
+              <select name="single_download_audio_format">
+                {% for value in ['m4a','mp3','opus','flac','wav'] %}<option value="{{ value }}" {% if single_download_audio_format == value %}selected{% endif %}>{{ value|upper }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Download folder
+              <input type="text" name="single_download_folder" value="{{ single_download_folder }}" placeholder="Single Downloads">
+            </label>
+            <label>yt-dlp output template
+              <input type="text" name="single_download_output_template" value="{{ single_download_output_template }}" autocomplete="off">
+            </label>
+          </div>
+          <label><input type="checkbox" name="single_download_write_nfo" value="1" {% if single_download_write_nfo %}checked{% endif %}> Include Emby <code>tvshow.nfo</code> metadata</label>
+          <div class="actions">
+            <button class="btn">Save One-time Download</button>
+            <button class="btn secondary" type="button" onclick="openSingleDownload()">↓ Single Download</button>
+          </div>
+        </form>
+      </div>
       <div class="settings-grid">
         <div class="setting-box">
           <h3>Default download history</h3>
@@ -1670,16 +1718,33 @@
             <label>YouTube subscription auto-download path template
               <input type="text" name="subscription_download_template" value="{{ subscription_download_template }}" autocomplete="off">
             </label>
-            <div class="settings-grid">
-              <label>Emby Download folder
-                <input type="text" name="emby_download_folder" value="{{ emby_download_folder }}" placeholder="Emby Download">
-              </label>
-              <label>Single Download folder
-                <input type="text" name="single_download_folder" value="{{ single_download_folder }}" placeholder="Single Downloads">
-              </label>
-            </div>
+            <label>Emby Download folder
+              <input type="text" name="emby_download_folder" value="{{ emby_download_folder }}" placeholder="Emby Download">
+            </label>
             <button class="btn">Save Download Paths</button>
           </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="favourites">
+      <div class="setting-box">
+        <h3>Favourite video lists</h3>
+        <p class="muted small">Create and manage your saved video lists here. Favourite channels and individual favourite videos remain in the Favourites window.</p>
+        <div id="settings-favourites-error" class="flash error hidden"></div>
+        <div class="favourite-list-toolbar">
+          <input id="new-favourite-list-name" type="text" placeholder="New list name" style="max-width:320px">
+          <button class="btn smallbtn" type="button" onclick="createFavouriteList()">Create list</button>
+        </div>
+        <div class="favourite-list-layout">
+          <div id="favourite-list-nav" class="favourite-list-nav"></div>
+          <div>
+            <div id="favourite-list-actions" class="favourite-list-toolbar hidden">
+              <button class="btn secondary smallbtn" type="button" onclick="downloadSelectedFavouriteList()">Download list</button>
+              <button class="btn danger smallbtn" type="button" onclick="deleteSelectedFavouriteList()">Delete list</button>
+            </div>
+            <div id="favourite-list-videos" class="favourites-grid"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -1742,6 +1807,48 @@
             <button class="btn secondary smallbtn" {% if not google_write_ready %}disabled{% endif %}>Ensure Emby Download playlist exists</button>
           </form>
           <span class="muted small">Playlist ID: {{ emby_download_playlist_id or "not created yet" }}</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="logs">
+      <div class="setting-box">
+        <h3>Activity</h3>
+        <p class="muted small">Recent automation, source, download and settings events.</p>
+        {% if activity_rows %}
+          {% for item in activity_rows %}
+            <div class="activity-item">
+              <strong class="{% if item['severity'] == 'warning' %}warn{% elif item['severity'] == 'success' %}ok{% elif item['severity'] == 'error' %}bad{% endif %}">{{ item["title"] }}</strong>
+              <div>{{ item["message"] }}</div>
+              <div class="activity-time">{{ item["created_at"] }} · {{ item["event_type"] }}</div>
+            </div>
+          {% endfor %}
+        {% else %}<div class="empty">No activity has been recorded yet.</div>{% endif %}
+      </div>
+
+      <div class="settings-grid" style="margin-top:14px">
+        <div class="setting-box">
+          <h3>Recent direct downloads</h3>
+          {% if recent_downloads %}
+            {% for item in recent_downloads %}
+              <div class="activity-item">
+                <strong class="{% if item['status'] == 'completed' %}ok{% elif item['status'] == 'failed' %}bad{% elif item['status'] in ['downloading','processing'] %}warn{% endif %}">{{ item["title"] or item["youtube_url"] }}</strong>
+                <div>{{ item["source_type"] }} · {{ item["status"] }} · {{ "%.0f"|format(item["progress"] or 0) }}%</div>
+                {% if item["error"] %}<div class="bad small">{{ item["error"] }}</div>{% endif %}
+                <div class="activity-time">{{ item["created_at"] }}</div>
+              </div>
+            {% endfor %}
+          {% else %}<div class="muted small">No direct downloads yet.</div>{% endif %}
+        </div>
+        <div class="setting-box">
+          <h3>Recent sync runs</h3>
+          {% for run in recent_runs %}
+            <div class="activity-item">
+              <strong>{{ run["status"] }}</strong>
+              <div>{{ run["message"] }}</div>
+              <div class="activity-time">{{ run["started_at"] }}</div>
+            </div>
+          {% else %}<div class="muted small">No sync runs recorded yet.</div>{% endfor %}
         </div>
       </div>
     </section>
@@ -1873,54 +1980,10 @@
   </div>
 </dialog>
 
-<dialog id="activity-dialog">
-  <div class="modal-head">
-    <div><h2 style="margin:0">Activity</h2><div class="muted small">Recent automation, source, download and settings events.</div></div>
-    <button class="modal-close" onclick="closeActivity()" aria-label="Close">×</button>
-  </div>
-  <div class="modal-body">
-    {% if activity_rows %}
-      {% for item in activity_rows %}
-        <div class="activity-item">
-          <strong class="{% if item['severity'] == 'warning' %}warn{% elif item['severity'] == 'success' %}ok{% elif item['severity'] == 'error' %}bad{% endif %}">{{ item["title"] }}</strong>
-          <div>{{ item["message"] }}</div>
-          <div class="activity-time">{{ item["created_at"] }} · {{ item["event_type"] }}</div>
-        </div>
-      {% endfor %}
-    {% else %}
-      <div class="empty">No activity has been recorded yet.</div>
-    {% endif %}
 
-    <h3 style="margin-top:24px">Recent direct downloads</h3>
-    {% if recent_downloads %}
-      {% for item in recent_downloads %}
-        <div class="activity-item">
-          <strong class="{% if item['status'] == 'completed' %}ok{% elif item['status'] == 'failed' %}bad{% elif item['status'] in ['downloading','processing'] %}warn{% endif %}">
-            {{ item["title"] or item["youtube_url"] }}
-          </strong>
-          <div>{{ item["source_type"] }} · {{ item["status"] }} · {{ "%.0f"|format(item["progress"] or 0) }}%</div>
-          {% if item["error"] %}<div class="bad small">{{ item["error"] }}</div>{% endif %}
-          <div class="activity-time">{{ item["created_at"] }}</div>
-        </div>
-      {% endfor %}
-    {% else %}
-      <div class="muted small">No direct downloads yet.</div>
-    {% endif %}
-
-    <h3 style="margin-top:24px">Recent sync runs</h3>
-    {% for run in recent_runs %}
-      <div class="activity-item">
-        <strong>{{ run["status"] }}</strong>
-        <div>{{ run["message"] }}</div>
-        <div class="activity-time">{{ run["started_at"] }}</div>
-      </div>
-    {% endfor %}
-  </div>
-</dialog>
 
 <script>
 const settingsDialog = document.getElementById("settings-dialog");
-const activityDialog = document.getElementById("activity-dialog");
 const singleDownloadDialog = document.getElementById("single-download-dialog");
 const discoverDialog = document.getElementById("discover-dialog");
 const favouritesDialog = document.getElementById("favourites-dialog");
@@ -1942,13 +2005,27 @@ let shortsPlayer = null;
 let shortsMuted = true;
 let youtubeIframeApiPromise = null;
 
+
+function setLatestSectionMinimised(minimised) {
+  const content = document.getElementById("latest-videos-content");
+  const button = document.getElementById("latest-videos-minimise");
+  if (!content || !button) return;
+  content.classList.toggle("hidden", minimised);
+  button.textContent = minimised ? "+" : "−";
+  button.title = minimised ? "Show latest videos" : "Minimise latest videos";
+  localStorage.setItem("latestVideosMinimised", minimised ? "1" : "0");
+}
+
+function toggleLatestSection() {
+  const content = document.getElementById("latest-videos-content");
+  setLatestSectionMinimised(!content || !content.classList.contains("hidden"));
+}
+
 function openSettings(tab="{{ 'general' if is_admin else 'security' }}") {
   showTab(tab);
   if (!settingsDialog.open) settingsDialog.showModal();
 }
 function closeSettings() { settingsDialog.close(); }
-function openActivity() { activityDialog.showModal(); }
-function closeActivity() { activityDialog.close(); }
 function openSingleDownload() { singleDownloadDialog.showModal(); }
 function closeSingleDownload() {
   singleDownloadDialog.close();
@@ -2123,6 +2200,7 @@ function updateLatestPopupButtons() {
 
   const videoHeart = document.getElementById("latest-popup-video-heart");
   const channelHeart = document.getElementById("latest-popup-channel-heart");
+  const youtubeSubscribe = document.getElementById("latest-popup-youtube-subscribe");
   const youtubeLike = document.getElementById("latest-popup-youtube-like");
 
   if (videoHeart) {
@@ -2143,6 +2221,14 @@ function updateLatestPopupButtons() {
       "active",
       !!latestPopupVideo.is_favourite_channel
     );
+  }
+
+  if (youtubeSubscribe) {
+    youtubeSubscribe.textContent = latestPopupVideo.is_subscribed
+      ? "Subscribed ✓"
+      : "＋ Subscribe";
+    youtubeSubscribe.disabled = !!latestPopupVideo.is_subscribed;
+    youtubeSubscribe.classList.toggle("active", !!latestPopupVideo.is_subscribed);
   }
 
   if (youtubeLike) {
@@ -2245,6 +2331,21 @@ async function toggleLatestPopupChannelFavourite() {
   );
 
   updateLatestPopupButtons();
+}
+
+async function subscribeLatestPopupChannel() {
+  if (!latestPopupVideo?.channel_id || latestPopupVideo.is_subscribed) return;
+  const button = document.getElementById("latest-popup-youtube-subscribe");
+  const original = button?.textContent || "＋ Subscribe";
+  if (button) { button.disabled = true; button.textContent = "Subscribing…"; }
+  try {
+    await apiPost("/api/youtube/subscribe", { channel_id: latestPopupVideo.channel_id });
+    latestPopupVideo.is_subscribed = true;
+    updateLatestPopupButtons();
+  } catch (err) {
+    if (button) { button.disabled = false; button.textContent = original; }
+    alert(`YouTube subscribe failed: ${err.message || String(err)}`);
+  }
 }
 
 function likeLatestPopupOnYouTube() {
@@ -2577,19 +2678,20 @@ async function openFavourites(tab="channels") {
 function closeFavourites() { favouritesDialog.close(); }
 
 function showFavouriteTab(tab) {
-  favouriteTab = ["channels","videos","lists"].includes(tab) ? tab : "channels";
-  ["channels","videos","lists"].forEach(name => {
+  favouriteTab = ["channels","videos"].includes(tab) ? tab : "channels";
+  ["channels","videos"].forEach(name => {
     document.getElementById(`fav-tab-${name}`)?.classList.toggle("active", name === favouriteTab);
     document.getElementById(`fav-panel-${name}`)?.classList.toggle("hidden", name !== favouriteTab);
   });
-  if (favouriteTab === "lists") renderFavouriteLists();
 }
 
 async function loadFavourites() {
   const loading = document.getElementById("favourites-loading");
   const error = document.getElementById("favourites-error");
-  loading.classList.remove("hidden");
-  error.classList.add("hidden");
+  const settingsError = document.getElementById("settings-favourites-error");
+  loading?.classList.remove("hidden");
+  error?.classList.add("hidden");
+  settingsError?.classList.add("hidden");
   try {
     const response = await fetch("/api/favourites");
     const data = await response.json();
@@ -2600,10 +2702,11 @@ async function loadFavourites() {
     renderFavouriteLists();
     refreshListPickerOptions();
   } catch (err) {
-    error.textContent = err.message || String(err);
-    error.classList.remove("hidden");
+    const message = err.message || String(err);
+    if (error) { error.textContent = message; error.classList.remove("hidden"); }
+    if (settingsError) { settingsError.textContent = message; settingsError.classList.remove("hidden"); }
   } finally {
-    loading.classList.add("hidden");
+    loading?.classList.add("hidden");
   }
 }
 
@@ -2698,7 +2801,7 @@ function renderFavouriteLists() {
 async function createFavouriteList() {
   const input = document.getElementById("new-favourite-list-name");
   const name = input.value.trim(); if (!name) return;
-  try { const data = await apiPost("/api/favourites/lists/create", {name}); input.value = ""; selectedFavouriteListId = data.list.id; await loadFavourites(); showFavouriteTab("lists"); }
+  try { const data = await apiPost("/api/favourites/lists/create", {name}); input.value = ""; selectedFavouriteListId = data.list.id; await loadFavourites(); }
   catch (err) { window.alert(err.message || String(err)); }
 }
 
@@ -3093,6 +3196,11 @@ async function playRandomShort(index) {
   channelHeart.textContent = item.is_favourite_channel ? "♥ Channel" : "♡ Channel";
   channelHeart.classList.toggle("active", !!item.is_favourite_channel);
 
+  const youtubeSubscribe = document.getElementById("shorts-youtube-subscribe");
+  youtubeSubscribe.textContent = item.is_subscribed ? "Subscribed ✓" : "＋ Subscribe";
+  youtubeSubscribe.disabled = !!item.is_subscribed;
+  youtubeSubscribe.classList.toggle("active", !!item.is_subscribed);
+
   const youtubeLike = document.getElementById("shorts-youtube-like");
   youtubeLike.textContent = "👍 Like on YouTube";
   youtubeLike.disabled = false;
@@ -3166,6 +3274,25 @@ function toggleCurrentShortChannelFavourite() {
   if (!item) return;
   toggleChannelFavourite(document.getElementById("shorts-channel-heart"), item.channel_id, item.channel_title, `https://www.youtube.com/channel/${item.channel_id}`, item.channel_avatar_url || "").then(() => playRandomShort(shortsIndex));
 }
+async function subscribeCurrentShortChannel() {
+  const item = currentShortItem();
+  const button = document.getElementById("shorts-youtube-subscribe");
+  if (!item?.channel_id || item.is_subscribed || !button) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Subscribing…";
+  try {
+    await apiPost("/api/youtube/subscribe", { channel_id: item.channel_id });
+    item.is_subscribed = true;
+    button.textContent = "Subscribed ✓";
+    button.classList.add("active");
+    button.disabled = true;
+  } catch (err) {
+    button.textContent = original;
+    button.disabled = false;
+    alert(`YouTube subscribe failed: ${err.message || String(err)}`);
+  }
+}
 async function likeVideoOnYouTube(button, item) {
   if (!item?.video_id || !button) return;
 
@@ -3227,8 +3354,9 @@ function toggleShortsSound() {
 }
 
 function showTab(name) {
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
+  document.querySelectorAll("#settings-dialog .tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll("#settings-dialog .tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
+  if (name === "favourites") loadFavourites();
 }
 
 function toggleDefaultHistory() {
@@ -3266,36 +3394,6 @@ function sourceToggleChanged(input) {
   markSourceRowDirty(input);
 }
 
-function stageSourceApproval(button) {
-  const formId = button.dataset.formId;
-  const form = document.getElementById(formId);
-  const row = button.closest(".source-row");
-  if (!form || !row) return;
-
-  const approve = form.querySelector('input[name="approve"]');
-  if (approve) approve.value = "1";
-
-  const enabled = row.querySelector('input[name="download_enabled"]');
-  if (enabled) {
-    enabled.checked = true;
-    const label = enabled.closest(".source-toggle")?.querySelector(".source-toggle-text");
-    if (label) label.textContent = "Enabled";
-  }
-
-  button.textContent = "Approved ✓";
-  button.classList.remove("secondary");
-  button.classList.add("success");
-  button.disabled = true;
-
-  const note = row.querySelector(".approval-note");
-  if (note) {
-    note.textContent = "Ready to save";
-    note.classList.remove("warn");
-    note.classList.add("ok");
-  }
-
-  markSourceRowDirty(button);
-}
 
 async function startSingleDownload(event) {
   event.preventDefault();
@@ -3427,6 +3525,7 @@ initialFilter();
 applyFilters();
 toggleBulkOptions();
 {% if google_connected %}
+setLatestSectionMinimised(localStorage.getItem("latestVideosMinimised") === "1");
 loadLatestSubscriptionVideos(false);
 {% endif %}
 const settingsHashTabs = new Set(["security", "pinchflat", "general", "youtube", "downloads", "automation", "advanced"]);

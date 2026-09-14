@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.5.1"
+VERSION = "2.6.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -326,6 +326,21 @@ def init_db():
                 """
             )
 
+        # v2.6 retires the old approval workflow. The Enabled toggle is now
+        # the only authority for whether an active YouTube subscription
+        # should exist as a Pinchflat source. Keep needs_review only for
+        # backwards-compatible database upgrades.
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET needs_review = 0,
+                source_authorised = CASE
+                    WHEN active = 1 AND download_enabled = 1 THEN 1
+                    ELSE 0
+                END
+            """
+        )
+
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS activity (
@@ -505,6 +520,10 @@ def init_db():
             "youtube_daily_quota": "10000",
             "youtube_search_daily_limit": "100",
             "single_download_folder": "Single Downloads",
+            "single_download_format": "best",
+            "single_download_audio_format": "m4a",
+            "single_download_write_nfo": "1",
+            "single_download_output_template": "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
             "emby_download_folder": "Emby Download",
             "auth_session_timeout_minutes": "720",
             "auth_lockout_attempts": "5",
@@ -1219,30 +1238,6 @@ def youtube_duration_label(value):
     return f"{minutes}:{seconds:02d}"
 
 
-def youtube_duration_label(value):
-    value = str(value or "").strip()
-    if not value:
-        return ""
-
-    match = re.fullmatch(
-        r"P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?",
-        value,
-    )
-    if not match:
-        return ""
-
-    days, hours, minutes, seconds = [
-        int(part or 0)
-        for part in match.groups()
-    ]
-    hours += days * 24
-
-    if hours:
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
-
-    return f"{minutes}:{seconds:02d}"
-
-
 def youtube_duration_seconds(value):
     value = str(value or "").strip()
     if not value:
@@ -1659,6 +1654,8 @@ def youtube_latest_subscription_videos(limit=36, force=False):
 
     videos = annotate_favourites(videos[:limit])
     shorts = annotate_favourites(shorts[:8])
+    for item in videos + shorts:
+        item["is_subscribed"] = True
 
     retrieved_at = now_iso()
     LATEST_SUBSCRIPTIONS_CACHE.update(
@@ -2147,6 +2144,7 @@ def youtube_discovery_results(kind="videos", limit=24):
             "duration": details.get("duration") or "",
             "duration_seconds": duration_seconds,
             "recommendation_source": entry["source"],
+            "is_subscribed": False,
             "_plan_index": entry["plan_index"],
             "_position": entry["position"],
         }
@@ -2289,6 +2287,7 @@ def safe_relative_download_folder(value, default):
 
 def profile_values_for_update(settings):
     return {
+        "name": settings.get("name", ""),
         "output_path_template": settings.get(
             "output_path_template",
             EMBY_OUTPUT_PATH_TEMPLATE,
@@ -2826,7 +2825,7 @@ def remove_subscription_source_keep_files(row):
     """
     Disabled is authoritative.
 
-    A disabled or unapproved channel must not exist as a Pinchflat source.
+    A disabled channel must not exist as a Pinchflat source.
     Downloaded files are retained. Pinchflat deletion is asynchronous, so
     retain the source link until disappearance is verified.
     """
@@ -2904,14 +2903,13 @@ def ensure_enabled_subscription_source(row, apply_settings=True):
     """
     Enabled is authoritative.
 
-    An active, approved and enabled subscription must exist in Pinchflat.
+    An active and enabled subscription must exist in Pinchflat.
     Missing or stale source links are repaired automatically.
     """
     row = dict(row)
 
     if (
         not row.get("active")
-        or row.get("needs_review")
         or not subscription_download_enabled(row)
         or not subscription_source_authorised(row)
     ):
@@ -2976,8 +2974,8 @@ def apply_subscription_source_authority(row, apply_settings=True):
     """
     Enabled is the source-of-truth for Pinchflat membership.
 
-    Enabled + approved -> source exists.
-    Disabled or waiting for approval -> source does not exist.
+    Enabled -> source exists.
+    Disabled -> source does not exist.
     """
     row = dict(row)
 
@@ -2987,7 +2985,6 @@ def apply_subscription_source_authority(row, apply_settings=True):
     desired_in_pinchflat = (
         subscription_download_enabled(row)
         and subscription_source_authorised(row)
-        and not bool(row.get("needs_review"))
     )
 
     if desired_in_pinchflat:
@@ -3052,7 +3049,6 @@ def reconcile_active_source_authority(max_changes=25):
         desired = (
             subscription_download_enabled(row)
             and subscription_source_authorised(row)
-            and not bool(row.get("needs_review"))
         )
         source_id = resolve_pinchflat_source_id(row)
         source_exists = bool(
@@ -3372,8 +3368,8 @@ def _write_jpeg_variant(image, path, size):
     rendered.save(path, format="JPEG", quality=90, optimize=True)
 
 
-def write_direct_download_series_metadata(info, output_path):
-    """Write Emby-friendly series artwork/NFO beside direct downloads."""
+def write_direct_download_series_metadata(info, output_path, write_nfo=True):
+    """Write Emby-friendly artwork and optional NFO beside direct downloads."""
     if not output_path:
         return
 
@@ -3391,30 +3387,31 @@ def write_direct_download_series_metadata(info, output_path):
     if video_description:
         description = video_description[:2000]
 
-    root = ET.Element("tvshow")
-    ET.SubElement(root, "title").text = str(channel_title)
-    ET.SubElement(root, "sorttitle").text = str(channel_title)
-    ET.SubElement(root, "plot").text = description
-    ET.SubElement(root, "studio").text = "YouTube"
-    ET.SubElement(root, "genre").text = "YouTube"
-    if channel_id:
-        unique = ET.SubElement(
-            root,
-            "uniqueid",
-            {"type": "youtube", "default": "true"},
-        )
-        unique.text = channel_id
+    if write_nfo:
+        root = ET.Element("tvshow")
+        ET.SubElement(root, "title").text = str(channel_title)
+        ET.SubElement(root, "sorttitle").text = str(channel_title)
+        ET.SubElement(root, "plot").text = description
+        ET.SubElement(root, "studio").text = "YouTube"
+        ET.SubElement(root, "genre").text = "YouTube"
+        if channel_id:
+            unique = ET.SubElement(
+                root,
+                "uniqueid",
+                {"type": "youtube", "default": "true"},
+            )
+            unique.text = channel_id
 
-    tree = ET.ElementTree(root)
-    try:
-        ET.indent(tree, space="  ")
-    except AttributeError:
-        pass
-    tree.write(
-        channel_dir / "tvshow.nfo",
-        encoding="utf-8",
-        xml_declaration=True,
-    )
+        tree = ET.ElementTree(root)
+        try:
+            ET.indent(tree, space="  ")
+        except AttributeError:
+            pass
+        tree.write(
+            channel_dir / "tvshow.nfo",
+            encoding="utf-8",
+            xml_declaration=True,
+        )
 
     thumbnail_url = _best_thumbnail_url(info)
     if not thumbnail_url:
@@ -3431,6 +3428,43 @@ def write_direct_download_series_metadata(info, output_path):
         _write_jpeg_variant(image, channel_dir / "fanart.jpg", (1920, 1080))
         _write_jpeg_variant(image, channel_dir / "poster.jpg", (1000, 1500))
         _write_jpeg_variant(image, channel_dir / "banner.jpg", (1920, 480))
+
+
+
+def single_download_ydl_settings():
+    mode = get_setting("single_download_format", "best").strip()
+    audio_format = get_setting("single_download_audio_format", "m4a").strip().lower()
+
+    if mode == "audio":
+        return {
+            "format": "bestaudio/best",
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": audio_format,
+                    "preferredquality": "0",
+                }
+            ],
+        }
+
+    heights = {
+        "2160p": 2160,
+        "1440p": 1440,
+        "1080p": 1080,
+        "720p": 720,
+        "480p": 480,
+        "360p": 360,
+    }
+    height = heights.get(mode)
+    if height:
+        return {
+            "format": f"bestvideo*[height<={height}]+bestaudio/best[height<={height}]/best",
+            "merge_output_format": "mp4",
+        }
+    return {
+        "format": "bestvideo*+bestaudio/best",
+        "merge_output_format": "mp4",
+    }
 
 
 def run_download_job(job_id):
@@ -3455,15 +3489,17 @@ def run_download_job(job_id):
         progress=0,
     )
 
-    output_template = str(
-        output_dir
-        / "%(uploader,channel|Unknown Channel).80B"
-        / "%(title).180B [%(id)s].%(ext)s"
+    relative_template = (
+        get_setting(
+            "single_download_output_template",
+            "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
+        )
+        if job["source_type"] == "single"
+        else "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s"
     )
+    output_template = str(output_dir / relative_template)
 
     ydl_opts = {
-        "format": "bestvideo*+bestaudio/best",
-        "merge_output_format": "mp4",
         "outtmpl": output_template,
         "noplaylist": True,
         "continuedl": True,
@@ -3476,6 +3512,13 @@ def run_download_job(job_id):
         "quiet": True,
         "no_warnings": True,
     }
+    if job["source_type"] == "single":
+        ydl_opts.update(single_download_ydl_settings())
+    else:
+        ydl_opts.update({
+            "format": "bestvideo*+bestaudio/best",
+            "merge_output_format": "mp4",
+        })
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -3509,7 +3552,15 @@ def run_download_job(job_id):
 
         if job.get("source_type") in {"single", "emby_download"}:
             try:
-                write_direct_download_series_metadata(info, output_path)
+                write_direct_download_series_metadata(
+                    info,
+                    output_path,
+                    write_nfo=(
+                        setting_bool("single_download_write_nfo", True)
+                        if job.get("source_type") == "single"
+                        else True
+                    ),
+                )
             except Exception as exc:
                 log_activity(
                     "download_metadata",
@@ -3798,11 +3849,19 @@ def annotate_favourites(items, user_id=None):
     user_id = user_id or current_user_id()
     channel_ids = favourite_channel_ids(user_id)
     video_ids = favourite_video_ids(user_id)
+    with db() as conn:
+        subscribed_ids = {
+            row["channel_id"]
+            for row in conn.execute(
+                "SELECT channel_id FROM subscriptions WHERE active = 1"
+            ).fetchall()
+        }
     annotated = []
     for item in items or []:
         row = dict(item)
         row["is_favourite_channel"] = row.get("channel_id") in channel_ids
         row["is_favourite_video"] = row.get("video_id") in video_ids
+        row["is_subscribed"] = row.get("channel_id") in subscribed_ids
         annotated.append(row)
     return annotated
 
@@ -3951,7 +4010,9 @@ def current_emby_poll_interval():
 
 def new_subscription_policy():
     value = get_setting("new_subscription_policy", "auto_enable").strip()
-    if value not in {"auto_enable", "disabled", "review"}:
+    if value == "review":
+        value = "disabled"
+    if value not in {"auto_enable", "disabled"}:
         return "auto_enable"
     return value
 
@@ -4315,14 +4376,12 @@ def refresh_subscriptions():
                 # subscriptions are not treated as newly subscribed channels.
                 if first_import:
                     enabled = 0
-                    needs_review = 1
+                    needs_review = 0
                     source_authorised = 0
                 else:
                     enabled = 1 if policy == "auto_enable" else 0
-                    needs_review = 1 if policy == "review" else 0
-                    source_authorised = (
-                        1 if policy == "auto_enable" else 0
-                    )
+                    needs_review = 0
+                    source_authorised = 1 if enabled else 0
 
                 conn.execute(
                     """
@@ -4365,10 +4424,8 @@ def refresh_subscriptions():
                 if was_inactive:
                     reactivated_count += 1
                     enabled = 1 if policy == "auto_enable" else 0
-                    needs_review = 1 if policy == "review" else 0
-                    source_authorised = (
-                        1 if policy == "auto_enable" else 0
-                    )
+                    needs_review = 0
+                    source_authorised = 1 if enabled else 0
 
                     conn.execute(
                         """
@@ -5413,6 +5470,65 @@ def profile_form_multi_values(form, field_fragment):
     return list(dict.fromkeys(values))
 
 
+
+def media_profile_extra_fields(form):
+    """Return Pinchflat profile fields not already represented by our friendly controls."""
+    known = {
+        "media_profile[name]",
+        "media_profile[output_path_template]",
+        "media_profile[download_subs]",
+        "media_profile[embed_subs]",
+        "media_profile[download_thumbnail]",
+        "media_profile[embed_thumbnail]",
+        "media_profile[download_metadata]",
+        "media_profile[embed_metadata]",
+        "media_profile[shorts_behaviour]",
+        "media_profile[livestream_behaviour]",
+        "media_profile[preferred_resolution]",
+        "media_profile[redownload_delay_days]",
+        "media_profile[download_nfo]",
+        "media_profile[download_source_images]",
+        "media_profile[sponsorblock_behaviour]",
+    }
+
+    results = []
+    seen = set()
+
+    for field in form.find_all(["input", "select", "textarea"], attrs={"name": True}):
+        name = str(field.get("name") or "").strip()
+        if not name or name in known or "sponsorblock_categories" in name:
+            continue
+        if not name.startswith("media_profile["):
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+
+        field_type = (field.get("type") or "text").lower() if field.name == "input" else field.name
+        if field_type in {"hidden", "submit", "button", "file", "image", "radio"}:
+            continue
+
+        key = name[len("media_profile["):-1] if name.endswith("]") else name
+        label = key.replace("_", " ").strip().title()
+        label_node = field.find_parent("label")
+        if label_node:
+            label_text = " ".join(label_node.stripped_strings).strip()
+            if label_text:
+                label = label_text[:120]
+
+        entry = {
+            "name": name,
+            "key": key,
+            "label": label,
+            "type": field_type,
+            "value": profile_form_value(form, name, ""),
+            "checked": profile_form_bool(form, name, False),
+            "options": profile_form_select_options(form, name) if field.name == "select" else [],
+        }
+        results.append(entry)
+
+    return results
+
 def load_media_profile_form(profile_id, session_obj=None):
     session_obj = session_obj or pinchflat_session()
     page = session_obj.get(
@@ -5454,6 +5570,7 @@ def media_profile_settings(profile_id):
         "id": str(profile_id or ""),
         "name": "",
         "output_path_template": EMBY_OUTPUT_PATH_TEMPLATE,
+        "extra_fields": [],
         "download_subs": False,
         "embed_subs": False,
         "download_thumbnail": False,
@@ -5507,6 +5624,7 @@ def media_profile_settings(profile_id):
             "media_profile[name]",
             f"Media Profile {profile_id}",
         )
+        settings["extra_fields"] = media_profile_extra_fields(form)
         settings["output_path_template"] = profile_form_value(
             form,
             field_map["output_path_template"],
@@ -5593,6 +5711,10 @@ def update_media_profile_settings(profile_id, values):
             payload[field_name] = value
 
     set_if_supported(
+        "media_profile[name]",
+        values.get("name", profile_form_value(form, "media_profile[name]", "")),
+    )
+    set_if_supported(
         "media_profile[output_path_template]",
         values.get("output_path_template", EMBY_OUTPUT_PATH_TEMPLATE),
     )
@@ -5655,6 +5777,19 @@ def update_media_profile_settings(profile_id, values):
         )
         categories = values.get("sponsorblock_categories") or []
         payload[category_name] = categories if categories else [""]
+
+    extra_values = values.get("extra_values") or {}
+    for field_name, field_value in extra_values.items():
+        if not str(field_name).startswith("media_profile["):
+            continue
+        field = form.find(attrs={"name": field_name})
+        if field is None:
+            continue
+        if field.name == "input" and (field.get("type") or "").lower() == "checkbox":
+            truthy = str(field_value).strip().lower() in {"1", "true", "yes", "on"}
+            payload[field_name] = "true" if truthy else "false"
+        else:
+            payload[field_name] = str(field_value)
 
     action = form.get("action") or f"/media_profiles/{profile_id}"
     if action.startswith(("http://", "https://")):
@@ -5960,11 +6095,8 @@ def complete_pinchflat_onboarding():
 
 
 def subscription_source_authorised(sub):
-    value = row_value(sub, "source_authorised", 0)
-    try:
-        return bool(int(value))
-    except (TypeError, ValueError):
-        return bool(value)
+    # v2.6: the Enabled toggle is the single authority for Pinchflat membership.
+    return bool(row_value(sub, "active", 1)) and subscription_download_enabled(sub)
 
 
 def subscription_download_enabled(sub):
@@ -6365,7 +6497,6 @@ def add_pending_sources():
             FROM subscriptions
             WHERE active = 1
               AND pinchflat_added = 0
-              AND COALESCE(needs_review, 0) = 0
               AND COALESCE(download_enabled, 0) = 1
               AND COALESCE(source_authorised, 0) = 1
             ORDER BY first_seen_at ASC, title COLLATE NOCASE ASC
@@ -6659,12 +6790,10 @@ def subscription_view(row):
         item.get("media_profile_id")
         or effective_media_profile_id()
     )
-    item["needs_review"] = bool(item.get("needs_review") or 0)
+    item["needs_review"] = False
 
     if not item.get("active"):
         item["ui_status"] = "removed"
-    elif item.get("needs_review"):
-        item["ui_status"] = "review"
     elif item.get("last_error"):
         item["ui_status"] = "error"
     elif not item.get("pinchflat_added"):
@@ -7336,7 +7465,6 @@ def index():
         "pending": sum(1 for sub in subs if sub["active"] and not sub["pinchflat_added"]),
         "errors": sum(1 for sub in subs if sub.get("last_error")),
         "removed": sum(1 for sub in subs if not sub["active"]),
-        "review": sum(1 for sub in subs if sub.get("needs_review")),
     }
 
     next_youtube_sync = None
@@ -7418,6 +7546,13 @@ def index():
         emby_download_remove_after_success=setting_bool("emby_download_remove_after_success", True),
         emby_download_folder=get_setting("emby_download_folder", "Emby Download"),
         single_download_folder=get_setting("single_download_folder", "Single Downloads"),
+        single_download_format=get_setting("single_download_format", "best"),
+        single_download_audio_format=get_setting("single_download_audio_format", "m4a"),
+        single_download_write_nfo=setting_bool("single_download_write_nfo", True),
+        single_download_output_template=get_setting(
+            "single_download_output_template",
+            "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
+        ),
         subscription_download_template=profile_settings.get(
             "output_path_template",
             EMBY_OUTPUT_PATH_TEMPLATE,
@@ -7543,12 +7678,11 @@ def save_default_history():
 
 @app.post("/subscriptions/<channel_id>/save")
 def save_subscription_row(channel_id):
-    """Save one source. Enabled controls Pinchflat membership."""
+    """Save one source. Enabled is authoritative for Pinchflat membership."""
     mode = request.form.get("history_mode", "default").strip()
     custom_date = request.form.get("history_custom_date", "").strip()
     profile_id = request.form.get("media_profile_id", "").strip()
     enabled = "1" in request.form.getlist("download_enabled")
-    approve = request.form.get("approve", "0") == "1"
 
     if mode not in HISTORY_MODES:
         flash("Unknown source download range.", "error")
@@ -7560,10 +7694,7 @@ def save_subscription_row(channel_id):
             if parsed > date.today():
                 raise ValueError
         except ValueError:
-            flash(
-                "Choose a valid custom date which is not in the future.",
-                "error",
-            )
+            flash("Choose a valid custom date which is not in the future.", "error")
             return redirect(url_for("index") + "#subscriptions")
 
     with db() as conn:
@@ -7577,25 +7708,15 @@ def save_subscription_row(channel_id):
         return redirect(url_for("index") + "#subscriptions")
 
     current = dict(row)
-    needs_review = bool(current.get("needs_review"))
-
-    if approve and needs_review:
-        needs_review = False
-        enabled = True
-
-    source_authorised = 1 if (enabled and not needs_review) else 0
-
     prospective = dict(current)
-    prospective.update(
-        {
-            "download_enabled": 1 if enabled else 0,
-            "source_authorised": source_authorised,
-            "history_mode": mode,
-            "history_custom_date": custom_date,
-            "media_profile_id": profile_id or None,
-            "needs_review": 1 if needs_review else 0,
-        }
-    )
+    prospective.update({
+        "download_enabled": 1 if enabled else 0,
+        "source_authorised": 1 if enabled else 0,
+        "history_mode": mode,
+        "history_custom_date": custom_date,
+        "media_profile_id": profile_id or None,
+        "needs_review": 0,
+    })
 
     with db() as conn:
         conn.execute(
@@ -7606,135 +7727,45 @@ def save_subscription_row(channel_id):
                 history_mode = ?,
                 history_custom_date = ?,
                 media_profile_id = ?,
-                needs_review = ?,
+                needs_review = 0,
                 last_error = NULL
             WHERE channel_id = ?
             """,
             (
                 1 if enabled else 0,
-                source_authorised,
+                1 if enabled else 0,
                 mode,
                 custom_date,
                 profile_id or None,
-                1 if needs_review else 0,
                 channel_id,
             ),
         )
 
     try:
-        result = apply_subscription_source_authority(
-            prospective,
-            apply_settings=True,
-        )
-
+        result = apply_subscription_source_authority(prospective, apply_settings=True)
         with db() as conn:
             conn.execute(
-                """
-                UPDATE subscriptions
-                SET retry_count = 0
-                WHERE channel_id = ?
-                """,
+                "UPDATE subscriptions SET retry_count = 0 WHERE channel_id = ?",
                 (channel_id,),
             )
 
         if result["state"] == "disabled" and result.get("pending"):
-            flash(
-                f"{current['title']} saved. Pinchflat source removal is in progress.",
-                "success",
-            )
-        elif approve and bool(current.get("needs_review")):
-            flash(
-                f"{current['title']} approved, enabled and added to Pinchflat.",
-                "success",
-            )
+            flash(f"{current['title']} saved. Pinchflat source removal is in progress.", "success")
         elif enabled:
-            flash(
-                f"{current['title']} saved and enabled in Pinchflat.",
-                "success",
-            )
+            flash(f"{current['title']} saved and enabled in Pinchflat.", "success")
         else:
-            flash(
-                f"{current['title']} saved and removed from Pinchflat. Existing downloaded files were kept.",
-                "success",
-            )
-
+            flash(f"{current['title']} saved and removed from Pinchflat. Existing downloaded files were kept.", "success")
     except Exception as exc:
         with db() as conn:
             conn.execute(
-                """
-                UPDATE subscriptions
-                SET last_error = ?,
-                    retry_count = retry_count + 1
-                WHERE channel_id = ?
-                """,
+                "UPDATE subscriptions SET last_error = ?, retry_count = retry_count + 1 WHERE channel_id = ?",
                 (str(exc)[:1000], channel_id),
             )
-
-        flash(
-            "Your choices were saved locally, but Pinchflat could not be "
-            f"reconciled: {exc}",
-            "error",
-        )
+        flash(f"Your choices were saved locally, but Pinchflat could not be reconciled: {exc}", "error")
 
     return redirect(url_for("index") + "#subscriptions")
 
 
-@app.post("/subscriptions/<channel_id>/unapprove")
-def unapprove_subscription(channel_id):
-    with db() as conn:
-        row = conn.execute(
-            "SELECT * FROM subscriptions WHERE channel_id = ?",
-            (channel_id,),
-        ).fetchone()
-
-    if not row:
-        flash("The YouTube subscription was not found.", "error")
-        return redirect(url_for("index") + "#subscriptions")
-
-    row_dict = dict(row)
-    prospective = dict(row_dict)
-    prospective.update(
-        {
-            "needs_review": 1,
-            "download_enabled": 0,
-            "source_authorised": 0,
-        }
-    )
-
-    with db() as conn:
-        conn.execute(
-            """
-            UPDATE subscriptions
-            SET needs_review = 1,
-                download_enabled = 0,
-                source_authorised = 0,
-                last_error = NULL
-            WHERE channel_id = ?
-            """,
-            (channel_id,),
-        )
-
-    try:
-        apply_subscription_source_authority(
-            prospective,
-            apply_settings=True,
-        )
-        flash(
-            f"{row_dict['title']} moved back to review and removed from Pinchflat.",
-            "success",
-        )
-    except Exception as exc:
-        with db() as conn:
-            conn.execute(
-                "UPDATE subscriptions SET last_error = ? WHERE channel_id = ?",
-                (str(exc)[:1000], channel_id),
-            )
-        flash(
-            f"The channel was moved back to review, but Pinchflat removal failed: {exc}",
-            "error",
-        )
-
-    return redirect(url_for("index") + "#subscriptions")
 
 
 @app.post("/subscriptions/<channel_id>/history")
@@ -8007,7 +8038,9 @@ def save_general_settings():
     new_policy = request.form.get("new_subscription_policy", "auto_enable").strip()
     removed_policy = request.form.get("unsubscribe_policy", "keep").strip()
 
-    if new_policy not in {"auto_enable", "disabled", "review"}:
+    if new_policy == "review":
+        new_policy = "disabled"
+    if new_policy not in {"auto_enable", "disabled"}:
         new_policy = "auto_enable"
     if removed_policy not in {"keep", "disable", "remove", "remove_delete"}:
         removed_policy = "keep"
@@ -8117,11 +8150,6 @@ def save_download_paths():
             request.form.get("emby_download_folder", ""),
             "Emby Download",
         )
-        single_folder = safe_relative_download_folder(
-            request.form.get("single_download_folder", ""),
-            "Single Downloads",
-        )
-
         current = media_profile_settings(profile_id)
         if current.get("error"):
             raise RuntimeError(current["error"])
@@ -8131,15 +8159,13 @@ def save_download_paths():
         update_media_profile_settings(profile_id, values)
 
         set_setting("emby_download_folder", emby_folder)
-        set_setting("single_download_folder", single_folder)
 
         log_activity(
             "settings",
             "Download paths updated",
             (
                 f"Subscriptions: {subscription_template}. "
-                f"Emby Download: {emby_folder}. "
-                f"Single Download: {single_folder}."
+                f"Emby Download: {emby_folder}."
             ),
             "success",
         )
@@ -8147,6 +8173,42 @@ def save_download_paths():
     except Exception as exc:
         flash(f"Download paths could not be saved: {exc}", "error")
 
+    return redirect(url_for("index") + "#downloads")
+
+
+@app.post("/settings/single-download")
+def save_single_download_settings():
+    download_format = request.form.get("single_download_format", "best").strip()
+    audio_format = request.form.get("single_download_audio_format", "m4a").strip().lower()
+    allowed_formats = {"best", "2160p", "1440p", "1080p", "720p", "480p", "360p", "audio"}
+    allowed_audio = {"m4a", "mp3", "opus", "flac", "wav"}
+    if download_format not in allowed_formats:
+        download_format = "best"
+    if audio_format not in allowed_audio:
+        audio_format = "m4a"
+
+    try:
+        folder = safe_relative_download_folder(
+            request.form.get("single_download_folder", ""),
+            "Single Downloads",
+        )
+        template = request.form.get(
+            "single_download_output_template",
+            "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
+        ).strip()
+        if not template:
+            template = "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s"
+        if template.startswith(("/", "\\")) or ".." in Path(template).parts:
+            raise RuntimeError("The yt-dlp output template must stay inside the selected /downloads folder.")
+
+        set_setting("single_download_folder", folder)
+        set_setting("single_download_format", download_format)
+        set_setting("single_download_audio_format", audio_format)
+        set_setting("single_download_write_nfo", "1" if request.form.get("single_download_write_nfo") == "1" else "0")
+        set_setting("single_download_output_template", template)
+        flash("One-time download settings saved.", "success")
+    except Exception as exc:
+        flash(f"One-time download settings could not be saved: {exc}", "error")
     return redirect(url_for("index") + "#downloads")
 
 
@@ -8208,6 +8270,26 @@ def save_pinchflat_settings():
     return redirect(url_for("index") + "#pinchflat")
 
 
+@app.post("/settings/pinchflat/profile/create")
+def create_pinchflat_profile_from_settings():
+    name = request.form.get("profile_name", "").strip()
+    resolution = request.form.get("preferred_resolution", "1080p").strip() or "1080p"
+    if not name:
+        flash("Enter a name for the new Media Profile.", "error")
+        return redirect(url_for("index") + "#pinchflat")
+    try:
+        created, _form, _profiles = create_media_profile(
+            name,
+            resolution,
+            set_as_default=True,
+        )
+        log_activity("settings", "Pinchflat Media Profile created", f"Created {created['name']}.", "success")
+        flash(f"Created Media Profile {created['name']} and selected it.", "success")
+    except Exception as exc:
+        flash(f"Media Profile could not be created: {exc}", "error")
+    return redirect(url_for("index") + "#pinchflat")
+
+
 @app.post("/settings/pinchflat/profile")
 def save_current_media_profile():
     profile_id = effective_media_profile_id()
@@ -8222,7 +8304,16 @@ def save_current_media_profile():
     if behaviour not in {"disabled", "mark", "remove"}:
         behaviour = "remove"
 
+    extra_values = {}
+    for field_name in request.form:
+        if not field_name.startswith("pf_extra::"):
+            continue
+        original_name = field_name[len("pf_extra::"):]
+        field_values = request.form.getlist(field_name)
+        extra_values[original_name] = field_values[-1] if field_values else ""
+
     values = {
+        "name": request.form.get("profile_name", "").strip(),
         "output_path_template": (
             request.form.get(
                 "output_path_template",
@@ -8264,6 +8355,7 @@ def save_current_media_profile():
         "sponsorblock_categories": request.form.getlist(
             "sponsorblock_categories"
         ),
+        "extra_values": extra_values,
     }
 
     try:
@@ -8346,35 +8438,10 @@ def retry_subscription(channel_id):
 
     try:
         row_dict = dict(row)
-
-        if row_dict["pinchflat_added"] and row_dict["pinchflat_source_id"]:
-            if not pinchflat_source_exists(row_dict["pinchflat_source_id"]):
-                clear_stale_pinchflat_link(channel_id)
-                row_dict["pinchflat_added"] = 0
-                row_dict["pinchflat_source_id"] = None
-
-        if row_dict["pinchflat_added"] and row_dict["pinchflat_source_id"]:
-            update_pinchflat_source_settings(
-                row_dict["pinchflat_source_id"],
-                cutoff=subscription_cutoff(row_dict),
-                download_enabled=subscription_download_enabled(row_dict),
-                media_profile_id=subscription_media_profile_id(row_dict),
-            )
-        elif not row_dict["needs_review"]:
-            _result, source_id = add_pinchflat_source(row_dict)
-            with db() as conn:
-                conn.execute(
-                    """
-                    UPDATE subscriptions
-                    SET pinchflat_added = 1,
-                        pinchflat_source_id = ?,
-                        last_error = NULL,
-                        retry_count = 0
-                    WHERE channel_id = ?
-                    """,
-                    (source_id, channel_id),
-                )
-
+        result = apply_subscription_source_authority(
+            row_dict,
+            apply_settings=True,
+        )
         with db() as conn:
             conn.execute(
                 """
@@ -8384,7 +8451,10 @@ def retry_subscription(channel_id):
                 """,
                 (channel_id,),
             )
-        flash("Source retry completed.", "success")
+        flash(
+            f"Retried {row_dict['title']}. Pinchflat state: {result.get('state', 'updated')}.",
+            "success",
+        )
     except Exception as exc:
         with db() as conn:
             conn.execute(
@@ -8454,52 +8524,6 @@ def bulk_subscription_action():
                     prospective,
                     apply_settings=True,
                 )
-
-            elif action == "approve":
-                with db() as conn:
-                    conn.execute(
-                        """
-                        UPDATE subscriptions
-                        SET needs_review = 0,
-                            download_enabled = 1,
-                            source_authorised = 1,
-                            last_error = NULL
-                        WHERE channel_id = ?
-                        """,
-                        (row["channel_id"],),
-                    )
-
-                prospective["needs_review"] = 0
-                prospective["download_enabled"] = 1
-                prospective["source_authorised"] = 1
-
-                apply_subscription_source_authority(
-                    prospective,
-                    apply_settings=True,
-                )
-
-            elif action == "unapprove":
-                with db() as conn:
-                    conn.execute(
-                        """
-                        UPDATE subscriptions
-                        SET needs_review = 1,
-                            download_enabled = 0,
-                            source_authorised = 0,
-                            last_error = NULL
-                        WHERE channel_id = ?
-                        """,
-                        (row["channel_id"],),
-                    )
-
-                prospective["needs_review"] = 1
-                prospective["download_enabled"] = 0
-                prospective["source_authorised"] = 0
-                apply_subscription_source_authority(
-                    prospective,
-                    apply_settings=True,
-                )
-
             elif action == "range":
                 mode = request.form.get(
                     "bulk_history_mode",
@@ -8825,9 +8849,14 @@ def get_favourites():
             dict(row)
             for row in conn.execute(
                 """
-                SELECT * FROM saved_videos
-                WHERE user_id = ? AND favourite = 1
-                ORDER BY updated_at DESC
+                SELECT sv.*,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM subscriptions s
+                           WHERE s.channel_id = sv.channel_id AND s.active = 1
+                       ) THEN 1 ELSE 0 END AS is_subscribed
+                FROM saved_videos sv
+                WHERE sv.user_id = ? AND sv.favourite = 1
+                ORDER BY sv.updated_at DESC
                 """,
                 (user_id,),
             ).fetchall()
@@ -9090,9 +9119,15 @@ def subscribe_to_youtube_channel():
     if not channel_id:
         return jsonify({"ok": False, "error": "Channel ID is missing."}), 400
     try:
-        youtube_subscribe(channel_id)
+        with db() as conn:
+            existing = conn.execute(
+                "SELECT active FROM subscriptions WHERE channel_id = ?",
+                (channel_id,),
+            ).fetchone()
+        if not existing or not bool(existing["active"]):
+            youtube_subscribe(channel_id)
         refresh_subscriptions()
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "already_subscribed": bool(existing and existing["active"])})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 

@@ -2,6 +2,29 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.6.0
+
+Interface, source-control and settings refresh.
+
+- Renames the main interface to `Pinchflat Sync` and removes the old subtitle.
+- Renames the main sync action to `Pinchflat Sync`.
+- Moves `Refresh YouTube` beside it and gives both primary-action styling.
+- Replaces the top `Open Pinchflat` button with a clickable Pinchflat icon beside the Online state.
+- Moves Single Download into the Downloads dashboard tile.
+- Adds a minimise control to Latest from your subscriptions.
+- Moves custom favourite video lists into Settings > Favourites.
+- Moves Activity into Settings > Logs alongside recent downloads and sync runs.
+- Retires the old Approve and Unapprove workflow. The Enabled toggle is now the sole authority for Pinchflat source membership.
+- Existing databases are migrated automatically so legacy review state no longer blocks source reconciliation.
+- Makes Save and Unsubscribe source-row actions compact and equal in size.
+- Standardises normal and compact button dimensions across the interface.
+- Expands Settings > Pinchflat into a Media Profile manager with profile creation, editing and dynamically detected Pinchflat profile fields.
+- Adds profile-name editing and support for Pinchflat text, select, checkbox and textarea fields not already represented by friendly controls.
+- Adds Settings > Downloads > One-time download with video/quality mode, audio format, NFO control, download folder and a yt-dlp output template.
+- Keeps One-time Download settings independent from the normal subscription and Emby Download paths.
+- Adds Subscribe controls to the shared in-app video popup and Random Shorts. Existing subscriptions show as Subscribed.
+- Keeps the app on the v2 release line.
+
 ## Version 2.5.1
 
 Random Videos / Shorts separation and Shorts layout fix.
