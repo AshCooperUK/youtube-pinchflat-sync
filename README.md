@@ -2,6 +2,26 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.6.1
+
+Media Profile manager and one-time-download UI refresh.
+
+- Adds `Single Download` to the main top menu.
+- Keeps the Downloads tile quick-download icon.
+- Removes the duplicate Single Download launcher from Settings > Downloads. Settings now only controls one-time-download defaults.
+- Adds `One-time download` to the in-app video player action panel.
+- Adds `Download` to Random Shorts. Both routes use the same configured one-time-download backend and progress dialog.
+- Keeps download controls outside the YouTube iframe so YouTube's own player buttons are never covered.
+- Rebuilds Settings > Pinchflat as a cleaner Media Profile Manager.
+- Adds profile selection, create and delete controls at the top of the manager.
+- Adds guarded Media Profile deletion. The last profile cannot be deleted, and profiles used by enabled app-managed Pinchflat sources are protected.
+- Moves Pinchflat statistics to the bottom of the Media Profile Manager.
+- Reorganises profile settings into General, Subtitles, Thumbnails, Metadata, Release Formats, Quality, Media Center, SponsorBlock and Advanced sections.
+- Dynamically detected fields from the installed Pinchflat release are grouped into the most relevant section when possible.
+- Adds local starting presets for Default, Media Center / Emby, Music and Archiving. Presets only populate the editor and require Save Profile before anything is written to Pinchflat.
+- Adds an Output Template Help popup with Liquid syntax, yt-dlp syntax, media-centre aliases, custom aliases and common template variables.
+- Adds explanatory text beside the main Pinchflat profile options.
+
 ## Version 2.6.0
 
 Interface, source-control and settings refresh.

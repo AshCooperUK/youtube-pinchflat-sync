@@ -730,6 +730,104 @@
     .tab-panel { display:none; }
     .tab-panel.active { display:block; }
     .profile-settings-grid { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin:8px 0 0; }
+    .profile-manager-toolbar {
+      display:grid;
+      grid-template-columns:minmax(220px,1fr) auto;
+      gap:12px;
+      align-items:end;
+    }
+    .profile-manager-actions {
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .profile-editor-heading {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+    .profile-editor-heading h3 { margin:0; }
+    .profile-section {
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:16px;
+      background:rgba(255,255,255,.018);
+    }
+    .profile-section h3 {
+      margin:0 0 8px;
+      font-size:16px;
+    }
+    .profile-section .section-help {
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.45;
+      margin:-2px 0 12px;
+    }
+    .profile-control-help {
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.4;
+      margin-top:-5px;
+      margin-bottom:9px;
+    }
+    .profile-preset-row {
+      display:grid;
+      grid-template-columns:minmax(180px,280px) auto;
+      gap:8px;
+      align-items:end;
+      margin:0 0 14px;
+    }
+    .profile-stats-footer {
+      margin-top:14px;
+      border-top:1px solid var(--line);
+      padding-top:14px;
+    }
+    .profile-create-panel {
+      margin-top:12px;
+      padding-top:12px;
+      border-top:1px solid var(--line);
+    }
+    .template-help-button {
+      min-width:42px !important;
+      width:42px !important;
+      padding-left:0 !important;
+      padding-right:0 !important;
+    }
+    #profile-template-help-dialog {
+      width:min(920px,94vw);
+      max-height:90vh;
+    }
+    #profile-template-help-dialog .modal-body {
+      max-height:calc(90vh - 76px);
+      overflow-y:auto;
+    }
+    .syntax-example {
+      display:block;
+      padding:8px 10px;
+      border-radius:8px;
+      background:#07101d;
+      border:1px solid var(--line);
+      overflow-wrap:anywhere;
+      margin:6px 0 10px;
+    }
+    .syntax-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+      gap:12px;
+    }
+    .syntax-list {
+      margin:6px 0 0;
+      padding-left:20px;
+    }
+    @media (max-width:760px) {
+      .profile-manager-toolbar { grid-template-columns:1fr; }
+      .profile-manager-actions { justify-content:flex-start; }
+      .profile-preset-row { grid-template-columns:1fr; }
+    }
     .compact-setting { padding:14px; }
     .compact-setting h3 { margin-bottom:10px; }
     .mini-stat-grid {
@@ -795,6 +893,7 @@
       <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
       </form>
+      <button class="btn secondary" type="button" onclick="openSingleDownload()" title="One-time download">↓ Single Download</button>
       {% endif %}
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
       <button class="btn ghost" type="button" onclick="openDiscover()" {% if not google_connected %}disabled{% endif %}>Discover</button>
@@ -1216,6 +1315,7 @@
           <button id="latest-popup-channel-heart" class="btn secondary" type="button" onclick="toggleLatestPopupChannelFavourite()">♡ Favourite channel</button>
           <button id="latest-popup-youtube-subscribe" class="btn secondary" type="button" onclick="subscribeLatestPopupChannel()">＋ Subscribe</button>
           <button id="latest-popup-youtube-like" class="btn secondary" type="button" onclick="likeLatestPopupOnYouTube()">👍 Like on YouTube</button>
+          <button id="latest-popup-download" class="btn secondary" type="button" onclick="downloadLatestPopupVideo()">↓ One-time download</button>
           <a id="latest-popup-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank" rel="noopener">Open on YouTube</a>
         </div>
 
@@ -1285,6 +1385,7 @@
             <button id="shorts-channel-heart" class="btn secondary" type="button" onclick="toggleCurrentShortChannelFavourite()">♡ Channel</button>
             <button id="shorts-youtube-subscribe" class="btn secondary" type="button" onclick="subscribeCurrentShortChannel()">＋ Subscribe</button>
             <button id="shorts-youtube-like" class="btn secondary" type="button" onclick="likeCurrentShortOnYouTube()">👍 Like on YouTube</button>
+            <button id="shorts-download" class="btn secondary" type="button" onclick="downloadCurrentShort()">↓ Download</button>
             <a id="shorts-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank">Open on YouTube</a>
           </div>
 
@@ -1332,6 +1433,86 @@
       <button class="btn secondary" type="button" onclick="createListFromPicker()">New list</button>
     </div>
     <div id="list-picker-error" class="bad small" style="margin-top:10px"></div>
+  </div>
+</dialog>
+
+<dialog id="profile-template-help-dialog">
+  <div class="modal-head">
+    <div>
+      <h2 style="margin:0">Output Template Help</h2>
+      <div class="muted small">Pinchflat output-path syntax and useful template variables.</div>
+    </div>
+    <button class="modal-close" type="button" onclick="closeProfileTemplateHelp()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="profile-section">
+      <h3>Output Template Syntax</h3>
+      <p>You can mix Liquid-style variables, yt-dlp-style variables and normal folder names in the same path.</p>
+
+      <strong>Liquid-style</strong>
+      <code class="syntax-example">/{{ '{{ channel }}' }}/{{ '{{ title }}' }} - {{ '{{ id }}' }}.{{ '{{ ext }}' }}</code>
+
+      <strong>yt-dlp-style</strong>
+      <code class="syntax-example">/%(channel)s/%(duration&gt;%H-%M-%S)s-%(id)s.%(ext)s</code>
+
+      <strong>Bare folders and Liquid-style</strong>
+      <code class="syntax-example">/videos/1080p/{{ '{{ id }}' }}.{{ '{{ ext }}' }}</code>
+
+      <p class="muted small">Your template must end with an extension option such as <code>.{{ '{{ ext }}' }}</code> or <code>.%(ext)s</code>.</p>
+    </div>
+
+    <div class="syntax-grid" style="margin-top:14px">
+      <div class="profile-section">
+        <h3>Media Center Custom Aliases</h3>
+        <ul class="syntax-list">
+          <li><code>{{ '{{ season_by_year__episode_by_date }}' }}</code> → Season YYYY/sYYYYeMMDD</li>
+          <li><code>{{ '{{ season_by_year__episode_by_date_and_index }}' }}</code> → recommended. Handles date collisions with an index.</li>
+          <li><code>{{ '{{ static_season__episode_by_index }}' }}</code> → Season 1/s01eXX. Best for playlists that do not change.</li>
+          <li><code>{{ '{{ static_season__episode_by_date }}' }}</code> → Season 1/s01eYYMMDD.</li>
+        </ul>
+      </div>
+
+      <div class="profile-section">
+        <h3>Other Custom Aliases</h3>
+        <ul class="syntax-list">
+          <li><code>{{ '{{ upload_day }}' }}</code></li>
+          <li><code>{{ '{{ upload_month }}' }}</code></li>
+          <li><code>{{ '{{ upload_year }}' }}</code></li>
+          <li><code>{{ '{{ upload_yyyy_mm_dd }}' }}</code></li>
+          <li><code>{{ '{{ source_custom_name }}' }}</code></li>
+          <li><code>{{ '{{ source_collection_id }}' }}</code></li>
+          <li><code>{{ '{{ source_collection_name }}' }}</code></li>
+          <li><code>{{ '{{ source_collection_type }}' }}</code></li>
+          <li><code>{{ '{{ artist_name }}' }}</code></li>
+          <li><code>{{ '{{ season_from_date }}' }}</code></li>
+          <li><code>{{ '{{ season_episode_from_date }}' }}</code></li>
+          <li><code>{{ '{{ season_episode_index_from_date }}' }}</code></li>
+          <li><code>{{ '{{ media_playlist_index }}' }}</code></li>
+          <li><code>{{ '{{ media_item_id }}' }}</code></li>
+          <li><code>{{ '{{ source_id }}' }}</code></li>
+          <li><code>{{ '{{ media_profile_id }}' }}</code></li>
+        </ul>
+      </div>
+
+      <div class="profile-section">
+        <h3>Common Options</h3>
+        <ul class="syntax-list">
+          <li><code>{{ '{{ id }}' }}</code></li>
+          <li><code>{{ '{{ ext }}' }}</code></li>
+          <li><code>{{ '{{ title }}' }}</code></li>
+          <li><code>{{ '{{ uploader }}' }}</code></li>
+          <li><code>{{ '{{ channel }}' }}</code></li>
+          <li><code>{{ '{{ upload_date }}' }}</code></li>
+          <li><code>{{ '{{ duration_string }}' }}</code></li>
+        </ul>
+      </div>
+
+      <div class="profile-section">
+        <h3>Emby example</h3>
+        <p class="muted small">A media-centre friendly template using one folder per channel and season-style episode names.</p>
+        <code class="syntax-example">/shows/{{ '{{ source_custom_name }}' }}/{{ '{{ season_by_year__episode_by_date_and_index }}' }} - {{ '{{ title }}' }}.{{ '{{ ext }}' }}</code>
+      </div>
+    </div>
   </div>
 </dialog>
 
@@ -1448,45 +1629,315 @@
     </section>
 
     <section class="tab-panel" data-panel="pinchflat">
-      <div class="settings-grid">
-        <div class="setting-box">
-          <h3>Media Profile manager</h3>
-          <form method="post" action="/settings/pinchflat"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <label>Profile
+      <div class="setting-box">
+        <div class="profile-editor-heading">
+          <div>
+            <h3>Media Profile Manager</h3>
+            <div class="muted small">Create, select, edit and delete Pinchflat Media Profiles without leaving this app.</div>
+          </div>
+          <button class="btn ghost" type="button" onclick="openProfileTemplateHelp()">? Template help</button>
+        </div>
+
+        <div class="profile-manager-toolbar">
+          <form method="post" action="/settings/pinchflat">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <label>Selected profile
               <select name="pinchflat_media_profile_id" onchange="this.form.submit()">
                 {% for profile in profiles %}
                   <option value="{{ profile.id }}" {% if media_profile_id|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
                 {% endfor %}
               </select>
             </label>
-            <label><input type="checkbox" name="auto_create_media_profile" value="1" {% if auto_create_media_profile %}checked{% endif %}> Automatically create “YouTube Sync” plus 1080p, 720p, Audio Only and 4K profiles</label>
-            <button class="btn">Save Pinchflat</button>
+            <input type="hidden" name="auto_create_media_profile" value="{{ '1' if auto_create_media_profile else '0' }}">
           </form>
+
+          <div class="profile-manager-actions">
+            <button class="btn secondary" type="button" onclick="toggleCreateProfilePanel()">＋ New Profile</button>
+            <form
+              method="post"
+              action="/settings/pinchflat/profile/delete"
+              onsubmit="return confirm('Delete the selected Media Profile? This is blocked while enabled Pinchflat sources still use it.');"
+            >
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <input type="hidden" name="pinchflat_media_profile_id" value="{{ media_profile_id }}">
+              <button class="btn danger" type="submit" {% if profiles|length <= 1 %}disabled{% endif %}>Delete Profile</button>
+            </form>
+          </div>
         </div>
 
-        <div class="setting-box">
+        <div id="create-profile-panel" class="profile-create-panel hidden">
           <h3>Create Media Profile</h3>
           <form method="post" action="/settings/pinchflat/profile/create">
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <label>Profile name
-              <input type="text" name="profile_name" placeholder="My YouTube Profile" required maxlength="100">
-            </label>
-            <label>Starting quality
-              <select name="preferred_resolution">
-                <option value="2160p">2160p / 4K</option>
-                <option value="1440p">1440p</option>
-                <option value="1080p" selected>1080p</option>
-                <option value="720p">720p</option>
-                <option value="480p">480p</option>
-                <option value="360p">360p</option>
-                <option value="audio">Audio Only</option>
-              </select>
-            </label>
-            <button class="btn">Create Profile</button>
+            <div class="settings-grid">
+              <label>Profile name
+                <input type="text" name="profile_name" placeholder="My YouTube Profile" required maxlength="100">
+              </label>
+              <label>Starting quality
+                <select name="preferred_resolution">
+                  <option value="2160p">2160p / 4K</option>
+                  <option value="1440p">1440p</option>
+                  <option value="1080p" selected>1080p</option>
+                  <option value="720p">720p</option>
+                  <option value="480p">480p</option>
+                  <option value="360p">360p</option>
+                  <option value="audio">Audio Only</option>
+                </select>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="btn">Create Profile</button>
+              <button class="btn ghost" type="button" onclick="toggleCreateProfilePanel()">Cancel</button>
+            </div>
           </form>
         </div>
 
-        <div class="setting-box">
+        <div style="margin-top:12px">
+          <label>
+            <input
+              type="checkbox"
+              id="auto-create-media-profiles"
+              {% if auto_create_media_profile %}checked{% endif %}
+              onchange="saveAutoCreateProfiles(this)"
+            >
+            Automatically create the standard YouTube Sync, 1080p, 720p, Audio Only and 4K profiles on a fresh Pinchflat install
+          </label>
+        </div>
+
+        {% if media_profile_settings.error %}
+          <div class="flash error" style="margin-top:14px">{{ media_profile_settings.error }}</div>
+        {% else %}
+          <div class="profile-editor-heading" style="margin-top:22px">
+            <div>
+              <h3>Edit {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</h3>
+              <div class="muted small">Editing mode: Standard · Changes are written directly to Pinchflat when you press Save Profile.</div>
+            </div>
+          </div>
+
+          <form method="post" action="/settings/pinchflat/profile" id="pinchflat-media-profile-form">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+            <div class="profile-section" style="margin-bottom:14px">
+              <h3>Use a preset</h3>
+              <div class="section-help">Choose a starting point, review the values below, then press Save Profile. Applying a preset does not save immediately.</div>
+              <div class="profile-preset-row">
+                <label>Preset
+                  <select id="media-profile-preset">
+                    <option value="">Select preset</option>
+                    <option value="default">Default</option>
+                    <option value="media_center">Media Center / Emby</option>
+                    <option value="music">Music</option>
+                    <option value="archiving">Archiving</option>
+                  </select>
+                </label>
+                <button class="btn secondary" type="button" onclick="applyMediaProfilePreset()">Apply Preset</button>
+              </div>
+            </div>
+
+            <div class="profile-section" style="margin-bottom:14px">
+              <h3>General Options</h3>
+              <div class="section-help">Name the profile and control how downloaded files are arranged on disk.</div>
+
+              <label>Name
+                <input type="text" name="profile_name" value="{{ media_profile_settings.name }}" autocomplete="off">
+              </label>
+              <div class="profile-control-help">Something descriptive. The name does not change indexing or downloading.</div>
+
+              <label>Output path template
+                <div style="display:flex;gap:8px;align-items:center">
+                  <input
+                    id="media-profile-output-template"
+                    type="text"
+                    name="output_path_template"
+                    value="{{ media_profile_settings.output_path_template or emby_output_path_template }}"
+                    placeholder="{{ emby_output_path_template }}"
+                    autocomplete="off"
+                    style="flex:1"
+                  >
+                  <button class="btn ghost template-help-button" type="button" onclick="openProfileTemplateHelp()" title="Output template help">?</button>
+                </div>
+              </label>
+              <div class="profile-control-help">Must end with <code>.{{ '{{ ext }}' }}</code> or the yt-dlp equivalent. Press ? for syntax and aliases.</div>
+            </div>
+
+            <div class="settings-grid profile-settings-grid">
+              <div class="profile-section">
+                <h3>Subtitle Options</h3>
+                <div class="section-help">Download subtitle files, embed them into supported media, and configure language behaviour.</div>
+                <label><input type="checkbox" name="download_subs" value="1" {% if media_profile_settings.download_subs %}checked{% endif %} {% if not media_profile_settings.available.download_subs %}disabled{% endif %}> Download Subtitles</label>
+                <div class="profile-control-help">Downloads subtitle files alongside the media file.</div>
+                <label><input type="checkbox" name="embed_subs" value="1" {% if media_profile_settings.embed_subs %}checked{% endif %} {% if not media_profile_settings.available.embed_subs %}disabled{% endif %}> Embed Subtitles</label>
+                <div class="profile-control-help">Downloads and embeds subtitles into the media file where supported.</div>
+                {% for field in media_profile_settings.extra_fields if field.category == 'subtitles' %}
+                  {% if field.type == 'select' %}
+                    <label>{{ field.label }}
+                      <select name="pf_extra::{{ field.name }}">
+                        {% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
+                      </select>
+                    </label>
+                  {% elif field.type == 'checkbox' %}
+                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                  {% else %}
+                    <label>{{ field.label }}<input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}"></label>
+                  {% endif %}
+                {% endfor %}
+              </div>
+
+              <div class="profile-section">
+                <h3>Thumbnail Options</h3>
+                <div class="section-help">Keep thumbnails beside the file, embed them, or both.</div>
+                <label><input type="checkbox" name="download_thumbnail" value="1" {% if media_profile_settings.download_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.download_thumbnail %}disabled{% endif %}> Download Thumbnail</label>
+                <div class="profile-control-help">Downloads the thumbnail alongside the media file.</div>
+                <label><input type="checkbox" name="embed_thumbnail" value="1" {% if media_profile_settings.embed_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.embed_thumbnail %}disabled{% endif %}> Embed Thumbnail</label>
+                <div class="profile-control-help">Embeds the thumbnail into supported media. Recommended for media-centre profiles.</div>
+                {% for field in media_profile_settings.extra_fields if field.category == 'thumbnails' %}
+                  {% if field.type == 'checkbox' %}
+                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                  {% endif %}
+                {% endfor %}
+              </div>
+
+              <div class="profile-section">
+                <h3>Metadata Options</h3>
+                <div class="section-help">Save or embed metadata used by players and archive tools.</div>
+                <label><input type="checkbox" name="download_metadata" value="1" {% if media_profile_settings.download_metadata %}checked{% endif %} {% if not media_profile_settings.available.download_metadata %}disabled{% endif %}> Download Metadata</label>
+                <div class="profile-control-help">Downloads metadata alongside the media file.</div>
+                <label><input type="checkbox" name="embed_metadata" value="1" {% if media_profile_settings.embed_metadata %}checked{% endif %} {% if not media_profile_settings.available.embed_metadata %}disabled{% endif %}> Embed Metadata</label>
+                <div class="profile-control-help">Embeds metadata into supported media. Recommended.</div>
+                {% for field in media_profile_settings.extra_fields if field.category == 'metadata' %}
+                  {% if field.type == 'checkbox' %}
+                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                  {% elif field.type == 'select' %}
+                    <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                  {% else %}
+                    <label>{{ field.label }}<input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}"></label>
+                  {% endif %}
+                {% endfor %}
+              </div>
+
+              <div class="profile-section">
+                <h3>Release Format Options</h3>
+                <div class="section-help">Choose whether Shorts and past livestreams are included in this profile.</div>
+                <label><input type="checkbox" name="include_shorts" value="1" {% if media_profile_settings.include_shorts %}checked{% endif %} {% if not media_profile_settings.available.shorts_behaviour %}disabled{% endif %}> Include Shorts</label>
+                <label><input type="checkbox" name="include_livestreams" value="1" {% if media_profile_settings.include_livestreams %}checked{% endif %} {% if not media_profile_settings.available.livestream_behaviour %}disabled{% endif %}> Include Livestreams</label>
+                {% for field in media_profile_settings.extra_fields if field.category == 'content' %}
+                  {% if field.type == 'select' %}
+                    <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                  {% elif field.type == 'checkbox' %}
+                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                  {% endif %}
+                {% endfor %}
+              </div>
+
+              <div class="profile-section">
+                <h3>Quality Options</h3>
+                <div class="section-help">Pinchflat selects the closest available quality when the exact resolution is unavailable.</div>
+                <label>Preferred Resolution
+                  <select name="preferred_resolution" {% if not media_profile_settings.available.preferred_resolution %}disabled{% endif %}>
+                    {% for option in media_profile_settings.resolution_options %}
+                      <option value="{{ option.value }}" {% if media_profile_settings.preferred_resolution|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Redownload Delay (days)
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    name="redownload_delay_days"
+                    value="{{ media_profile_settings.redownload_delay_days }}"
+                    placeholder="Leave blank to disable"
+                    {% if not media_profile_settings.available.redownload_delay_days %}disabled{% endif %}
+                  >
+                </label>
+                <div class="profile-control-help">Redownloading recent media can improve quality or refresh SponsorBlock data.</div>
+                {% for field in media_profile_settings.extra_fields if field.category == 'quality' %}
+                  {% if field.type == 'select' %}
+                    <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                  {% elif field.type == 'checkbox' %}
+                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                  {% endif %}
+                {% endfor %}
+              </div>
+
+              <div class="profile-section">
+                <h3>Media Center Options</h3>
+                <div class="section-help">These work best when the output template splits each channel into seasons.</div>
+                <label><input type="checkbox" name="download_nfo" value="1" {% if media_profile_settings.download_nfo %}checked{% endif %} {% if not media_profile_settings.available.download_nfo %}disabled{% endif %}> Download NFO data</label>
+                <div class="profile-control-help">Writes NFO data for Emby, Jellyfin, Kodi and compatible media centres.</div>
+                <label><input type="checkbox" name="download_source_images" value="1" {% if media_profile_settings.download_source_images %}checked{% endif %} {% if not media_profile_settings.available.download_source_images %}disabled{% endif %}> Download Series Images</label>
+                <div class="profile-control-help">Downloads poster and banner images for full channel sources.</div>
+              </div>
+            </div>
+
+            <div class="profile-section" style="margin-top:14px">
+              <h3>SponsorBlock Options</h3>
+              <div class="section-help">Choose whether SponsorBlock segments are ignored, marked as chapters, or removed.</div>
+              <label>SponsorBlock Behaviour
+                <select name="sponsorblock_behaviour" id="sponsorblock-behaviour" onchange="toggleSponsorBlockCategories()" {% if not media_profile_settings.available.sponsorblock_behaviour %}disabled{% endif %}>
+                  <option value="disabled" {% if media_profile_settings.sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option>
+                  <option value="mark" {% if media_profile_settings.sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark Segments as Chapters</option>
+                  <option value="remove" {% if media_profile_settings.sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove Segments</option>
+                </select>
+              </label>
+              <div id="sponsorblock-categories">
+                <div class="muted small" style="margin-bottom:8px">Categories to remove or mark</div>
+                {% for value, label in sponsorblock_common_categories %}
+                  <label><input type="checkbox" name="sponsorblock_categories" value="{{ value }}" {% if value in media_profile_settings.sponsorblock_categories %}checked{% endif %}> {{ label }}</label>
+                {% endfor %}
+              </div>
+
+              {% for field in media_profile_settings.extra_fields if field.category == 'sponsorblock' %}
+                {% if field.type == 'select' %}
+                  <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
+                {% elif field.type == 'checkbox' %}
+                  <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                  <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                {% endif %}
+              {% endfor %}
+            </div>
+
+            {% set advanced_fields = media_profile_settings.extra_fields | selectattr('category', 'equalto', 'advanced') | list %}
+            {% if advanced_fields %}
+            <details class="profile-section" style="margin-top:14px">
+              <summary><strong>Advanced Pinchflat Options</strong> <span class="muted small">({{ advanced_fields|length }} detected)</span></summary>
+              <div class="section-help" style="margin-top:10px">These fields are read directly from your installed Pinchflat version so newer options remain available here.</div>
+              <div class="profile-settings-grid">
+                {% for field in advanced_fields %}
+                <div class="compact-setting">
+                  {% if field.type == 'select' %}
+                    <label>{{ field.label }}
+                      <select name="pf_extra::{{ field.name }}">
+                        {% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
+                      </select>
+                    </label>
+                  {% elif field.type == 'checkbox' %}
+                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
+                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
+                  {% elif field.type == 'textarea' %}
+                    <label>{{ field.label }}<textarea name="pf_extra::{{ field.name }}" rows="4">{{ field.value }}</textarea></label>
+                  {% else %}
+                    <label>{{ field.label }}<input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}"></label>
+                  {% endif %}
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+
+            <div class="actions" style="margin-top:16px">
+              <button class="btn">Save Profile to {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</button>
+              <span class="muted small">Existing files are not renamed when the output template changes.</span>
+            </div>
+          </form>
+        {% endif %}
+
+        <div class="profile-stats-footer">
           <h3>Pinchflat stats</h3>
           <div class="mini-stat-grid">
             <div><span class="muted small">Status</span><strong>{% if pinchflat_online %}Online{% else %}Offline{% endif %}</strong></div>
@@ -1497,146 +1948,7 @@
             <div><span class="muted small">Pending</span><strong>{{ pinchflat_stats.pending }}</strong></div>
             <div><span class="muted small">Shared storage</span><strong>{{ pinchflat_stats.storage }}</strong></div>
           </div>
-          <p class="muted small">{{ pinchflat_profile_message }}</p>
-          {% if media_profile_settings.error %}
-            <p class="bad small">{{ media_profile_settings.error }}</p>
-          {% else %}
-            <p class="muted small">Selected profile: {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</p>
-          {% endif %}
-        </div>
-
-        <div class="setting-box" style="grid-column:1/-1">
-          <h3>Current Media Profile</h3>
-          <p class="muted small">These controls edit the selected profile directly in Pinchflat.</p>
-
-          {% if not media_profile_settings.error %}
-          <form method="post" action="/settings/pinchflat/profile" id="pinchflat-media-profile-form">
-            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-
-            <label>Profile name
-              <input type="text" name="profile_name" value="{{ media_profile_settings.name }}" autocomplete="off">
-            </label>
-
-            <label>Output path template
-              <input
-                id="media-profile-output-template"
-                type="text"
-                name="output_path_template"
-                value="{{ media_profile_settings.output_path_template or emby_output_path_template }}"
-                placeholder="{{ emby_output_path_template }}"
-                autocomplete="off"
-              >
-            </label>
-
-            <div class="settings-grid profile-settings-grid">
-              <div class="setting-box compact-setting">
-                <h3>Subtitles</h3>
-                <label><input type="checkbox" name="download_subs" value="1" {% if media_profile_settings.download_subs %}checked{% endif %} {% if not media_profile_settings.available.download_subs %}disabled{% endif %}> Download subtitles</label>
-                <label><input type="checkbox" name="embed_subs" value="1" {% if media_profile_settings.embed_subs %}checked{% endif %} {% if not media_profile_settings.available.embed_subs %}disabled{% endif %}> Embed subtitles</label>
-              </div>
-
-              <div class="setting-box compact-setting">
-                <h3>Thumbnails</h3>
-                <label><input type="checkbox" name="download_thumbnail" value="1" {% if media_profile_settings.download_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.download_thumbnail %}disabled{% endif %}> Download thumbnails</label>
-                <label><input type="checkbox" name="embed_thumbnail" value="1" {% if media_profile_settings.embed_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.embed_thumbnail %}disabled{% endif %}> Embed thumbnails</label>
-              </div>
-
-              <div class="setting-box compact-setting">
-                <h3>Metadata</h3>
-                <label><input type="checkbox" name="download_metadata" value="1" {% if media_profile_settings.download_metadata %}checked{% endif %} {% if not media_profile_settings.available.download_metadata %}disabled{% endif %}> Download metadata</label>
-                <label><input type="checkbox" name="embed_metadata" value="1" {% if media_profile_settings.embed_metadata %}checked{% endif %} {% if not media_profile_settings.available.embed_metadata %}disabled{% endif %}> Embed metadata</label>
-              </div>
-
-              <div class="setting-box compact-setting">
-                <h3>Content types</h3>
-                <label><input type="checkbox" name="include_shorts" value="1" {% if media_profile_settings.include_shorts %}checked{% endif %} {% if not media_profile_settings.available.shorts_behaviour %}disabled{% endif %}> Include Shorts</label>
-                <label><input type="checkbox" name="include_livestreams" value="1" {% if media_profile_settings.include_livestreams %}checked{% endif %} {% if not media_profile_settings.available.livestream_behaviour %}disabled{% endif %}> Include livestreams</label>
-              </div>
-
-              <div class="setting-box compact-setting">
-                <h3>Quality</h3>
-                <label>Default download resolution
-                  <select name="preferred_resolution" {% if not media_profile_settings.available.preferred_resolution %}disabled{% endif %}>
-                    {% for option in media_profile_settings.resolution_options %}
-                      <option value="{{ option.value }}" {% if media_profile_settings.preferred_resolution|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-                <label>Redownload delay
-                  <select name="redownload_delay_days" {% if not media_profile_settings.available.redownload_delay_days %}disabled{% endif %}>
-                    {% set current_delay = media_profile_settings.redownload_delay_days|string %}
-                    <option value="" {% if not current_delay %}selected{% endif %}>Disabled</option>
-                    {% for days in [1,2,3,7,14,30] %}
-                      <option value="{{ days }}" {% if current_delay == days|string %}selected{% endif %}>{{ days }} day{% if days != 1 %}s{% endif %}</option>
-                    {% endfor %}
-                    {% if current_delay and current_delay not in ['1','2','3','7','14','30'] %}
-                      <option value="{{ current_delay }}" selected>{{ current_delay }} days · current</option>
-                    {% endif %}
-                  </select>
-                </label>
-              </div>
-
-              <div class="setting-box compact-setting">
-                <h3>Media centre</h3>
-                <label><input type="checkbox" name="download_nfo" value="1" {% if media_profile_settings.download_nfo %}checked{% endif %} {% if not media_profile_settings.available.download_nfo %}disabled{% endif %}> Download NFO data</label>
-                <label><input type="checkbox" name="download_source_images" value="1" {% if media_profile_settings.download_source_images %}checked{% endif %} {% if not media_profile_settings.available.download_source_images %}disabled{% endif %}> Download Series Images</label>
-              </div>
-            </div>
-
-            <div class="setting-box" style="margin-top:14px">
-              <h3>SponsorBlock</h3>
-              <label>Behaviour
-                <select name="sponsorblock_behaviour" id="sponsorblock-behaviour" onchange="toggleSponsorBlockCategories()" {% if not media_profile_settings.available.sponsorblock_behaviour %}disabled{% endif %}>
-                  <option value="disabled" {% if media_profile_settings.sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option>
-                  <option value="mark" {% if media_profile_settings.sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark segments as chapters</option>
-                  <option value="remove" {% if media_profile_settings.sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove segments</option>
-                </select>
-              </label>
-              <div id="sponsorblock-categories">
-                <div class="muted small" style="margin-bottom:8px">Categories</div>
-                {% for value, label in sponsorblock_common_categories %}
-                  <label><input type="checkbox" name="sponsorblock_categories" value="{{ value }}" {% if value in media_profile_settings.sponsorblock_categories %}checked{% endif %}> {{ label }}</label>
-                {% endfor %}
-              </div>
-            </div>
-
-            {% if media_profile_settings.extra_fields %}
-            <div class="setting-box" style="margin-top:14px">
-              <h3>Additional Pinchflat options</h3>
-              <p class="muted small">These controls are read directly from this Pinchflat version so new profile options appear here automatically.</p>
-              <div class="profile-settings-grid">
-                {% for field in media_profile_settings.extra_fields %}
-                <div class="compact-setting">
-                  {% if field.type == 'select' %}
-                  <label>{{ field.label }}
-                    <select name="pf_extra::{{ field.name }}">
-                      {% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
-                    </select>
-                  </label>
-                  {% elif field.type == 'checkbox' %}
-                  <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                  <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                  {% elif field.type == 'textarea' %}
-                  <label>{{ field.label }}
-                    <textarea name="pf_extra::{{ field.name }}" rows="4">{{ field.value }}</textarea>
-                  </label>
-                  {% else %}
-                  <label>{{ field.label }}
-                    <input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}">
-                  </label>
-                  {% endif %}
-                </div>
-                {% endfor %}
-              </div>
-            </div>
-            {% endif %}
-
-            <div class="actions" style="margin-top:16px">
-              <button class="btn">Save Profile to {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</button>
-              <span class="muted small">Existing downloaded files are not renamed when you change the output template.</span>
-            </div>
-          </form>
-          {% endif %}
+          {% if pinchflat_profile_message %}<p class="muted small">{{ pinchflat_profile_message }}</p>{% endif %}
         </div>
       </div>
     </section>
@@ -1669,8 +1981,7 @@
           </div>
           <label><input type="checkbox" name="single_download_write_nfo" value="1" {% if single_download_write_nfo %}checked{% endif %}> Include Emby <code>tvshow.nfo</code> metadata</label>
           <div class="actions">
-            <button class="btn">Save One-time Download</button>
-            <button class="btn secondary" type="button" onclick="openSingleDownload()">↓ Single Download</button>
+            <button class="btn">Save One-time Download Settings</button>
           </div>
         </form>
       </div>
@@ -1985,6 +2296,7 @@
 <script>
 const settingsDialog = document.getElementById("settings-dialog");
 const singleDownloadDialog = document.getElementById("single-download-dialog");
+const profileTemplateHelpDialog = document.getElementById("profile-template-help-dialog");
 const discoverDialog = document.getElementById("discover-dialog");
 const favouritesDialog = document.getElementById("favourites-dialog");
 const listPickerDialog = document.getElementById("list-picker-dialog");
@@ -2026,10 +2338,214 @@ function openSettings(tab="{{ 'general' if is_admin else 'security' }}") {
   if (!settingsDialog.open) settingsDialog.showModal();
 }
 function closeSettings() { settingsDialog.close(); }
-function openSingleDownload() { singleDownloadDialog.showModal(); }
+function resetSingleDownloadDialog(url="") {
+  const input = document.getElementById("single-download-url");
+  const status = document.getElementById("single-download-status");
+  const button = document.getElementById("single-download-start");
+
+  if (input && url) input.value = url;
+  if (status) status.classList.add("hidden");
+  if (button) button.disabled = false;
+
+  document.getElementById("single-download-progress").value = 0;
+  document.getElementById("single-download-percent").textContent = "0%";
+  document.getElementById("single-download-speed").textContent = "";
+  document.getElementById("single-download-eta").textContent = "";
+  document.getElementById("single-download-bytes").textContent = "";
+  document.getElementById("single-download-error").textContent = "";
+}
+
+function openSingleDownload(url="") {
+  if (url) resetSingleDownloadDialog(url);
+  if (!singleDownloadDialog.open) singleDownloadDialog.showModal();
+}
+
 function closeSingleDownload() {
   singleDownloadDialog.close();
   if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+}
+
+async function queueOneTimeDownload(url) {
+  if (!url) return;
+  resetSingleDownloadDialog(url);
+  if (!singleDownloadDialog.open) singleDownloadDialog.showModal();
+
+  await startSingleDownload({
+    preventDefault() {}
+  });
+}
+
+function downloadLatestPopupVideo() {
+  if (!latestPopupVideo) return;
+  const url =
+    latestPopupVideo.video_url
+    || latestPopupVideo.shorts_url
+    || (
+      latestPopupVideo.video_id
+        ? `https://www.youtube.com/watch?v=${latestPopupVideo.video_id}`
+        : ""
+    );
+
+  queueOneTimeDownload(url);
+}
+
+function downloadCurrentShort() {
+  const item = currentShortItem();
+  if (!item) return;
+
+  const url =
+    item.video_url
+    || item.shorts_url
+    || (
+      item.video_id
+        ? `https://www.youtube.com/watch?v=${item.video_id}`
+        : ""
+    );
+
+  queueOneTimeDownload(url);
+}
+
+function openProfileTemplateHelp() {
+  if (!profileTemplateHelpDialog.open) {
+    profileTemplateHelpDialog.showModal();
+  }
+}
+
+function closeProfileTemplateHelp() {
+  profileTemplateHelpDialog.close();
+}
+
+function toggleCreateProfilePanel() {
+  document.getElementById("create-profile-panel")?.classList.toggle("hidden");
+}
+
+async function saveAutoCreateProfiles(input) {
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = "/settings/pinchflat";
+
+  const csrf = document.createElement("input");
+  csrf.type = "hidden";
+  csrf.name = "_csrf";
+  csrf.value = document.querySelector('meta[name="csrf-token"]').content;
+
+  const profile = document.createElement("input");
+  profile.type = "hidden";
+  profile.name = "pinchflat_media_profile_id";
+  profile.value = "{{ media_profile_id }}";
+
+  const autoCreate = document.createElement("input");
+  autoCreate.type = "hidden";
+  autoCreate.name = "auto_create_media_profile";
+  autoCreate.value = input.checked ? "1" : "0";
+
+  form.append(csrf, profile, autoCreate);
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function setProfileCheckbox(name, checked) {
+  const field = document.querySelector(`#pinchflat-media-profile-form [name="${name}"]`);
+  if (field && !field.disabled) field.checked = checked;
+}
+
+function setProfileValue(name, value) {
+  const field = document.querySelector(`#pinchflat-media-profile-form [name="${name}"]`);
+  if (field && !field.disabled) field.value = value;
+}
+
+function applyMediaProfilePreset() {
+  const preset = document.getElementById("media-profile-preset")?.value;
+  if (!preset) return;
+
+  const defaults = {
+    default: {
+      output: "/{{ source_custom_name }}/{{ upload_yyyy_mm_dd }} {{ title }}/{{ title }} [{{ id }}].{{ ext }}",
+      resolution: "1080p",
+      shorts: true,
+      live: true,
+      subs: false,
+      embedSubs: false,
+      thumb: false,
+      embedThumb: false,
+      metadata: false,
+      embedMetadata: false,
+      nfo: false,
+      images: false,
+      sponsor: "disabled"
+    },
+    media_center: {
+      output: "/shows/{{ source_custom_name }}/{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}",
+      resolution: "1080p",
+      shorts: false,
+      live: true,
+      subs: false,
+      embedSubs: false,
+      thumb: true,
+      embedThumb: true,
+      metadata: true,
+      embedMetadata: true,
+      nfo: true,
+      images: true,
+      sponsor: "remove"
+    },
+    music: {
+      output: "/music/{{ artist_name }}/{{ title }}.{{ ext }}",
+      resolution: "audio",
+      shorts: false,
+      live: false,
+      subs: false,
+      embedSubs: false,
+      thumb: true,
+      embedThumb: true,
+      metadata: true,
+      embedMetadata: true,
+      nfo: false,
+      images: false,
+      sponsor: "disabled"
+    },
+    archiving: {
+      output: "/archive/{{ source_custom_name }}/{{ upload_yyyy_mm_dd }} - {{ title }} [{{ id }}].{{ ext }}",
+      resolution: "2160p",
+      shorts: true,
+      live: true,
+      subs: true,
+      embedSubs: false,
+      thumb: true,
+      embedThumb: false,
+      metadata: true,
+      embedMetadata: false,
+      nfo: false,
+      images: true,
+      sponsor: "disabled"
+    }
+  };
+
+  const values = defaults[preset];
+  if (!values) return;
+
+  setProfileValue("output_path_template", values.output);
+  setProfileValue("preferred_resolution", values.resolution);
+  setProfileCheckbox("include_shorts", values.shorts);
+  setProfileCheckbox("include_livestreams", values.live);
+  setProfileCheckbox("download_subs", values.subs);
+  setProfileCheckbox("embed_subs", values.embedSubs);
+  setProfileCheckbox("download_thumbnail", values.thumb);
+  setProfileCheckbox("embed_thumbnail", values.embedThumb);
+  setProfileCheckbox("download_metadata", values.metadata);
+  setProfileCheckbox("embed_metadata", values.embedMetadata);
+  setProfileCheckbox("download_nfo", values.nfo);
+  setProfileCheckbox("download_source_images", values.images);
+  setProfileValue("sponsorblock_behaviour", values.sponsor);
+
+  const sponsor = document.querySelectorAll(
+    '#pinchflat-media-profile-form [name="sponsorblock_categories"]'
+  );
+  sponsor.forEach(field => {
+    field.checked = values.sponsor === "remove" && field.value === "sponsor";
+  });
+
+  toggleSponsorBlockCategories();
 }
 
 function csrfHeaders() {

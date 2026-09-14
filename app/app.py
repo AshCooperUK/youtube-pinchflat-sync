@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.6.0"
+VERSION = "2.6.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -5516,6 +5516,22 @@ def media_profile_extra_fields(form):
             if label_text:
                 label = label_text[:120]
 
+        search_text = f"{key} {label}".casefold()
+        if "subtitle" in search_text or "subtitles" in search_text:
+            category = "subtitles"
+        elif "thumbnail" in search_text or "image" in search_text:
+            category = "thumbnails"
+        elif "metadata" in search_text or "nfo" in search_text:
+            category = "metadata"
+        elif "short" in search_text or "livestream" in search_text or "live stream" in search_text:
+            category = "content"
+        elif "resolution" in search_text or "quality" in search_text or "redownload" in search_text:
+            category = "quality"
+        elif "sponsor" in search_text:
+            category = "sponsorblock"
+        else:
+            category = "advanced"
+
         entry = {
             "name": name,
             "key": key,
@@ -5524,6 +5540,7 @@ def media_profile_extra_fields(form):
             "value": profile_form_value(form, name, ""),
             "checked": profile_form_bool(form, name, False),
             "options": profile_form_select_options(form, name) if field.name == "select" else [],
+            "category": category,
         }
         results.append(entry)
 
@@ -5965,6 +5982,145 @@ def create_media_profile(
         set_setting("pinchflat_media_profile_id", created["id"])
 
     return created, source_form, profiles
+
+
+def delete_media_profile(profile_id):
+    profile_id = str(profile_id or "").strip()
+    if not profile_id:
+        raise RuntimeError("Choose a Media Profile to delete.")
+
+    profiles = pinchflat_profiles()
+    existing_ids = [str(profile["id"]) for profile in profiles]
+
+    if profile_id not in existing_ids:
+        raise RuntimeError("The selected Media Profile no longer exists.")
+
+    if len(existing_ids) <= 1:
+        raise RuntimeError(
+            "Pinchflat must keep at least one Media Profile."
+        )
+
+    # Protect profiles currently used by sources managed by this app.
+    with db() as conn:
+        if profile_id == str(effective_media_profile_id()):
+            usage = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM subscriptions
+                WHERE active = 1
+                  AND pinchflat_added = 1
+                  AND download_enabled = 1
+                  AND (
+                    media_profile_id = ?
+                    OR media_profile_id IS NULL
+                    OR TRIM(media_profile_id) = ''
+                  )
+                """,
+                (profile_id,),
+            ).fetchone()["count"]
+        else:
+            usage = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM subscriptions
+                WHERE active = 1
+                  AND pinchflat_added = 1
+                  AND download_enabled = 1
+                  AND media_profile_id = ?
+                """,
+                (profile_id,),
+            ).fetchone()["count"]
+
+    if int(usage or 0) > 0:
+        raise RuntimeError(
+            f"This Media Profile is currently used by {usage} enabled "
+            "Pinchflat source(s). Move those sources to another profile first."
+        )
+
+    session_obj = pinchflat_session()
+    edit_url = f"{PINCHFLAT_URL}/media_profiles/{profile_id}/edit"
+    response = session_obj.get(edit_url, timeout=30)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    csrf_token = ""
+
+    for field in soup.find_all("input", attrs={"name": "_csrf_token"}):
+        csrf_token = field.get("value", "")
+        if csrf_token:
+            break
+
+    delete_form = None
+    for candidate in soup.find_all("form"):
+        action = candidate.get("action") or ""
+        method_field = candidate.find(
+            "input",
+            attrs={"name": "_method", "value": "delete"},
+        )
+        text = " ".join(candidate.stripped_strings).casefold()
+
+        if (
+            f"/media_profiles/{profile_id}" in action
+            and (
+                method_field is not None
+                or "delete" in text
+            )
+        ):
+            delete_form = candidate
+            break
+
+    if delete_form is not None:
+        payload = scrape_form_payload(delete_form)
+        action = delete_form.get("action") or f"/media_profiles/{profile_id}"
+    else:
+        # The delete button is not always rendered as its own form. The
+        # REST route still accepts Phoenix's method override.
+        payload = {}
+        action = f"/media_profiles/{profile_id}"
+
+    payload["_method"] = "delete"
+    if csrf_token:
+        payload["_csrf_token"] = csrf_token
+
+    if action.startswith(("http://", "https://")):
+        target = action
+    else:
+        target = (
+            f"{PINCHFLAT_URL}"
+            f"{action if action.startswith('/') else '/' + action}"
+        )
+
+    result = session_obj.post(
+        target,
+        data=payload,
+        timeout=60,
+        allow_redirects=False,
+    )
+
+    if result.status_code not in (200, 204, 301, 302, 303):
+        body = " ".join(
+            BeautifulSoup(result.text, "html.parser").stripped_strings
+        )
+        raise RuntimeError(
+            f"Pinchflat returned HTTP {result.status_code}. "
+            f"{body[:400] or 'No error text returned.'}"
+        )
+
+    remaining = pinchflat_profiles()
+    remaining_ids = [str(profile["id"]) for profile in remaining]
+
+    if profile_id in remaining_ids:
+        raise RuntimeError(
+            "Pinchflat accepted the delete request but the profile still exists."
+        )
+
+    if str(effective_media_profile_id()) == profile_id:
+        set_setting(
+            "pinchflat_media_profile_id",
+            remaining_ids[0],
+        )
+
+    return remaining
 
 
 def create_default_media_profile(session_obj=None):
@@ -8287,6 +8443,52 @@ def create_pinchflat_profile_from_settings():
         flash(f"Created Media Profile {created['name']} and selected it.", "success")
     except Exception as exc:
         flash(f"Media Profile could not be created: {exc}", "error")
+    return redirect(url_for("index") + "#pinchflat")
+
+
+@app.post("/settings/pinchflat/profile/delete")
+def delete_current_media_profile():
+    profile_id = request.form.get(
+        "pinchflat_media_profile_id",
+        effective_media_profile_id(),
+    ).strip()
+
+    try:
+        selected_name = next(
+            (
+                profile["name"]
+                for profile in pinchflat_profiles()
+                if str(profile["id"]) == str(profile_id)
+            ),
+            f"Media Profile {profile_id}",
+        )
+
+        remaining = delete_media_profile(profile_id)
+
+        log_activity(
+            "settings",
+            "Pinchflat Media Profile deleted",
+            f"Deleted {selected_name}.",
+            "success",
+        )
+
+        flash(
+            f"Deleted Media Profile {selected_name}. "
+            f"{len(remaining)} profile(s) remain.",
+            "success",
+        )
+    except Exception as exc:
+        log_activity(
+            "settings",
+            "Pinchflat Media Profile deletion failed",
+            str(exc),
+            "error",
+        )
+        flash(
+            f"Media Profile could not be deleted: {exc}",
+            "error",
+        )
+
     return redirect(url_for("index") + "#pinchflat")
 
 
