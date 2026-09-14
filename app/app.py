@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.6.3"
+VERSION = "2.6.4"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -4957,6 +4957,109 @@ def docker_request(method, path, payload=None, timeout=30, versioned=True):
         conn.close()
 
 
+def decode_docker_log_stream(body):
+    """
+    Decode Docker's multiplexed stdout/stderr stream.
+
+    Containers created with TTY enabled return plain text instead, so this
+    falls back to normal UTF-8 decoding when the frame structure is absent.
+    """
+    if not body:
+        return ""
+
+    chunks = []
+    offset = 0
+    framed = False
+
+    while offset + 8 <= len(body):
+        stream_type = body[offset]
+        size = int.from_bytes(
+            body[offset + 4:offset + 8],
+            "big",
+        )
+
+        if (
+            stream_type not in (0, 1, 2)
+            or size < 0
+            or offset + 8 + size > len(body)
+        ):
+            break
+
+        framed = True
+        chunks.append(
+            body[offset + 8:offset + 8 + size]
+        )
+        offset += 8 + size
+
+    if framed and chunks:
+        return b"".join(chunks).decode(
+            "utf-8",
+            "replace",
+        )
+
+    return body.decode(
+        "utf-8",
+        "replace",
+    )
+
+
+def pinchflat_container_logs(tail=250):
+    if not DOCKER_SOCKET_PATH.exists():
+        raise RuntimeError(
+            "Docker socket is not mounted. Pinchflat container logs "
+            "are unavailable."
+        )
+
+    try:
+        tail = int(tail)
+    except (TypeError, ValueError):
+        tail = 250
+
+    tail = max(20, min(tail, 1000))
+
+    name = quote(
+        PINCHFLAT_CONTAINER_NAME,
+        safe="",
+    )
+
+    query = urlencode(
+        {
+            "stdout": "1",
+            "stderr": "1",
+            "timestamps": "1",
+            "tail": str(tail),
+        }
+    )
+
+    status, _headers, body = docker_request(
+        "GET",
+        f"/containers/{name}/logs?{query}",
+        timeout=20,
+    )
+
+    if status == 404:
+        raise RuntimeError(
+            f"Docker container {PINCHFLAT_CONTAINER_NAME!r} was not found."
+        )
+
+    if status >= 400:
+        raise RuntimeError(
+            f"Docker returned HTTP {status}: "
+            f"{body.decode('utf-8', 'replace')[:300]}"
+        )
+
+    text = decode_docker_log_stream(body)
+    lines = text.splitlines()
+
+    # Protect the browser from very long individual log messages.
+    cleaned = [
+        line[:5000]
+        for line in lines[-tail:]
+    ]
+
+    return "\n".join(cleaned)
+
+
 def pinchflat_container_status():
     if not DOCKER_SOCKET_PATH.exists():
         return {
@@ -7138,6 +7241,7 @@ VIEWER_POST_ENDPOINTS = {
 ADMIN_ONLY_GET_ENDPOINTS = {
     "google_login",
     "google_callback",
+    "pinchflat_logs_api",
 }
 
 
@@ -9155,6 +9259,33 @@ def single_download_start():
         )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/pinchflat/logs")
+def pinchflat_logs_api():
+    try:
+        tail = request.args.get(
+            "tail",
+            "250",
+        )
+        logs = pinchflat_container_logs(tail)
+
+        return jsonify(
+            {
+                "ok": True,
+                "container": PINCHFLAT_CONTAINER_NAME,
+                "logs": logs,
+            }
+        )
+    except Exception as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "container": PINCHFLAT_CONTAINER_NAME,
+                "error": str(exc),
+                "logs": "",
+            }
+        ), 503
 
 
 @app.get("/api/downloads/<job_id>")

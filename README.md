@@ -2,6 +2,25 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.6.4
+
+Settings form consistency and Pinchflat container logs.
+
+- Adds a dedicated Pinchflat Logs tile under Settings > Logs.
+- Pinchflat logs are read directly from the configured Docker container through the existing Docker socket integration.
+- The log tile supports 100, 250, 500 or 1,000 recent lines and a manual Refresh logs control.
+- Pinchflat Docker logs are restricted to administrator accounts.
+- Adds Docker stdout/stderr multiplexed-stream decoding so the log viewer displays clean text.
+- Fixes the global checkbox height inherited from normal text fields.
+- Checkboxes and radio buttons now use a consistent 18px control aligned vertically with their labels.
+- Checkbox rows throughout Settings use a consistent flex layout and 42px row height.
+- Normal Settings buttons, text inputs and dropdowns now share the same 42px control height.
+- Reworks Settings tabs into an even grid so the tab buttons line up consistently.
+- Reworks the Media Profile preset row so Apply Preset no longer stretches across the whole panel.
+- Aligns Media Profile selector, New Profile and Delete Profile controls.
+- Keeps multi-line text areas intentionally taller while matching the same border, focus and typography treatment.
+
+
 ## Version 2.6.3
 
 YouTube statistics cleanup.

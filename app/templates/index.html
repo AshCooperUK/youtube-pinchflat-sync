@@ -118,8 +118,89 @@
       box-shadow:0 0 0 3px rgba(37,99,235,.18);
     }
     input[type="text"],input[type="url"],input[type="password"],input[type="number"],input[type="date"],select { width:100%; }
-    input[type="checkbox"] { width:auto; min-height:auto; accent-color:var(--blue); }
-    label { display:block; margin:10px 0; font-size:14px; }
+    input[type="checkbox"],
+    input[type="radio"] {
+      width:18px !important;
+      height:18px !important;
+      min-width:18px !important;
+      min-height:18px !important;
+      padding:0 !important;
+      margin:0;
+      flex:0 0 18px;
+      accent-color:var(--blue);
+      vertical-align:middle;
+    }
+
+    label {
+      display:block;
+      margin:10px 0;
+      font-size:14px;
+      line-height:1.35;
+    }
+
+    #settings-dialog label:not(.source-toggle):has(> input[type="checkbox"]),
+    #settings-dialog label:not(.source-toggle):has(> input[type="radio"]) {
+      display:flex;
+      align-items:center;
+      gap:9px;
+      min-height:var(--control-height);
+      margin:5px 0;
+      cursor:pointer;
+    }
+
+    #settings-dialog label:not(.source-toggle):has(> input[type="checkbox"]) code,
+    #settings-dialog label:not(.source-toggle):has(> input[type="radio"]) code {
+      margin:0 2px;
+    }
+
+    #settings-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+    #settings-dialog select,
+    #settings-dialog .btn {
+      height:var(--control-height);
+      min-height:var(--control-height);
+      vertical-align:middle;
+    }
+
+    #settings-dialog .settings-grid > .setting-box > label:first-child,
+    #settings-dialog .profile-section > label:first-of-type {
+      margin-top:0;
+    }
+
+    #settings-dialog .actions {
+      min-height:var(--control-height);
+      align-items:center;
+    }
+
+    #settings-dialog .actions > .btn,
+    #settings-dialog .profile-manager-actions > .btn,
+    #settings-dialog .profile-manager-actions > form > .btn {
+      align-self:center;
+    }
+
+    #settings-dialog > .modal-body > .tabs {
+      display:grid;
+      grid-template-columns:repeat(8,minmax(92px,1fr));
+      gap:7px;
+    }
+
+    #settings-dialog > .modal-body > .tabs .tab-btn {
+      min-width:0;
+      width:100%;
+      margin:0;
+      white-space:nowrap;
+    }
+
+    @media (max-width:980px) {
+      #settings-dialog > .modal-body > .tabs {
+        grid-template-columns:repeat(4,minmax(92px,1fr));
+      }
+    }
+
+    @media (max-width:620px) {
+      #settings-dialog > .modal-body > .tabs {
+        grid-template-columns:repeat(2,minmax(92px,1fr));
+      }
+    }
     .inline-control { min-width:170px; }
     .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
     table { width:100%; border-collapse:collapse; min-width:1370px; }
@@ -892,10 +973,32 @@
     }
     .profile-preset-row {
       display:grid;
-      grid-template-columns:minmax(180px,280px) auto;
-      gap:8px;
+      grid-template-columns:minmax(220px,320px) 150px;
+      gap:10px;
       align-items:end;
+      justify-content:start;
       margin:0 0 14px;
+    }
+
+    .profile-preset-row label {
+      margin:0;
+    }
+
+    .profile-preset-row .btn {
+      width:150px;
+      min-width:150px;
+    }
+
+    .profile-manager-toolbar form > label {
+      margin:0;
+    }
+
+    .profile-manager-actions form {
+      margin:0;
+    }
+
+    .profile-manager-actions .btn {
+      min-width:142px;
     }
     .profile-stats-footer {
       margin-top:14px;
@@ -985,6 +1088,52 @@
     .activity-item { border-bottom:1px solid var(--line); padding:11px 0; }
     .activity-item:last-child { border-bottom:0; }
     .activity-time { color:var(--muted); font-size:12px; }
+
+    .log-tile-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:10px;
+    }
+
+    .log-tile-head h3 {
+      margin:0;
+    }
+
+    .container-log-toolbar {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .container-log-toolbar select {
+      width:138px;
+    }
+
+    .container-log-output {
+      width:100%;
+      min-height:260px;
+      max-height:420px;
+      overflow:auto;
+      margin:0;
+      padding:12px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#060d18;
+      color:#d7e3f5;
+      font-family:Consolas, "SFMono-Regular", Menlo, Monaco, monospace;
+      font-size:12px;
+      line-height:1.45;
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+    }
+
+    .container-log-status {
+      margin:8px 0 0;
+      min-height:18px;
+    }
     .modal-close { background:none; border:0; color:var(--muted); cursor:pointer; font-size:24px; }
     .progress-wrap { margin-top:18px; }
     progress { width:100%; height:20px; accent-color:var(--blue); }
@@ -2328,6 +2477,34 @@
             </div>
           {% endfor %}
         {% else %}<div class="empty">No activity has been recorded yet.</div>{% endif %}
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <div class="log-tile-head">
+          <div>
+            <h3>Pinchflat logs</h3>
+            <div class="muted small">Recent stdout and stderr from the Pinchflat Docker container.</div>
+          </div>
+
+          <div class="container-log-toolbar">
+            <select id="pinchflat-log-tail" aria-label="Pinchflat log line count">
+              <option value="100">100 lines</option>
+              <option value="250" selected>250 lines</option>
+              <option value="500">500 lines</option>
+              <option value="1000">1,000 lines</option>
+            </select>
+
+            <button
+              class="btn secondary"
+              type="button"
+              id="pinchflat-log-refresh"
+              onclick="loadPinchflatLogs(true)"
+            >Refresh logs</button>
+          </div>
+        </div>
+
+        <pre id="pinchflat-log-output" class="container-log-output">Open Logs to load the Pinchflat container log.</pre>
+        <div id="pinchflat-log-status" class="container-log-status muted small"></div>
       </div>
 
       <div class="settings-grid" style="margin-top:14px">
@@ -4173,11 +4350,83 @@ function toggleShortsSound() {
   } catch (_) {}
 }
 
-function showTab(name) {
-  document.querySelectorAll("#settings-dialog .tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll("#settings-dialog .tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
-  if (name === "favourites") loadFavourites();
+let pinchflatLogsLoaded = false;
+
+async function loadPinchflatLogs(force=false) {
+  const output = document.getElementById("pinchflat-log-output");
+  const status = document.getElementById("pinchflat-log-status");
+  const refresh = document.getElementById("pinchflat-log-refresh");
+  const tail = document.getElementById("pinchflat-log-tail")?.value || "250";
+
+  if (!output) return;
+  if (pinchflatLogsLoaded && !force) return;
+
+  if (refresh) refresh.disabled = true;
+  if (status) status.textContent = "Loading Pinchflat logs…";
+
+  try {
+    const response = await fetch(
+      `/api/pinchflat/logs?tail=${encodeURIComponent(tail)}`,
+      {
+        headers: {
+          "Accept": "application/json"
+        }
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error || `Pinchflat logs returned HTTP ${response.status}`
+      );
+    }
+
+    output.textContent =
+      data.logs?.trim()
+        ? data.logs
+        : "No Pinchflat log output was returned.";
+
+    output.scrollTop = output.scrollHeight;
+    pinchflatLogsLoaded = true;
+
+    if (status) {
+      status.textContent =
+        `Showing the latest ${tail} lines from ${data.container || "Pinchflat"}.`;
+    }
+  } catch (error) {
+    output.textContent =
+      `Pinchflat logs are unavailable.\n\n${error.message || String(error)}`;
+
+    if (status) {
+      status.textContent =
+        "Check the Docker socket mount and Pinchflat container name.";
+    }
+  } finally {
+    if (refresh) refresh.disabled = false;
+  }
 }
+
+function showTab(name) {
+  document.querySelectorAll("#settings-dialog .tab-btn").forEach(
+    b => b.classList.toggle("active", b.dataset.tab === name)
+  );
+
+  document.querySelectorAll("#settings-dialog .tab-panel").forEach(
+    p => p.classList.toggle("active", p.dataset.panel === name)
+  );
+
+  if (name === "favourites") loadFavourites();
+  if (name === "logs") loadPinchflatLogs();
+}
+
+document.getElementById("pinchflat-log-tail")?.addEventListener(
+  "change",
+  () => {
+    pinchflatLogsLoaded = false;
+    loadPinchflatLogs(true);
+  }
+);
 
 function toggleDefaultHistory() {
   const mode = document.getElementById("default-history-mode")?.value;
