@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.6.1"
+VERSION = "2.6.3"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -179,6 +179,13 @@ LATEST_SUBSCRIPTIONS_CACHE = {
 YOUTUBE_CHANNEL_FEED_CACHE_SECONDS = 600
 YOUTUBE_CHANNEL_FEED_CACHE = {}
 YOUTUBE_CHANNEL_FEED_LOCK = threading.Lock()
+
+YOUTUBE_ACCOUNT_STATS_CACHE_SECONDS = 600
+YOUTUBE_ACCOUNT_STATS_CACHE = {
+    "expires_at": 0.0,
+    "data": None,
+}
+YOUTUBE_ACCOUNT_STATS_LOCK = threading.Lock()
 YOUTUBE_CHANNEL_FEED_WORKERS = 24
 
 TOTP_ISSUER = "YouTube Pinchflat Sync"
@@ -1212,6 +1219,134 @@ def youtube_top100_channels(force=False):
     }
 
 
+
+
+def youtube_account_stats(force=False):
+    """
+    YouTube account/library statistics for Settings > YouTube.
+
+    Deliberately excludes statistics for the user's own YouTube channel.
+    Only account-level library information useful to this application is
+    returned: subscriptions, liked videos and playlists.
+
+    Personal viewer watch-history totals and total watch-time are not exposed
+    through the YouTube Data API and are therefore not shown.
+    """
+    now_ts = time.time()
+
+    with YOUTUBE_ACCOUNT_STATS_LOCK:
+        cached = YOUTUBE_ACCOUNT_STATS_CACHE.get("data")
+        expires_at = YOUTUBE_ACCOUNT_STATS_CACHE.get("expires_at", 0)
+
+    if cached and not force and expires_at > now_ts:
+        return dict(cached)
+
+    result = {
+        "available": False,
+        "error": "",
+        "subscription_count_text": "—",
+        "liked_video_count_text": "—",
+        "playlist_count_text": "—",
+        "retrieved_at": "",
+    }
+
+    try:
+        creds = load_credentials()
+        if not creds:
+            result["error"] = "Google is not connected."
+            return result
+
+        # The account is connected even if one of the individual statistic
+        # calls below is unavailable.
+        result["available"] = True
+
+        # Channels the authenticated YouTube account currently subscribes to.
+        try:
+            response = youtube_api_request(
+                creds,
+                "GET",
+                "subscriptions",
+                "subscriptions.list",
+                1,
+                params={
+                    "part": "id",
+                    "mine": "true",
+                    "maxResults": 1,
+                },
+            )
+            total = int(
+                (response.json().get("pageInfo") or {}).get(
+                    "totalResults",
+                    0,
+                )
+                or 0
+            )
+            result["subscription_count_text"] = f"{total:,}"
+        except Exception:
+            pass
+
+        # Videos currently marked Like by the authenticated account.
+        try:
+            response = youtube_api_request(
+                creds,
+                "GET",
+                "videos",
+                "videos.list",
+                1,
+                params={
+                    "part": "id",
+                    "myRating": "like",
+                    "maxResults": 1,
+                },
+            )
+            total = int(
+                (response.json().get("pageInfo") or {}).get(
+                    "totalResults",
+                    0,
+                )
+                or 0
+            )
+            result["liked_video_count_text"] = f"{total:,}"
+        except Exception:
+            pass
+
+        # User-created playlists owned by the authenticated account.
+        try:
+            response = youtube_api_request(
+                creds,
+                "GET",
+                "playlists",
+                "playlists.list",
+                1,
+                params={
+                    "part": "id",
+                    "mine": "true",
+                    "maxResults": 1,
+                },
+            )
+            total = int(
+                (response.json().get("pageInfo") or {}).get(
+                    "totalResults",
+                    0,
+                )
+                or 0
+            )
+            result["playlist_count_text"] = f"{total:,}"
+        except Exception:
+            pass
+
+        result["retrieved_at"] = now_iso()
+
+    except Exception as exc:
+        result["error"] = str(exc)
+
+    with YOUTUBE_ACCOUNT_STATS_LOCK:
+        YOUTUBE_ACCOUNT_STATS_CACHE["data"] = dict(result)
+        YOUTUBE_ACCOUNT_STATS_CACHE["expires_at"] = (
+            now_ts + YOUTUBE_ACCOUNT_STATS_CACHE_SECONDS
+        )
+
+    return result
 
 
 def youtube_duration_label(value):
@@ -7603,6 +7738,14 @@ def index():
         "running": int(download_counts_row["running"] or 0),
         "failed": int(download_counts_row["failed"] or 0),
     }
+    youtube_account = (
+        youtube_account_stats()
+        if google_connected
+        else {
+            "available": False,
+            "error": "",
+        }
+    )
     api_stats = api_usage_stats()
     emby_playlist_id = get_setting("emby_download_playlist_id", "")
     auth = auth_context()
@@ -7692,6 +7835,7 @@ def index():
         auto_retry=setting_bool("auto_retry", True),
         auto_create_media_profile=setting_bool("auto_create_media_profile", True),
         api_stats=api_stats,
+        youtube_account_stats=youtube_account,
         storage_total_bytes=storage["total"],
         storage_total=format_bytes(storage["total"]),
         download_counts=download_counts,

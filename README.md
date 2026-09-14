@@ -2,6 +2,40 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.6.3
+
+YouTube statistics cleanup.
+
+- Removes all creator statistics relating to the authenticated user's own YouTube channel.
+- Removes own-channel subscriber count.
+- Removes own-channel upload count.
+- Removes own-channel view count.
+- Removes the own-channel account summary/header from Settings > YouTube.
+- Stops calling `channels.list?mine=true` solely for statistics.
+- Keeps useful account/library information: YouTube subscriptions, liked videos and playlists.
+- Keeps YouTube API quota usage and remaining discovery-search allowance.
+- Personal watch-history totals and total watch time remain omitted because the YouTube Data API does not expose them.
+
+
+## Version 2.6.2
+
+UI consistency, favourites refresh and YouTube statistics.
+
+- Playback Download actions now open the Single Download window with the current video URL filled in. They no longer start the download automatically.
+- Removes the arrow icon from the main Single Download button.
+- Removes the Single Download shortcut from the Downloads dashboard tile.
+- Uses the requested Pinchflat CasaOS icon at the top-right of the Pinchflat dashboard tile.
+- Replaces the Latest Videos text controls with compact Windows-style refresh and minimise controls.
+- Minimise collapses the Latest section into a compact header and changes to a restore control.
+- Favourite channel cards are larger and centred. YouTube and Subscribe sit side-by-side only when Subscribe is required.
+- Favourite video cards are wider and use a Play, Download, Save to list and Remove favourite layout.
+- Favourite video Download opens the configured Single Download window.
+- Removes the obsolete Emby scheduling note from Settings > YouTube.
+- Adds a YouTube account statistics dashboard for subscriptions, liked videos, own-channel subscribers, public uploads, channel views, playlists, API use and discovery allowance.
+- Clearly reports that personal watch-history totals and total watch time are not exposed by the YouTube Data API.
+- Standardises normal buttons, inputs and dropdowns around a common 42px Bootstrap-style control height with consistent focus states.
+
+
 ## Version 2.6.1
 
 Media Profile manager and one-time-download UI refresh.
