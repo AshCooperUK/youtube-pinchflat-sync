@@ -87,8 +87,59 @@
     .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:17px; }
     .metric { font-size:27px; font-weight:800; margin-top:5px; }
     .ok { color:var(--green); } .warn { color:var(--amber); } .bad { color:var(--red); }
-    .flash { padding:12px 14px; border-radius:10px; margin:13px 0; background:#34445d; }
-    .flash.error { background:#7a252d; } .flash.success { background:#175a35; }
+    .flash {
+      position:relative;
+      padding:12px 48px 12px 14px;
+      border-radius:10px;
+      margin:13px 0;
+      background:#34445d;
+    }
+
+    .flash.error {
+      background:#7a252d;
+    }
+
+    .flash.success {
+      background:#175a35;
+    }
+
+    .flash-dismiss {
+      position:absolute;
+      top:50%;
+      right:10px;
+      width:30px;
+      height:30px;
+      transform:translateY(-50%);
+      display:grid;
+      place-items:center;
+      padding:0;
+      border:0;
+      border-radius:7px;
+      background:transparent;
+      color:inherit;
+      font-size:20px;
+      line-height:1;
+      cursor:pointer;
+      opacity:.82;
+      transition:
+        opacity .15s ease,
+        background .15s ease;
+    }
+
+    .flash-dismiss:hover,
+    .flash-dismiss:focus-visible {
+      opacity:1;
+      background:rgba(255,255,255,.12);
+      outline:none;
+    }
+
+    .flash.is-dismissing {
+      opacity:0;
+      transform:translateY(-4px);
+      transition:
+        opacity .16s ease,
+        transform .16s ease;
+    }
     .toolbar { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin:12px 0; }
     .toolbar .grow { flex:1 1 240px; }
     .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -1006,6 +1057,49 @@
       border-color:#ff4f81;
       background:rgba(44,8,23,.92);
     }
+
+    .discover-download-icon {
+      position:absolute;
+      z-index:3;
+      top:8px;
+      right:50px;
+      width:34px;
+      height:34px;
+      display:grid;
+      place-items:center;
+      padding:0;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.30);
+      background:rgba(4,10,18,.84);
+      color:#fff;
+      cursor:pointer;
+      opacity:0;
+      transition:
+        opacity .16s ease,
+        transform .16s ease,
+        background .16s ease;
+    }
+
+    .discover-download-icon svg {
+      width:17px;
+      height:17px;
+      fill:none;
+      stroke:currentColor;
+      stroke-width:2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+    }
+
+    .discover-video-tile:hover .discover-download-icon,
+    .discover-video-tile:focus-within .discover-download-icon {
+      opacity:1;
+    }
+
+    .discover-download-icon:hover {
+      transform:scale(1.08);
+      background:#173d78;
+      border-color:#7aa7ef;
+    }
     @media (max-width:720px) {
       .discover-video-grid {
         grid-template-columns:repeat(2,minmax(0,1fr));
@@ -1764,7 +1858,16 @@
 
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}
-      <div class="flash {{ category }}">{{ message }}</div>
+      <div class="flash {{ category }}">
+        <span>{{ message }}</span>
+        <button
+          class="flash-dismiss"
+          type="button"
+          aria-label="Close message"
+          title="Close"
+          onclick="dismissFlashMessage(this)"
+        >×</button>
+      </div>
     {% endfor %}
   {% endwith %}
 
@@ -2412,6 +2515,7 @@
   <div class="modal-body">
     <div class="discover-toolbar">
       <button id="discover-downloaded-btn" class="btn" type="button" onclick="showDiscoverMode('downloaded')">Downloaded</button>
+      <button id="discover-liked-btn" class="btn secondary" type="button" onclick="showDiscoverMode('liked')">Liked Videos</button>
       <button id="discover-videos-btn" class="btn secondary" type="button" onclick="showDiscoverMode('videos')">Random Videos</button>
       <button id="discover-shorts-btn" class="btn secondary" type="button" onclick="showDiscoverMode('shorts')">Random Shorts</button>
       <button id="discover-top100-btn" class="btn secondary" type="button" onclick="showDiscoverMode('top100')">Top 100</button>
@@ -3628,7 +3732,7 @@ let latestSubscriptionVideos = [];
 let latestSubscriptionShorts = [];
 let latestPopupVideo = null;
 let discoverMode = "downloaded";
-let discoverResults = {downloaded: [], videos: [], shorts: [], top100: []};
+let discoverResults = {downloaded: [], liked: [], videos: [], shorts: [], top100: []};
 let discoverDownloadedTimer = null;
 let discoverDownloadedRefreshInFlight = false;
 let discoverDownloadedSignature = "";
@@ -4704,6 +4808,7 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       if (heart) row.dataset.favourite = data.favourite ? "1" : "0";
     });
     discoverResults.downloaded.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
+    discoverResults.liked.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     discoverResults.videos.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     discoverResults.shorts.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
     discoverResults.top100.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
@@ -4731,7 +4836,7 @@ async function toggleVideoFavourite(button, item) {
       button.classList.toggle("active", !!data.favourite);
       button.textContent = data.favourite ? "♥ Video" : "♡ Video";
     }
-    [discoverResults.downloaded, discoverResults.videos, discoverResults.shorts, latestSubscriptionVideos].forEach(items => items.forEach(v => {
+    [discoverResults.downloaded, discoverResults.liked, discoverResults.videos, discoverResults.shorts, latestSubscriptionVideos].forEach(items => items.forEach(v => {
       if (v.video_id === item.video_id) v.is_favourite_video = data.favourite;
     }));
     if (latestPopupVideo?.video_id === item.video_id) {
@@ -5701,6 +5806,17 @@ function renderCurrentDiscoverMode() {
     return;
   }
 
+  if (discoverMode === "liked") {
+    document.getElementById("discover-quota").textContent =
+      `${discoverResults.liked.length} videos liked on your YouTube account`;
+
+    renderDiscoverTiles(
+      discoverResults.liked
+    );
+
+    return;
+  }
+
   if (discoverMode === "videos") {
     renderDiscoverTiles(
       discoverResults.videos
@@ -5776,7 +5892,7 @@ async function refreshDownloadedDiscoverIfChanged(forceRender=false) {
 }
 
 async function showDiscoverMode(mode) {
-  discoverMode = ["downloaded", "videos", "shorts", "top100"].includes(mode)
+  discoverMode = ["downloaded", "liked", "videos", "shorts", "top100"].includes(mode)
     ? mode
     : "downloaded";
 
@@ -5787,7 +5903,7 @@ async function showDiscoverMode(mode) {
 
   document.getElementById("discover-videos-panel").classList.toggle(
     "hidden",
-    !["downloaded", "videos"].includes(discoverMode)
+    !["downloaded", "liked", "videos"].includes(discoverMode)
   );
 
   document.getElementById("discover-shorts-panel").classList.toggle(
@@ -5803,6 +5919,11 @@ async function showDiscoverMode(mode) {
   document.getElementById("discover-downloaded-btn").classList.toggle(
     "secondary",
     discoverMode !== "downloaded"
+  );
+
+  document.getElementById("discover-liked-btn").classList.toggle(
+    "secondary",
+    discoverMode !== "liked"
   );
 
   document.getElementById("discover-videos-btn").classList.toggle(
@@ -5828,6 +5949,16 @@ async function showDiscoverMode(mode) {
       await refreshDownloadedDiscoverIfChanged(false);
     } else {
       await loadDiscover("downloaded");
+    }
+
+    return;
+  }
+
+  if (discoverMode === "liked") {
+    if (discoverResults.liked.length) {
+      renderCurrentDiscoverMode();
+    } else {
+      await loadDiscover("liked");
     }
 
     return;
@@ -5890,6 +6021,13 @@ async function loadDiscover(mode, force=false) {
 
       renderDiscoverTiles(
         discoverResults.downloaded
+      );
+    } else if (mode === "liked") {
+      document.getElementById("discover-quota").textContent =
+        `${discoverResults.liked.length} videos liked on your YouTube account · no YouTube search quota used`;
+
+      renderDiscoverTiles(
+        discoverResults.liked
       );
     } else if (mode === "top100") {
       document.getElementById("discover-quota").textContent =
@@ -5986,6 +6124,47 @@ function renderDiscoverTiles(items) {
       );
     });
 
+    let downloadIcon = null;
+
+    if (discoverMode === "liked") {
+      downloadIcon = document.createElement("button");
+      downloadIcon.type = "button";
+      downloadIcon.className = "discover-download-icon";
+      downloadIcon.title = `Prepare one-time download for ${item.title || "this video"}`;
+      downloadIcon.setAttribute(
+        "aria-label",
+        `Prepare one-time download for ${item.title || "this video"}`
+      );
+
+      downloadIcon.innerHTML = `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4v11"></path>
+          <path d="m7.5 11 4.5 4.5 4.5-4.5"></path>
+          <path d="M5 20h14"></path>
+        </svg>
+      `;
+
+      downloadIcon.addEventListener(
+        "click",
+        event => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          const url =
+            item.video_url
+            || (
+              item.video_id
+                ? `https://www.youtube.com/watch?v=${item.video_id}`
+                : ""
+            );
+
+          if (url) {
+            queueOneTimeDownload(url);
+          }
+        }
+      );
+    }
+
     const overlay = document.createElement("div");
     overlay.className = "discover-video-overlay";
 
@@ -6009,7 +6188,13 @@ function renderDiscoverTiles(items) {
 
     overlay.append(title, channel, meta);
 
-    card.append(image, heart, overlay);
+    card.append(image, heart);
+
+    if (downloadIcon) {
+      card.appendChild(downloadIcon);
+    }
+
+    card.appendChild(overlay);
 
     if (item.duration) {
       const duration = document.createElement("span");
@@ -6019,7 +6204,12 @@ function renderDiscoverTiles(items) {
     }
 
     card.addEventListener("click", event => {
-      if (event.target.closest(".discover-channel-heart")) return;
+      if (
+        event.target.closest(".discover-channel-heart")
+        || event.target.closest(".discover-download-icon")
+      ) {
+        return;
+      }
 
       if (item.from_pinchflat || item.metadata_complete === false) {
         openPinchflatMedia(item);
@@ -6385,6 +6575,22 @@ async function loadPinchflatLogs(force=false) {
     if (refresh) refresh.disabled = false;
   }
 }
+
+function dismissFlashMessage(button) {
+  const message = button?.closest(".flash");
+
+  if (!message) {
+    return;
+  }
+
+  message.classList.add("is-dismissing");
+
+  window.setTimeout(
+    () => message.remove(),
+    170
+  );
+}
+
 
 const configuredPageSectionOrder = {{ page_section_order|tojson }};
 const configuredSummaryTileOrder = {{ page_summary_order|tojson }};

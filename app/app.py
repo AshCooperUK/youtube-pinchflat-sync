@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.9.1"
+VERSION = "2.10.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -224,6 +224,14 @@ YOUTUBE_ACCOUNT_STATS_LOCK = threading.Lock()
 YOUTUBE_VIDEO_METADATA_CACHE_SECONDS = 900
 YOUTUBE_VIDEO_METADATA_CACHE = {}
 YOUTUBE_VIDEO_METADATA_LOCK = threading.Lock()
+
+YOUTUBE_LIKED_VIDEOS_CACHE_SECONDS = 600
+YOUTUBE_LIKED_VIDEOS_CACHE = {
+    "expires_at": 0.0,
+    "results": [],
+    "retrieved_at": "",
+}
+YOUTUBE_LIKED_VIDEOS_LOCK = threading.Lock()
 
 YOUTUBE_CHANNEL_FEED_WORKERS = 24
 
@@ -1307,6 +1315,285 @@ def youtube_top100_channels(force=False):
         "source": "Wikipedia + YouTube",
     }
 
+
+
+
+def youtube_liked_videos(force=False):
+    now_ts = time.time()
+
+    with YOUTUBE_LIKED_VIDEOS_LOCK:
+        cached_results = list(
+            YOUTUBE_LIKED_VIDEOS_CACHE.get(
+                "results",
+                [],
+            )
+        )
+        expires_at = float(
+            YOUTUBE_LIKED_VIDEOS_CACHE.get(
+                "expires_at",
+                0,
+            )
+            or 0
+        )
+        retrieved_at = str(
+            YOUTUBE_LIKED_VIDEOS_CACHE.get(
+                "retrieved_at",
+                "",
+            )
+            or ""
+        )
+
+    if (
+        cached_results
+        and not force
+        and expires_at > now_ts
+    ):
+        return {
+            "kind": "liked",
+            "results": annotate_favourites(
+                cached_results
+            ),
+            "retrieved_at": retrieved_at,
+            "source": "YouTube liked videos",
+        }
+
+    creds = load_credentials()
+    if not creds:
+        raise RuntimeError(
+            "Google account is not connected."
+        )
+
+    results = []
+    channel_ids = []
+    page_token = None
+    seen_video_ids = set()
+
+    while True:
+        params = {
+            "part": "snippet,statistics,contentDetails",
+            "myRating": "like",
+            "maxResults": 50,
+        }
+
+        if page_token:
+            params["pageToken"] = page_token
+
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "videos",
+            "videos.list",
+            1,
+            params=params,
+        )
+
+        payload = response.json()
+
+        for video in payload.get("items", []):
+            video_id = str(
+                video.get("id")
+                or ""
+            ).strip()
+
+            if (
+                not video_id
+                or video_id in seen_video_ids
+            ):
+                continue
+
+            seen_video_ids.add(video_id)
+
+            snippet = video.get("snippet") or {}
+            statistics = video.get("statistics") or {}
+            content_details = (
+                video.get("contentDetails")
+                or {}
+            )
+            thumbnails = snippet.get("thumbnails") or {}
+
+            thumbnail = (
+                thumbnails.get("maxres")
+                or thumbnails.get("standard")
+                or thumbnails.get("high")
+                or thumbnails.get("medium")
+                or thumbnails.get("default")
+                or {}
+            )
+
+            channel_id = str(
+                snippet.get("channelId")
+                or ""
+            ).strip()
+
+            channel_title = str(
+                snippet.get("channelTitle")
+                or "YouTube"
+            ).strip()
+
+            duration_raw = str(
+                content_details.get("duration")
+                or ""
+            )
+
+            duration_seconds = youtube_duration_seconds(
+                duration_raw
+            )
+
+            results.append(
+                {
+                    "video_id": video_id,
+                    "channel_id": channel_id,
+                    "title": (
+                        snippet.get("title")
+                        or "YouTube video"
+                    ),
+                    "channel_title": channel_title,
+                    "published_at": (
+                        snippet.get("publishedAt")
+                        or ""
+                    ),
+                    "description": (
+                        snippet.get("description")
+                        or ""
+                    ),
+                    "video_url": (
+                        f"https://www.youtube.com/watch?v={video_id}"
+                    ),
+                    "shorts_url": (
+                        f"https://www.youtube.com/shorts/{video_id}"
+                    ),
+                    "channel_url": (
+                        f"https://www.youtube.com/channel/{channel_id}"
+                        if channel_id
+                        else "https://www.youtube.com"
+                    ),
+                    "thumbnail_url": (
+                        thumbnail.get("url")
+                        or ""
+                    ),
+                    "channel_avatar_url": "",
+                    "channel_thumbnail_url": "",
+                    "view_count": int(
+                        statistics.get("viewCount")
+                        or 0
+                    ),
+                    "duration": youtube_duration_label(
+                        duration_raw
+                    ),
+                    "duration_seconds": duration_seconds,
+                    "is_short": youtube_video_is_short(
+                        snippet.get("title") or "",
+                        snippet.get("description") or "",
+                        duration_seconds,
+                    ),
+                    "is_youtube_liked": True,
+                    "metadata_complete": True,
+                }
+            )
+
+            if channel_id:
+                channel_ids.append(channel_id)
+
+        page_token = str(
+            payload.get("nextPageToken")
+            or ""
+        ).strip()
+
+        if not page_token:
+            break
+
+    # Add channel avatars so opening a Liked Videos tile gets the same rich
+    # player information as Random Videos.
+    avatar_by_channel = {}
+    unique_channel_ids = list(
+        dict.fromkeys(channel_ids)
+    )
+
+    for chunk_start in range(
+        0,
+        len(unique_channel_ids),
+        50,
+    ):
+        chunk = unique_channel_ids[
+            chunk_start:chunk_start + 50
+        ]
+
+        if not chunk:
+            continue
+
+        try:
+            response = youtube_api_request(
+                creds,
+                "GET",
+                "channels",
+                "channels.list",
+                1,
+                params={
+                    "part": "snippet",
+                    "id": ",".join(chunk),
+                    "maxResults": 50,
+                },
+            )
+
+            for channel in response.json().get(
+                "items",
+                [],
+            ):
+                snippet = channel.get("snippet") or {}
+                thumbnails = (
+                    snippet.get("thumbnails")
+                    or {}
+                )
+                image = (
+                    thumbnails.get("high")
+                    or thumbnails.get("medium")
+                    or thumbnails.get("default")
+                    or {}
+                )
+
+                avatar_by_channel[
+                    channel.get("id")
+                ] = image.get("url") or ""
+
+        except Exception:
+            # Liked videos themselves remain usable if a channel-avatar lookup
+            # fails.
+            continue
+
+    for item in results:
+        avatar = avatar_by_channel.get(
+            item.get("channel_id"),
+            "",
+        )
+
+        item["channel_avatar_url"] = avatar
+        item["channel_thumbnail_url"] = avatar
+
+    retrieved_at = now_iso()
+
+    with YOUTUBE_LIKED_VIDEOS_LOCK:
+        YOUTUBE_LIKED_VIDEOS_CACHE.update(
+            {
+                "expires_at": (
+                    now_ts
+                    + YOUTUBE_LIKED_VIDEOS_CACHE_SECONDS
+                ),
+                "results": [
+                    dict(item)
+                    for item in results
+                ],
+                "retrieved_at": retrieved_at,
+            }
+        )
+
+    return {
+        "kind": "liked",
+        "results": annotate_favourites(
+            results
+        ),
+        "retrieved_at": retrieved_at,
+        "source": "YouTube liked videos",
+    }
 
 
 
@@ -11694,6 +11981,15 @@ def like_youtube_video():
         }
         record_discovery_like(item)
 
+        with YOUTUBE_LIKED_VIDEOS_LOCK:
+            YOUTUBE_LIKED_VIDEOS_CACHE.update(
+                {
+                    "expires_at": 0.0,
+                    "results": [],
+                    "retrieved_at": "",
+                }
+            )
+
         log_activity(
             "youtube",
             "YouTube video liked",
@@ -11746,6 +12042,7 @@ def discover_videos():
 
     if kind not in {
         "downloaded",
+        "liked",
         "videos",
         "shorts",
         "top100",
@@ -11763,6 +12060,22 @@ def discover_videos():
                     ),
                     "source": "Pinchflat",
                     "search_remaining": stats["search_remaining"],
+                }
+            )
+
+        if kind == "liked":
+            result = youtube_liked_videos(
+                force=refresh
+            )
+            stats = api_usage_stats()
+
+            return jsonify(
+                {
+                    "ok": True,
+                    **result,
+                    "search_remaining": (
+                        stats["search_remaining"]
+                    ),
                 }
             )
 

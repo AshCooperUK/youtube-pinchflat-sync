@@ -2,6 +2,37 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.10.1
+
+Dismissible page messages.
+
+- Adds a close button to the right-hand side of server-generated success and error messages.
+- The close button follows the existing dark UI style.
+- Messages fade away cleanly when dismissed.
+- Extra right-hand padding prevents message text from overlapping the close button.
+
+
+## Version 2.10.0
+
+YouTube Liked Videos in Discover.
+
+- Adds `Discover → Liked Videos`.
+- Reads every video currently marked Like on the connected YouTube account using `videos.list?myRating=like`.
+- Liked Videos use the same clean 16:9 tile layout as Downloaded and Random Videos.
+- The list follows YouTube pagination until all liked videos have been retrieved.
+- Liked-video results are cached for 10 minutes to reduce YouTube API calls on large libraries.
+- Pressing Discover Refresh while on Liked Videos forces a fresh read from YouTube.
+- Fetching Liked Videos uses normal YouTube Data API quota units but does not use the app's expensive `search.list` discovery allowance.
+- Channel avatars are loaded for liked videos so the in-app media player receives the same rich channel presentation as Random Videos.
+- Adds a circular download icon beside the favourite-channel heart on Liked Videos tiles.
+- The download icon opens the existing Single Download popup with the YouTube URL already filled in.
+- Pressing the tile download icon never starts or queues a download automatically. The user must press Download in the Single Download popup.
+- Clicking the heart continues to favourite the channel, matching the existing Discover tile behaviour.
+- Liked Videos stay synchronised with favourite-channel and favourite-video state changes made elsewhere in the app.
+- Liking a YouTube video from inside the app invalidates the Liked Videos cache so a later refresh includes the new like.
+- Also cleans the duplicated Discover tile click branch left from the earlier Downloaded metadata update.
+
+
 ## Version 2.9.1
 
 Discover Downloaded live-refresh fix.
