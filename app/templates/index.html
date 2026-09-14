@@ -386,9 +386,14 @@
     .pinchflat-download-media {
       display:grid;
       grid-template-columns:128px minmax(0,1fr) auto;
-      gap:14px;
+      column-gap:18px;
+      row-gap:10px;
       align-items:center;
       width:100%;
+    }
+
+    .pinchflat-download-media > * {
+      min-width:0;
     }
 
     .pinchflat-download-thumb-button,
@@ -468,12 +473,22 @@
 
     .pinchflat-last-download {
       display:grid;
-      grid-template-columns:96px minmax(0,1fr);
-      gap:12px;
+      grid-template-columns:128px minmax(0,1fr);
+      column-gap:18px;
+      row-gap:10px;
       align-items:center;
       margin-top:14px;
       padding-top:14px;
       border-top:1px solid var(--line);
+    }
+
+    .pinchflat-last-download > * {
+      min-width:0;
+    }
+
+    .pinchflat-last-thumb-button {
+      width:128px;
+      min-width:128px;
     }
 
     .pinchflat-last-download.no-image {
@@ -552,12 +567,17 @@
     .queue-media-item {
       display:grid;
       grid-template-columns:128px minmax(0,1fr) auto;
-      gap:14px;
+      column-gap:18px;
+      row-gap:10px;
       align-items:center;
       padding:13px;
       border:1px solid var(--line);
       border-radius:12px;
       background:#0b1626;
+    }
+
+    .queue-media-item > * {
+      min-width:0;
     }
 
     .queue-media-body {
@@ -3139,6 +3159,9 @@ const discoverDialog = document.getElementById("discover-dialog");
 const favouritesDialog = document.getElementById("favourites-dialog");
 const listPickerDialog = document.getElementById("list-picker-dialog");
 const latestVideoDialog = document.getElementById("latest-video-dialog");
+
+let returnToPinchflatQueueAfterPlayer = false;
+let pinchflatQueueReturnScrollTop = 0;
 let singleDownloadTimer = null;
 let latestSubscriptionVideos = [];
 let latestSubscriptionShorts = [];
@@ -3286,7 +3309,20 @@ function pinchflatPopupItem(item) {
 function openPinchflatMedia(item) {
   if (!item?.youtube_id) return;
 
-  if (pinchflatQueueDialog?.open) {
+  const openedFromQueue = Boolean(
+    pinchflatQueueDialog?.open
+  );
+
+  returnToPinchflatQueueAfterPlayer = openedFromQueue;
+
+  if (openedFromQueue) {
+    const queueBody = pinchflatQueueDialog.querySelector(
+      ".modal-body"
+    );
+
+    pinchflatQueueReturnScrollTop =
+      queueBody?.scrollTop || 0;
+
     pinchflatQueueDialog.close();
   }
 
@@ -4269,9 +4305,38 @@ function openLatestVideo(item) {
 
 function closeLatestVideo() {
   const player = document.getElementById("latest-video-player");
-  if (player) player.src = "";
+  const reopenPinchflatQueue =
+    returnToPinchflatQueueAfterPlayer;
+
+  if (player) {
+    player.src = "";
+  }
+
   latestPopupVideo = null;
-  if (latestVideoDialog.open) latestVideoDialog.close();
+  returnToPinchflatQueueAfterPlayer = false;
+
+  if (latestVideoDialog.open) {
+    latestVideoDialog.close();
+  }
+
+  if (
+    reopenPinchflatQueue
+    && pinchflatQueueDialog
+    && !pinchflatQueueDialog.open
+  ) {
+    pinchflatQueueDialog.showModal();
+
+    requestAnimationFrame(() => {
+      const queueBody = pinchflatQueueDialog.querySelector(
+        ".modal-body"
+      );
+
+      if (queueBody) {
+        queueBody.scrollTop =
+          pinchflatQueueReturnScrollTop;
+      }
+    });
+  }
 }
 
 async function toggleLatestPopupVideoFavourite() {
@@ -5671,6 +5736,23 @@ const requestedSettingsTab = window.location.hash.replace("#", "");
 if (settingsHashTabs.has(requestedSettingsTab)) {
   openSettings(requestedSettingsTab);
 }
+
+latestVideoDialog?.addEventListener(
+  "cancel",
+  event => {
+    event.preventDefault();
+    closeLatestVideo();
+  }
+);
+
+latestVideoDialog?.addEventListener(
+  "click",
+  event => {
+    if (event.target === latestVideoDialog) {
+      closeLatestVideo();
+    }
+  }
+);
 
 [settingsDialog, activityDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
   d?.addEventListener("click", event => {

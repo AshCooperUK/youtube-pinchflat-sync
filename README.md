@@ -2,6 +2,20 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.7.4
+
+Pinchflat download spacing and queue-navigation fix.
+
+- Fixes the thumbnail/text overlap in the Last downloaded row.
+- Current downloads, Last downloaded and Queue rows now use a consistent 128px thumbnail column with 18px spacing.
+- Prevents media text from overflowing into the thumbnail column.
+- Opening a video from the Pinchflat Download Queue now remembers the queue as the parent window.
+- Closing the media player returns to the Pinchflat Download Queue rather than closing everything.
+- Restores the queue's previous scroll position when returning from the media player.
+- Closing the media player with Escape or by clicking its backdrop follows the same queue-return behaviour.
+- Videos opened from Current downloads or Last downloaded still close normally.
+
+
 ## Version 2.7.3
 
 Pinchflat download dashboard media links and queue cleanup.
