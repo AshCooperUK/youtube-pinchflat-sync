@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.11.0"
+VERSION = "2.12.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -266,6 +266,7 @@ app.config.update(
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 sync_lock = threading.Lock()
+pinchflat_source_action_lock = threading.Lock()
 download_queue = queue.Queue()
 download_worker_started = False
 storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
@@ -4530,6 +4531,64 @@ def favourite_channel_ids(user_id=None):
             (user_id,),
         ).fetchall()
     return {row["channel_id"] for row in rows}
+
+
+def set_channel_favourite_state(channel_id, favourite, user_id=None):
+    user_id = user_id or current_user_id()
+    channel_id = str(channel_id or "").strip()
+
+    if not user_id or not channel_id:
+        raise RuntimeError("Channel information is missing.")
+
+    with db() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM favourite_channels WHERE user_id = ? AND channel_id = ?",
+            (user_id, channel_id),
+        ).fetchone()
+
+        if favourite:
+            if not existing:
+                sub = conn.execute(
+                    "SELECT title, channel_url, thumbnail_url FROM subscriptions WHERE channel_id = ?",
+                    (channel_id,),
+                ).fetchone()
+
+                title = str(
+                    (sub["title"] if sub else None)
+                    or "YouTube channel"
+                ).strip()
+                url = str(
+                    (sub["channel_url"] if sub else None)
+                    or f"https://www.youtube.com/channel/{channel_id}"
+                ).strip()
+                thumb = str(
+                    (sub["thumbnail_url"] if sub else None)
+                    or ""
+                ).strip()
+
+                conn.execute(
+                    """
+                    INSERT INTO favourite_channels (
+                        user_id, channel_id, channel_title, channel_url,
+                        thumbnail_url, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        channel_id,
+                        title[:300],
+                        url,
+                        thumb,
+                        now_iso(),
+                    ),
+                )
+        elif existing:
+            conn.execute(
+                "DELETE FROM favourite_channels WHERE user_id = ? AND channel_id = ?",
+                (user_id, channel_id),
+            )
+
+    return bool(favourite)
 
 
 def favourite_video_ids(user_id=None):
@@ -8924,6 +8983,282 @@ def update_pinchflat_source_settings(
 
 
 
+PINCHFLAT_SOURCE_ACTION_LABELS = {
+    "download_pending": (
+        "download pending",
+        "download pending media",
+    ),
+    "redownload_existing": (
+        "re-download existing",
+        "redownload existing",
+        "re-download downloaded",
+        "redownload downloaded",
+    ),
+    "force_scan": (
+        "force index",
+        "force scan",
+    ),
+    "refresh_metadata": (
+        "refresh metadata",
+    ),
+    "sync_files": (
+        "sync files on disk",
+        "sync files",
+    ),
+}
+
+
+def _normalise_action_text(value):
+    return re.sub(
+        r"\\s+",
+        " ",
+        str(value or "").strip().casefold(),
+    )
+
+
+def _pinchflat_action_control_text(control):
+    if control is None:
+        return ""
+
+    values = [
+        control.get_text(" ", strip=True)
+        if hasattr(control, "get_text")
+        else "",
+        control.get("value") or "",
+        control.get("title") or "",
+        control.get("aria-label") or "",
+        control.get("data-confirm") or "",
+    ]
+
+    return _normalise_action_text(
+        " ".join(str(value) for value in values if value)
+    )
+
+
+def _pinchflat_action_matches(text, labels):
+    text = _normalise_action_text(text)
+    return any(label in text for label in labels)
+
+
+def execute_pinchflat_source_action(source_id, action_key):
+    source_id = str(source_id or "").strip()
+    action_key = str(action_key or "").strip()
+    labels = PINCHFLAT_SOURCE_ACTION_LABELS.get(action_key)
+
+    if not source_id:
+        raise RuntimeError("This channel is not linked to a Pinchflat source.")
+
+    if not labels:
+        raise RuntimeError("Unknown Pinchflat source action.")
+
+    if not pinchflat_health():
+        raise RuntimeError("Pinchflat is not available.")
+
+    session_obj = pinchflat_session()
+    source_url = f"{PINCHFLAT_URL}/sources/{source_id}"
+    response = session_obj.get(
+        source_url,
+        timeout=30,
+        allow_redirects=False,
+    )
+
+    if response.status_code == 404:
+        raise RuntimeError("The Pinchflat source no longer exists.")
+
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Pinchflat exposes the source tools as forms/buttons. Detect them from
+    # their visible labels instead of hard-coding internal routes so the app
+    # remains compatible with different Pinchflat releases.
+    for form in soup.find_all("form"):
+        controls = form.find_all(["button", "input"])
+
+        for control in controls:
+            control_text = _pinchflat_action_control_text(control)
+            form_text = _normalise_action_text(
+                form.get_text(" ", strip=True)
+            )
+
+            if not (
+                _pinchflat_action_matches(control_text, labels)
+                or _pinchflat_action_matches(form_text, labels)
+            ):
+                continue
+
+            payload = scrape_form_payload(form)
+
+            control_name = control.get("name")
+            if control_name:
+                payload[control_name] = control.get("value") or ""
+
+            action = (
+                control.get("formaction")
+                or form.get("action")
+                or source_url
+            )
+            target = (
+                action
+                if action.startswith(("http://", "https://"))
+                else f"{PINCHFLAT_URL}{action if action.startswith('/') else '/' + action}"
+            )
+
+            method = _normalise_action_text(
+                control.get("formmethod")
+                or form.get("method")
+                or "post"
+            ).upper()
+
+            override = _normalise_action_text(
+                payload.get("_method")
+                or ""
+            ).upper()
+
+            if override in {"POST", "PUT", "PATCH", "DELETE"}:
+                method = override
+                payload.pop("_method", None)
+
+            result = session_obj.request(
+                method,
+                target,
+                data=payload,
+                timeout=180,
+                allow_redirects=False,
+            )
+
+            if result.status_code >= 500:
+                body = " ".join(
+                    BeautifulSoup(
+                        result.text,
+                        "html.parser",
+                    ).stripped_strings
+                )
+                raise RuntimeError(
+                    f"Pinchflat returned HTTP {result.status_code}. "
+                    f"Response: {body[:450] or 'No error text returned.'}"
+                )
+
+            if result.status_code >= 400:
+                raise RuntimeError(
+                    f"Pinchflat returned HTTP {result.status_code} while running this action."
+                )
+
+            return True
+
+    # A few Pinchflat releases expose tools as links instead of forms.
+    for link in soup.find_all("a", href=True):
+        text = _normalise_action_text(
+            " ".join(
+                filter(
+                    None,
+                    [
+                        link.get_text(" ", strip=True),
+                        link.get("title") or "",
+                        link.get("aria-label") or "",
+                    ],
+                )
+            )
+        )
+
+        if not _pinchflat_action_matches(text, labels):
+            continue
+
+        href = link.get("href") or ""
+        target = (
+            href
+            if href.startswith(("http://", "https://"))
+            else f"{PINCHFLAT_URL}{href if href.startswith('/') else '/' + href}"
+        )
+        method = _normalise_action_text(
+            link.get("data-method")
+            or "get"
+        ).upper()
+
+        result = session_obj.request(
+            method,
+            target,
+            timeout=180,
+            allow_redirects=False,
+        )
+
+        if result.status_code >= 400:
+            raise RuntimeError(
+                f"Pinchflat returned HTTP {result.status_code} while running this action."
+            )
+
+        return True
+
+    friendly = {
+        "download_pending": "Download Pending",
+        "redownload_existing": "Re-Download Existing",
+        "force_scan": "Force Scan",
+        "refresh_metadata": "Refresh Metadata",
+        "sync_files": "Sync Files on Disk",
+    }.get(action_key, action_key)
+
+    raise RuntimeError(
+        f"Pinchflat did not expose a {friendly} action on this source page."
+    )
+
+
+def youtube_channel_summary(channel_id):
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return {}
+
+    try:
+        creds = load_credentials()
+    except Exception:
+        creds = None
+
+    if not creds:
+        return {}
+
+    try:
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "channels",
+            "channels.list",
+            1,
+            params={
+                "part": "snippet,statistics,contentDetails",
+                "id": channel_id,
+                "maxResults": 1,
+            },
+        )
+
+        items = response.json().get("items", [])
+        if not items:
+            return {}
+
+        item = items[0]
+        snippet = item.get("snippet") or {}
+        stats = item.get("statistics") or {}
+        thumbs = snippet.get("thumbnails") or {}
+        image = (
+            thumbs.get("high")
+            or thumbs.get("medium")
+            or thumbs.get("default")
+            or {}
+        )
+
+        return {
+            "title": snippet.get("title") or "",
+            "description": snippet.get("description") or "",
+            "custom_url": snippet.get("customUrl") or "",
+            "published_at": snippet.get("publishedAt") or "",
+            "country": snippet.get("country") or "",
+            "thumbnail_url": image.get("url") or "",
+            "subscriber_count": int(stats.get("subscriberCount") or 0),
+            "view_count": int(stats.get("viewCount") or 0),
+            "video_count": int(stats.get("videoCount") or 0),
+            "hidden_subscriber_count": bool(stats.get("hiddenSubscriberCount")),
+        }
+    except Exception:
+        return {}
+
+
 def delete_pinchflat_source(
     source_id=None,
     delete_files=False,
@@ -9521,6 +9856,14 @@ def subscription_ajax_payload(channel_id):
         "media_profile_id": str(
             item.get("media_profile_id")
             or ""
+        ),
+        "pinchflat_source_id": str(
+            item.get("pinchflat_source_id")
+            or ""
+        ),
+        "is_favourite": bool(
+            item.get("channel_id")
+            in favourite_channel_ids()
         ),
     }
 
@@ -10688,10 +11031,11 @@ def save_subscription_row(channel_id):
     status_code = 200
 
     try:
-        result = apply_subscription_source_authority(
-            prospective,
-            apply_settings=True,
-        )
+        with pinchflat_source_action_lock:
+            result = apply_subscription_source_authority(
+                prospective,
+                apply_settings=True,
+            )
 
         with db() as conn:
             conn.execute(
@@ -11764,7 +12108,13 @@ def bulk_subscription_action():
         try:
             prospective = dict(row)
 
-            if action in {"enable", "disable"}:
+            if action in {"favourite", "unfavourite"}:
+                set_channel_favourite_state(
+                    row["channel_id"],
+                    action == "favourite",
+                )
+
+            elif action in {"enable", "disable"}:
                 enabled = action == "enable"
 
                 with db() as conn:
@@ -11788,10 +12138,12 @@ def bulk_subscription_action():
                 prospective["source_authorised"] = 1 if enabled else 0
                 prospective["needs_review"] = 0
 
-                apply_subscription_source_authority(
-                    prospective,
-                    apply_settings=True,
-                )
+                with pinchflat_source_action_lock:
+                    with pinchflat_source_action_lock:
+                        apply_subscription_source_authority(
+                            prospective,
+                            apply_settings=True,
+                        )
             elif action == "range":
                 mode = request.form.get(
                     "bulk_history_mode",
@@ -11821,10 +12173,11 @@ def bulk_subscription_action():
                 prospective["history_custom_date"] = custom
 
                 if subscription_download_enabled(prospective):
-                    apply_subscription_source_authority(
-                        prospective,
-                        apply_settings=True,
-                    )
+                    with pinchflat_source_action_lock:
+                        apply_subscription_source_authority(
+                            prospective,
+                            apply_settings=True,
+                        )
 
             elif action == "profile":
                 profile_id = request.form.get(
@@ -11849,16 +12202,19 @@ def bulk_subscription_action():
                 prospective["media_profile_id"] = profile_id
 
                 if subscription_download_enabled(prospective):
-                    apply_subscription_source_authority(
-                        prospective,
-                        apply_settings=True,
-                    )
+                    with pinchflat_source_action_lock:
+                        apply_subscription_source_authority(
+                            prospective,
+                            apply_settings=True,
+                        )
 
             elif action == "retry":
-                apply_subscription_source_authority(
-                    prospective,
-                    apply_settings=True,
-                )
+                with pinchflat_source_action_lock:
+                    with pinchflat_source_action_lock:
+                        apply_subscription_source_authority(
+                            prospective,
+                            apply_settings=True,
+                        )
 
                 with db() as conn:
                     conn.execute(
@@ -11933,6 +12289,279 @@ def bulk_subscription_action():
         url_for("index")
         + "#subscriptions"
     )
+
+
+@app.get("/api/subscriptions/<channel_id>/details")
+def subscription_details_api(channel_id):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+
+    if row is None:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Subscription was not found.",
+            }
+        ), 404
+
+    item = subscription_view(row)
+    source_id = resolve_pinchflat_source_id(item)
+    profile_id = subscription_media_profile_id(item)
+    profile_name = (
+        media_profile_settings(profile_id).get("name")
+        or str(profile_id)
+    )
+
+    disk_bytes = channel_disk_usage(
+        item.get("title") or channel_id,
+        storage_snapshot(),
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "subscription": {
+                "channel_id": item.get("channel_id") or "",
+                "title": item.get("title") or "YouTube channel",
+                "channel_url": item.get("channel_url") or "",
+                "thumbnail_url": item.get("thumbnail_url") or "",
+                "active": bool(item.get("active")),
+                "favourite": item.get("channel_id") in favourite_channel_ids(),
+                "download_enabled": bool(item.get("download_enabled")),
+                "pinchflat_added": bool(item.get("pinchflat_added")),
+                "pinchflat_source_id": str(source_id or ""),
+                "pinchflat_source_url": (
+                    f"{PINCHFLAT_URL}/sources/{source_id}"
+                    if source_id
+                    else ""
+                ),
+                "ui_status": item.get("ui_status") or "",
+                "cutoff": item.get("cutoff") or "",
+                "history_label": item.get("history_label") or "",
+                "media_profile_id": str(profile_id or ""),
+                "media_profile_name": profile_name,
+                "subscribed_at": item.get("subscribed_at") or "",
+                "first_seen_at": item.get("first_seen_at") or "",
+                "removed_at": item.get("removed_at") or "",
+                "last_error": item.get("last_error") or "",
+                "disk_bytes": disk_bytes,
+                "disk_usage": format_bytes(disk_bytes),
+            },
+            "youtube": youtube_channel_summary(channel_id),
+        }
+    )
+
+
+@app.post("/api/subscriptions/<channel_id>/source-action")
+def subscription_source_action_api(channel_id):
+    payload = request.get_json(silent=True) or {}
+    action = str(payload.get("action") or "").strip()
+
+    friendly = {
+        "download_pending": "Download Pending",
+        "redownload_existing": "Re-Download Existing",
+        "force_scan": "Force Scan",
+        "refresh_metadata": "Refresh Metadata",
+        "sync_files": "Sync Files on Disk",
+    }
+
+    if action not in friendly:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Unknown source action.",
+            }
+        ), 400
+
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+
+    if row is None:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Subscription was not found.",
+            }
+        ), 404
+
+    item = dict(row)
+    source_id = resolve_pinchflat_source_id(item)
+
+    if not source_id:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "This channel does not currently exist in Pinchflat.",
+            }
+        ), 409
+
+    try:
+        with pinchflat_source_action_lock:
+            execute_pinchflat_source_action(
+                source_id,
+                action,
+            )
+
+        message = (
+            f"{friendly[action]} started for "
+            f"{item.get('title') or channel_id}."
+        )
+
+        log_activity(
+            "pinchflat",
+            friendly[action],
+            message,
+            "success",
+            channel_id,
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "message": message,
+            }
+        )
+
+    except Exception as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+            }
+        ), 400
+
+
+@app.post("/api/subscriptions/<channel_id>/delete-unsubscribe")
+def delete_and_unsubscribe_subscription_api(channel_id):
+    payload = request.get_json(silent=True) or {}
+    delete_media = bool(payload.get("delete_media"))
+
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+
+    if row is None:
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Subscription was not found.",
+            }
+        ), 404
+
+    item = dict(row)
+    title = item.get("title") or channel_id
+
+    try:
+        if item.get("active"):
+            youtube_unsubscribe(
+                channel_id,
+                row_value(
+                    row,
+                    "youtube_subscription_id",
+                    None,
+                ),
+            )
+
+        source_id = resolve_pinchflat_source_id(item)
+        profile_id = subscription_media_profile_id(item)
+        output_template = media_profile_settings(
+            profile_id
+        ).get(
+            "output_path_template",
+            EMBY_OUTPUT_PATH_TEMPLATE,
+        )
+
+        source_gone = True
+
+        if source_id:
+            removal_row = dict(item)
+            removal_row["pinchflat_source_id"] = str(source_id)
+            removal_row["pinchflat_added"] = 1
+
+            with pinchflat_source_action_lock:
+                prepare_pinchflat_source_for_removal(removal_row)
+                source_gone = delete_pinchflat_source(
+                    source_id,
+                    delete_files=delete_media,
+                    subscription=removal_row,
+                )
+
+        if delete_media:
+            delete_subscription_download_folder(
+                title,
+                output_template,
+            )
+
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET active = 0,
+                    removed_at = ?,
+                    download_enabled = 0,
+                    source_authorised = 0,
+                    pinchflat_added = ?,
+                    pinchflat_source_id = ?,
+                    last_error = ?
+                WHERE channel_id = ?
+                """,
+                (
+                    now_iso(),
+                    0 if source_gone else 1,
+                    None if source_gone else str(source_id or ""),
+                    None if source_gone else "Pinchflat source removal is still in progress.",
+                    channel_id,
+                ),
+            )
+
+        if not source_gone and source_id:
+            schedule_unsubscribe_cleanup(
+                channel_id,
+                title,
+                output_template,
+                source_id=source_id,
+                delete_files=delete_media,
+                delay_seconds=300,
+                checks=6,
+            )
+
+        message = (
+            f"{title} was unsubscribed and removed from Pinchflat"
+            + (" with downloaded media removed." if delete_media else ".")
+        )
+
+        log_activity(
+            "youtube",
+            "Channel removed and unsubscribed",
+            message,
+            "success",
+            channel_id,
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "message": message,
+                "subscription": subscription_ajax_payload(channel_id),
+            }
+        )
+
+    except Exception as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+                "subscription": subscription_ajax_payload(channel_id),
+            }
+        ), 400
 
 
 @app.post("/subscriptions/<channel_id>/unsubscribe")
@@ -12331,40 +12960,79 @@ def toggle_favourite_channel():
     user_id = current_user_id()
     payload = request.get_json(silent=True) or {}
     channel_id = str(payload.get("channel_id") or "").strip()
+
     if not user_id or not channel_id:
-        return jsonify({"ok": False, "error": "Channel information is missing."}), 400
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Channel information is missing.",
+            }
+        ), 400
 
     with db() as conn:
         existing = conn.execute(
             "SELECT 1 FROM favourite_channels WHERE user_id = ? AND channel_id = ?",
             (user_id, channel_id),
         ).fetchone()
-        if existing:
-            conn.execute(
-                "DELETE FROM favourite_channels WHERE user_id = ? AND channel_id = ?",
-                (user_id, channel_id),
-            )
-            favourite = False
-        else:
+
+    favourite = not bool(existing)
+
+    if favourite:
+        # Preserve richer metadata supplied by Discover for channels which are
+        # not yet present in the subscriptions table.
+        with db() as conn:
             sub = conn.execute(
                 "SELECT title, channel_url, thumbnail_url FROM subscriptions WHERE channel_id = ?",
                 (channel_id,),
             ).fetchone()
-            title = str(payload.get("channel_title") or (sub["title"] if sub else "YouTube channel")).strip()
-            url = str(payload.get("channel_url") or (sub["channel_url"] if sub else f"https://www.youtube.com/channel/{channel_id}")).strip()
-            thumb = str(payload.get("thumbnail_url") or (sub["thumbnail_url"] if sub else "")).strip()
+
+            title = str(
+                payload.get("channel_title")
+                or (sub["title"] if sub else "YouTube channel")
+            ).strip()
+            url = str(
+                payload.get("channel_url")
+                or (
+                    sub["channel_url"]
+                    if sub
+                    else f"https://www.youtube.com/channel/{channel_id}"
+                )
+            ).strip()
+            thumb = str(
+                payload.get("thumbnail_url")
+                or (sub["thumbnail_url"] if sub else "")
+            ).strip()
+
             conn.execute(
                 """
-                INSERT INTO favourite_channels (
+                INSERT OR REPLACE INTO favourite_channels (
                     user_id, channel_id, channel_title, channel_url,
                     thumbnail_url, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, channel_id, title[:300], url, thumb, now_iso()),
+                (
+                    user_id,
+                    channel_id,
+                    title[:300],
+                    url,
+                    thumb,
+                    now_iso(),
+                ),
             )
-            favourite = True
+    else:
+        set_channel_favourite_state(
+            channel_id,
+            False,
+            user_id=user_id,
+        )
 
-    return jsonify({"ok": True, "favourite": favourite, "channel_id": channel_id})
+    return jsonify(
+        {
+            "ok": True,
+            "favourite": favourite,
+            "channel_id": channel_id,
+        }
+    )
 
 
 @app.post("/api/favourites/video/toggle")

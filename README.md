@@ -2,6 +2,26 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.12.0
+
+Subscription workflow and source-management update.
+
+- Keeps the page anchored to the same subscription after Save and favourite changes.
+- Serialises per-channel Save requests so several Pinchflat source updates do not collide.
+- Adds a short queue between subscription saves and shows Queued / Saving states.
+- Debounces subscription searching by 450 ms so filtering waits for typing to pause.
+- Moves subscription search, filtering, sorting, selection and bulk controls into a new Subscription tools popup beside the count badge.
+- Per-channel Save changes is only visible after that row has unsaved changes.
+- Adds Save selected changes to Bulk actions only when selected rows contain unsaved changes.
+- Adds Make favourite and Remove favourite to Bulk actions.
+- Adds a per-channel Actions popup with local subscription data, Pinchflat source information and live YouTube channel statistics.
+- Adds Pinchflat actions: Download Pending, Re-Download Existing, Force Scan, Refresh Metadata and Sync Files on Disk.
+- Source action discovery follows Pinchflat's own visible form/button labels instead of depending on one fixed internal route.
+- Adds Unsubscribe, Delete Channel & Unsubscribe, and Delete Channel & Unsubscribe & Remove Media actions.
+- Destructive delete actions use a separate confirmation popup.
+- Favourite changes now update every visible Discover tile from that channel immediately without a page refresh.
+- Discover clears stale tiles when loading a different category, so videos from the previous category are no longer shown underneath the loading message.
+
 ## Version 2.11.0
 
 Pinchflat concurrent download control.

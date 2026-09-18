@@ -315,6 +315,58 @@
     .power-toggle-label { color:var(--muted); font-size:13px; }
     .source-save-actions { min-width:96px; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
     .source-save-actions .btn { width:104px; min-width:104px; height:var(--control-height); min-height:var(--control-height); padding:0 10px; font-size:12px; }
+    .source-save-btn[hidden] { display:none !important; }
+
+    .subscription-menu-btn svg {
+      width:17px; height:17px; stroke:currentColor; fill:none; stroke-width:1.8;
+      stroke-linecap:round; stroke-linejoin:round;
+    }
+    #subscriptions-tools-dialog { width:min(900px,94vw); }
+    .subscription-tools-grid { display:grid; grid-template-columns:1fr; gap:12px; }
+    .subscription-tools-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .subscription-tools-row .grow { flex:1 1 280px; }
+    .subscription-tools-row select { min-width:170px; }
+    .subscription-tool-footer { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px; }
+
+    #subscription-channel-dialog { width:min(980px,94vw); }
+    .subscription-channel-hero {
+      display:grid; grid-template-columns:96px minmax(0,1fr); gap:18px; align-items:center;
+      padding:16px; border:1px solid var(--line); border-radius:14px; background:#0b1626;
+    }
+    .subscription-channel-hero img {
+      width:96px; height:96px; border-radius:50%; object-fit:cover; border:2px solid #415575;
+      background:#08111f;
+    }
+    .subscription-channel-title { margin:0; font-size:24px; }
+    .subscription-channel-description {
+      margin-top:10px; max-height:120px; overflow:auto; color:var(--muted); line-height:1.5;
+    }
+    .subscription-info-grid {
+      display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:14px;
+    }
+    .subscription-info-tile {
+      padding:12px; border:1px solid var(--line); border-radius:11px; background:#0b1626; min-width:0;
+    }
+    .subscription-info-tile strong { display:block; margin-top:4px; overflow-wrap:anywhere; }
+    .subscription-action-grid {
+      display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px;
+    }
+    .subscription-action-grid .btn { width:100%; }
+    .subscription-danger-zone {
+      margin-top:16px; padding:14px; border:1px solid #6d2b32; border-radius:12px; background:#241016;
+    }
+    .subscription-danger-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .subscription-danger-actions .btn { width:100%; }
+    .btn.danger { background:#a52d3a; border-color:#c64352; color:#fff; }
+    .btn.danger:hover { background:#bd3443; }
+    #subscription-confirm-dialog { width:min(560px,94vw); }
+    .subscription-action-status { min-height:22px; margin-top:10px; }
+    @media(max-width:760px) {
+      .subscription-info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .subscription-action-grid, .subscription-danger-actions { grid-template-columns:1fr; }
+      .subscription-channel-hero { grid-template-columns:72px minmax(0,1fr); }
+      .subscription-channel-hero img { width:72px; height:72px; }
+    }
 
     .pinchflat-download-card {
       margin-top:16px;
@@ -2119,6 +2171,23 @@
         >{{ counts.active }}</span>
 
         <button
+          class="latest-window-btn subscription-menu-btn"
+          type="button"
+          onclick="openSubscriptionTools()"
+          title="Subscription tools"
+          aria-label="Subscription tools"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16"></path>
+            <path d="M4 12h16"></path>
+            <path d="M4 17h16"></path>
+            <circle cx="9" cy="7" r="1.5"></circle>
+            <circle cx="15" cy="12" r="1.5"></circle>
+            <circle cx="11" cy="17" r="1.5"></circle>
+          </svg>
+        </button>
+
+        <button
           class="latest-window-btn"
           type="button"
           id="subscriptions-minimise"
@@ -2134,71 +2203,9 @@
     </div>
 
     <div id="subscriptions-content">
-    <div class="toolbar">
-      <div class="grow">
-        <input id="source-search" type="text" placeholder="Search channels…" oninput="applyFilters()">
-      </div>
-      <div class="inline-control">
-        <select id="status-filter" onchange="applyFilters()">
-          <option value="active">All active</option>
-          <option value="enabled">Enabled</option>
-          <option value="disabled">Disabled</option>
-          <option value="pending">Pending</option>
-          <option value="error">Errors</option>
-          <option value="removed">Removed</option>
-          <option value="favourites">Favourites</option>
-          <option value="all">Everything</option>
-        </select>
-      </div>
-      <div class="inline-control">
-        <select id="sort-filter" onchange="applyFilters()">
-          <option value="title">A → Z</option>
-          <option value="status">Status</option>
-          <option value="newest">Newest first</option>
-          <option value="storage">Disk usage</option>
-        </select>
-      </div>
-    </div>
-
     {% if subs %}
     {% if is_admin %}
     <form id="bulk-form" method="post" action="/subscriptions/bulk"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"></form>
-    <div class="toolbar">
-      <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(true)">Select visible</button>
-      <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(false)">Clear</button>
-      <span class="muted small" id="selected-count">0 selected</span>
-
-      <select id="bulk-action" name="bulk_action" form="bulk-form" class="inline-control" onchange="toggleBulkOptions()" required>
-        <option value="">Bulk action…</option>
-        <option value="enable">Enable downloads</option>
-        <option value="disable">Disable downloads</option>
-        <option value="range">Set download range</option>
-        <option value="profile">Set Media Profile</option>
-        <option value="retry">Retry errors</option>
-      </select>
-
-      <select id="bulk-range" name="bulk_history_mode" form="bulk-form" class="inline-control hidden">
-        <option value="default">Default range</option>
-        <option value="today">Today</option>
-        <option value="this_week">This week</option>
-        <option value="this_month">This month</option>
-        <option value="six_months">Last 6 months</option>
-        <option value="last_year">Last year</option>
-        {% for y in range(2, 11) %}<option value="years_{{ y }}">Last {{ y }} years</option>{% endfor %}
-        <option value="subscription_date">Subscription date</option>
-        <option value="custom_date">Custom date</option>
-      </select>
-
-      <input id="bulk-custom-date" name="bulk_custom_date" form="bulk-form" type="date" class="inline-control hidden">
-
-      <select id="bulk-profile" name="bulk_profile_id" form="bulk-form" class="inline-control hidden">
-        {% for profile in profiles %}
-          <option value="{{ profile.id }}">{{ profile.name }}</option>
-        {% endfor %}
-      </select>
-
-      <button class="btn smallbtn" type="submit" form="bulk-form">Apply</button>
-    </div>
     {% endif %}
 
     <div class="table-wrap">
@@ -2230,6 +2237,11 @@
             data-storage="{{ sub['disk_bytes'] }}"
             data-favourite="{{ 1 if sub['is_favourite'] else 0 }}"
             data-form-id="{{ row_form_id }}"
+            data-channel-id="{{ sub['channel_id']|e }}"
+            data-channel-title="{{ sub['title']|e }}"
+            data-channel-url="{{ sub['channel_url']|e }}"
+            data-thumbnail-url="{{ (sub['thumbnail_url'] or '')|e }}"
+            data-source-id="{{ (sub['pinchflat_source_id'] or '')|e }}"
           >
             <td>
               {% if is_admin %}
@@ -2355,18 +2367,13 @@
             <td>
               {% if is_admin %}
                 <div class="source-save-actions">
-                  <button class="btn source-save-btn" type="submit" form="{{ row_form_id }}">Save</button>
-                  {% if sub['active'] %}
-                    <form
-                      class="source-unsubscribe-form"
-                      data-channel-id="{{ sub['channel_id'] }}"
-                      method="post"
-                      action="/subscriptions/{{ sub['channel_id'] }}/unsubscribe"
-                    >
-                      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-                      <button class="btn ghost smallbtn" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
-                    </form>
-                  {% endif %}
+                  <button class="btn source-save-btn" type="submit" form="{{ row_form_id }}" hidden>Save changes</button>
+                  <button
+                    class="btn ghost smallbtn source-actions-btn"
+                    type="button"
+                    onclick="openSubscriptionChannelActions(this)"
+                    data-channel-id="{{ sub['channel_id']|e }}"
+                  >Actions</button>
                 </div>
               {% endif %}
             </td>
@@ -2385,6 +2392,160 @@
 </div>
 
 <div id="ajax-toast" class="ajax-toast" role="status" aria-live="polite"></div>
+
+<dialog id="subscriptions-tools-dialog">
+  <div class="modal-head">
+    <div>
+      <h2 style="margin:0">Subscription tools</h2>
+      <div class="muted small">Search, sort, filter and apply changes to selected channels.</div>
+    </div>
+    <button class="modal-close" type="button" onclick="closeSubscriptionTools()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="subscription-tools-grid">
+      <div class="subscription-tools-row">
+        <div class="grow">
+          <input id="source-search" type="text" placeholder="Search channels…" oninput="scheduleSubscriptionFilter()">
+        </div>
+        <select id="status-filter" onchange="applyFilters({preserveScroll:true})">
+          <option value="active">All active</option>
+          <option value="enabled">Enabled</option>
+          <option value="disabled">Disabled</option>
+          <option value="pending">Pending</option>
+          <option value="error">Errors</option>
+          <option value="removed">Removed</option>
+          <option value="favourites">Favourites</option>
+          <option value="all">Everything</option>
+        </select>
+        <select id="sort-filter" onchange="applyFilters({preserveScroll:true})">
+          <option value="title">A → Z</option>
+          <option value="status">Status</option>
+          <option value="newest">Newest first</option>
+          <option value="storage">Disk usage</option>
+        </select>
+      </div>
+
+      {% if is_admin %}
+      <div class="subscription-tools-row">
+        <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(true)">Select visible</button>
+        <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(false)">Clear</button>
+        <span class="muted small" id="selected-count">0 selected</span>
+      </div>
+
+      <div class="subscription-tools-row">
+        <select id="bulk-action" name="bulk_action" form="bulk-form" onchange="toggleBulkOptions()" required>
+          <option value="">Bulk action…</option>
+          <option id="bulk-save-changes-option" value="save_changes" hidden>Save selected changes</option>
+          <option value="enable">Enable downloads</option>
+          <option value="disable">Disable downloads</option>
+          <option value="range">Set download range</option>
+          <option value="profile">Set Media Profile</option>
+          <option value="favourite">Make favourite</option>
+          <option value="unfavourite">Remove favourite</option>
+          <option value="retry">Retry errors</option>
+        </select>
+
+        <select id="bulk-range" name="bulk_history_mode" form="bulk-form" class="hidden">
+          <option value="default">Default range</option>
+          <option value="today">Today</option>
+          <option value="this_week">This week</option>
+          <option value="this_month">This month</option>
+          <option value="six_months">Last 6 months</option>
+          <option value="last_year">Last year</option>
+          {% for y in range(2, 11) %}<option value="years_{{ y }}">Last {{ y }} years</option>{% endfor %}
+          <option value="subscription_date">Subscription date</option>
+          <option value="custom_date">Custom date</option>
+        </select>
+
+        <input id="bulk-custom-date" name="bulk_custom_date" form="bulk-form" type="date" class="hidden">
+
+        <select id="bulk-profile" name="bulk_profile_id" form="bulk-form" class="hidden">
+          {% for profile in profiles %}
+            <option value="{{ profile.id }}">{{ profile.name }}</option>
+          {% endfor %}
+        </select>
+
+        <button class="btn" type="submit" form="bulk-form">Apply</button>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</dialog>
+
+<dialog id="subscription-channel-dialog">
+  <div class="modal-head">
+    <div>
+      <h2 style="margin:0">Channel</h2>
+      <div class="muted small">YouTube subscription and Pinchflat source management.</div>
+    </div>
+    <button class="modal-close" type="button" onclick="closeSubscriptionChannelActions()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div id="subscription-channel-loading" class="empty">Loading channel information…</div>
+    <div id="subscription-channel-content" class="hidden">
+      <div class="subscription-channel-hero">
+        <img id="subscription-channel-avatar" src="{{ url_for('static', filename='channel-placeholder.svg') }}" alt="YouTube channel">
+        <div style="min-width:0">
+          <h2 id="subscription-channel-title" class="subscription-channel-title">YouTube channel</h2>
+          <div class="actions" style="margin-top:8px">
+            <a id="subscription-channel-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank" rel="noopener">Open YouTube channel</a>
+            <a id="subscription-channel-pinchflat-link" class="btn ghost hidden" href="#" target="_blank" rel="noopener">Open Pinchflat source</a>
+          </div>
+          <div id="subscription-channel-description" class="subscription-channel-description"></div>
+        </div>
+      </div>
+
+      <div class="subscription-info-grid">
+        <div class="subscription-info-tile"><span class="muted small">Status</span><strong id="subscription-channel-status">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Media Profile</span><strong id="subscription-channel-profile">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Download range</span><strong id="subscription-channel-range">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Disk usage</span><strong id="subscription-channel-storage">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube subscribers</span><strong id="subscription-channel-subscribers">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube videos</span><strong id="subscription-channel-videos">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube views</span><strong id="subscription-channel-views">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Pinchflat source</span><strong id="subscription-channel-source">—</strong></div>
+      </div>
+
+      {% if is_admin %}
+      <div class="profile-section" style="margin-top:16px">
+        <h3>Pinchflat source actions</h3>
+        <div class="subscription-action-grid">
+          <button class="btn secondary" type="button" data-source-action="download_pending" onclick="runSubscriptionSourceAction('download_pending')">Download Pending</button>
+          <button class="btn secondary" type="button" data-source-action="redownload_existing" onclick="runSubscriptionSourceAction('redownload_existing')">Re-Download Existing</button>
+          <button class="btn secondary" type="button" data-source-action="force_scan" onclick="runSubscriptionSourceAction('force_scan')">Force Scan</button>
+          <button class="btn secondary" type="button" data-source-action="refresh_metadata" onclick="runSubscriptionSourceAction('refresh_metadata')">Refresh Metadata</button>
+          <button class="btn secondary" type="button" data-source-action="sync_files" onclick="runSubscriptionSourceAction('sync_files')">Sync Files on Disk</button>
+          <button id="subscription-channel-unsubscribe" class="btn secondary" type="button" onclick="unsubscribeCurrentChannel()" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
+        </div>
+        <div id="subscription-channel-action-status" class="subscription-action-status muted small"></div>
+      </div>
+
+      <div class="subscription-danger-zone">
+        <h3 style="margin-top:0">Remove channel</h3>
+        <p class="muted small">These actions unsubscribe on YouTube and remove the Pinchflat source. Downloaded media is only deleted by the second option.</p>
+        <div class="subscription-danger-actions">
+          <button class="btn danger" type="button" onclick="confirmRemoveCurrentChannel(false)">Delete Channel &amp; Unsubscribe</button>
+          <button class="btn danger" type="button" onclick="confirmRemoveCurrentChannel(true)">Delete Channel &amp; Unsubscribe &amp; Remove Media</button>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</dialog>
+
+<dialog id="subscription-confirm-dialog">
+  <div class="modal-head">
+    <div><h2 style="margin:0">Confirm channel removal</h2></div>
+    <button class="modal-close" type="button" onclick="closeSubscriptionConfirm()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <p id="subscription-confirm-message"></p>
+    <div class="actions">
+      <button id="subscription-confirm-go" class="btn danger" type="button">Confirm</button>
+      <button class="btn secondary" type="button" onclick="closeSubscriptionConfirm()">Cancel</button>
+    </div>
+  </div>
+</dialog>
 
 <dialog id="latest-video-dialog">
   <div class="modal-head">
@@ -3793,6 +3954,12 @@
 
 <script>
 const settingsDialog = document.getElementById("settings-dialog");
+const subscriptionsToolsDialog = document.getElementById("subscriptions-tools-dialog");
+const subscriptionChannelDialog = document.getElementById("subscription-channel-dialog");
+const subscriptionConfirmDialog = document.getElementById("subscription-confirm-dialog");
+let currentSubscriptionChannelId = "";
+let currentSubscriptionChannelData = null;
+let subscriptionConfirmAction = null;
 const singleDownloadDialog = document.getElementById("single-download-dialog");
 const pinchflatQueueDialog = document.getElementById("pinchflat-queue-dialog");
 const profileTemplateHelpDialog = document.getElementById("profile-template-help-dialog");
@@ -4869,6 +5036,10 @@ function toggleChannelFavouriteFromButton(button) {
 }
 
 async function toggleChannelFavourite(button, channelId, channelTitle, channelUrl, thumbnailUrl) {
+  const viewport = captureViewportState(
+    button?.closest(".source-row") || null
+  );
+
   try {
     const data = await apiPost("/api/favourites/channel/toggle", {
       channel_id: channelId,
@@ -4876,34 +5047,65 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       channel_url: channelUrl,
       thumbnail_url: thumbnailUrl
     });
-    setHeartButton(button, data.favourite, "channel");
-    document.querySelectorAll(`.source-row .heart-btn[data-channel-id="${CSS.escape(channelId)}"]`).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
-    document.querySelectorAll(`.latest-channel-heart[data-channel-id="${CSS.escape(channelId)}"]`).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
+
+    document.querySelectorAll(
+      `.heart-btn[data-channel-id="${CSS.escape(channelId)}"], .discover-channel-heart[data-channel-id="${CSS.escape(channelId)}"]`
+    ).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
+
     document.querySelectorAll(`.source-row`).forEach(row => {
-      const heart = row.querySelector(`.heart-btn[data-channel-id="${CSS.escape(channelId)}"]`);
-      if (heart) row.dataset.favourite = data.favourite ? "1" : "0";
+      const heart = row.querySelector(
+        `.heart-btn[data-channel-id="${CSS.escape(channelId)}"]`
+      );
+      if (heart) {
+        row.dataset.favourite = data.favourite ? "1" : "0";
+      }
     });
-    discoverResults.downloaded.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
-    discoverResults.liked.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
-    discoverResults.videos.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
-    discoverResults.shorts.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
-    discoverResults.top100.forEach(item => { if (item.channel_id === channelId) item.is_favourite_channel = data.favourite; });
+
+    [
+      discoverResults.downloaded,
+      discoverResults.liked,
+      discoverResults.videos,
+      discoverResults.shorts,
+      discoverResults.top100
+    ].forEach(items => items.forEach(item => {
+      if (item.channel_id === channelId) {
+        item.is_favourite_channel = data.favourite;
+      }
+    }));
+
     latestSubscriptionVideos.forEach(item => {
       if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     });
+
     latestSubscriptionShorts.forEach(item => {
       if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     });
+
     if (latestPopupVideo?.channel_id === channelId) {
       latestPopupVideo.is_favourite_channel = data.favourite;
       updateLatestPopupButtons();
     }
-    if (favouritesDialog?.open) await loadFavourites();
-    applyFilters();
+
+    if (currentSubscriptionChannelData?.subscription?.channel_id === channelId) {
+      currentSubscriptionChannelData.subscription.favourite = data.favourite;
+    }
+
+    if (favouritesDialog?.open) {
+      await loadFavourites();
+    }
+
+    applyFilters({
+      preserveScroll: true,
+      anchorRow: viewport.anchorRow
+    });
+
+    restoreViewportState(viewport);
   } catch (err) {
+    restoreViewportState(viewport);
     window.alert(err.message || String(err));
   }
 }
+
 
 async function toggleVideoFavourite(button, item) {
   try {
@@ -6024,6 +6226,7 @@ async function showDiscoverMode(mode) {
       renderCurrentDiscoverMode();
       await refreshDownloadedDiscoverIfChanged(false);
     } else {
+      clearDiscoverPanelForLoading("downloaded");
       await loadDiscover("downloaded");
     }
 
@@ -6034,6 +6237,7 @@ async function showDiscoverMode(mode) {
     if (discoverResults.liked.length) {
       renderCurrentDiscoverMode();
     } else {
+      clearDiscoverPanelForLoading("liked");
       await loadDiscover("liked");
     }
 
@@ -6044,6 +6248,7 @@ async function showDiscoverMode(mode) {
     if (discoverResults.videos.length) {
       renderCurrentDiscoverMode();
     } else {
+      clearDiscoverPanelForLoading("videos");
       await loadDiscover("videos");
     }
 
@@ -6054,6 +6259,7 @@ async function showDiscoverMode(mode) {
     if (discoverResults.top100.length) {
       renderCurrentDiscoverMode();
     } else {
+      clearDiscoverPanelForLoading("top100");
       await loadDiscover("top100");
     }
 
@@ -6068,13 +6274,36 @@ async function showDiscoverMode(mode) {
 }
 
 
+function clearDiscoverPanelForLoading(mode) {
+  const grid = document.getElementById("discover-grid");
+  const top100 = document.getElementById("discover-top100-grid");
+
+  if (["downloaded", "liked", "videos"].includes(mode) && grid) {
+    grid.replaceChildren();
+  }
+
+  if (mode === "top100" && top100) {
+    top100.replaceChildren();
+  }
+}
+
 async function refreshDiscover() {
+  clearDiscoverPanelForLoading(discoverMode);
   await loadDiscover(discoverMode, true);
 }
 
 async function loadDiscover(mode, force=false) {
   const loading = document.getElementById("discover-loading");
   const error = document.getElementById("discover-error");
+  loading.textContent = mode === "liked"
+    ? "Loading your liked videos…"
+    : mode === "downloaded"
+      ? "Loading downloaded videos…"
+      : mode === "top100"
+        ? "Loading Top 100 channels…"
+        : mode === "shorts"
+          ? "Loading Shorts…"
+          : "Finding videos for you…";
   loading.classList.remove("hidden");
   error.classList.add("hidden");
   error.textContent = "";
@@ -6892,6 +7121,268 @@ function setSubscriptionsMinimised(minimised) {
   );
 }
 
+function captureViewportState(anchorRow=null) {
+  const row = anchorRow || null;
+  return {
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    anchorRow: row,
+    anchorTop: row ? row.getBoundingClientRect().top : null
+  };
+}
+
+function restoreViewportState(state) {
+  if (!state) return;
+
+  requestAnimationFrame(() => {
+    if (
+      state.anchorRow
+      && state.anchorTop !== null
+      && document.body.contains(state.anchorRow)
+      && !state.anchorRow.classList.contains("hidden-row")
+    ) {
+      const nextTop = state.anchorRow.getBoundingClientRect().top;
+      const delta = nextTop - state.anchorTop;
+      if (Math.abs(delta) > 0.5) {
+        window.scrollBy({
+          top: delta,
+          left: 0,
+          behavior: "instant"
+        });
+        return;
+      }
+    }
+
+    window.scrollTo({
+      top: state.scrollY,
+      left: state.scrollX,
+      behavior: "instant"
+    });
+  });
+}
+
+function openSubscriptionTools() {
+  if (!subscriptionsToolsDialog.open) {
+    subscriptionsToolsDialog.showModal();
+  }
+  updateSelectedCount();
+  updateBulkSaveOption();
+}
+
+function closeSubscriptionTools() {
+  subscriptionsToolsDialog.close();
+}
+
+function closeSubscriptionChannelActions() {
+  subscriptionChannelDialog.close();
+  currentSubscriptionChannelId = "";
+  currentSubscriptionChannelData = null;
+}
+
+function closeSubscriptionConfirm() {
+  subscriptionConfirmDialog.close();
+  subscriptionConfirmAction = null;
+}
+
+function formatLargeNumber(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return "—";
+  return new Intl.NumberFormat("en-GB").format(number);
+}
+
+async function openSubscriptionChannelActions(button) {
+  const channelId = button?.dataset.channelId || "";
+  if (!channelId) return;
+
+  currentSubscriptionChannelId = channelId;
+  currentSubscriptionChannelData = null;
+
+  const loading = document.getElementById("subscription-channel-loading");
+  const content = document.getElementById("subscription-channel-content");
+  const status = document.getElementById("subscription-channel-action-status");
+
+  loading.textContent = "Loading channel information…";
+  loading.classList.remove("hidden");
+  content.classList.add("hidden");
+  status.textContent = "";
+
+  if (!subscriptionChannelDialog.open) {
+    subscriptionChannelDialog.showModal();
+  }
+
+  try {
+    const response = await fetch(
+      `/api/subscriptions/${encodeURIComponent(channelId)}/details`,
+      {headers:{"Accept":"application/json"}}
+    );
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Channel information could not be loaded.");
+    }
+
+    currentSubscriptionChannelData = data;
+    const sub = data.subscription || {};
+    const yt = data.youtube || {};
+
+    const avatar = document.getElementById("subscription-channel-avatar");
+    avatar.src = yt.thumbnail_url || sub.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    avatar.onerror = () => {
+      avatar.onerror = null;
+      avatar.src = "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    };
+
+    document.getElementById("subscription-channel-title").textContent = sub.title || yt.title || "YouTube channel";
+    document.getElementById("subscription-channel-description").textContent = yt.description || "No YouTube channel description was returned.";
+
+    const youtubeLink = document.getElementById("subscription-channel-youtube-link");
+    youtubeLink.href = sub.channel_url || `https://www.youtube.com/channel/${channelId}`;
+
+    const pinchflatLink = document.getElementById("subscription-channel-pinchflat-link");
+    if (sub.pinchflat_source_url) {
+      pinchflatLink.href = sub.pinchflat_source_url;
+      pinchflatLink.classList.remove("hidden");
+    } else {
+      pinchflatLink.classList.add("hidden");
+    }
+
+    document.getElementById("subscription-channel-status").textContent =
+      `${sub.active ? "Subscribed" : "Unsubscribed"} · ${sub.download_enabled ? "Enabled" : "Disabled"}`;
+    document.getElementById("subscription-channel-profile").textContent = sub.media_profile_name || "—";
+    document.getElementById("subscription-channel-range").textContent = sub.history_label || sub.cutoff || "—";
+    document.getElementById("subscription-channel-storage").textContent = sub.disk_usage || "0 B";
+    document.getElementById("subscription-channel-subscribers").textContent = yt.hidden_subscriber_count ? "Hidden" : formatLargeNumber(yt.subscriber_count);
+    document.getElementById("subscription-channel-videos").textContent = yt.video_count ? formatLargeNumber(yt.video_count) : "—";
+    document.getElementById("subscription-channel-views").textContent = yt.view_count ? formatLargeNumber(yt.view_count) : "—";
+    document.getElementById("subscription-channel-source").textContent = sub.pinchflat_source_id ? `#${sub.pinchflat_source_id}` : "Not in Pinchflat";
+
+    document.querySelectorAll("[data-source-action]").forEach(actionButton => {
+      actionButton.disabled = !sub.pinchflat_source_id;
+      actionButton.title = sub.pinchflat_source_id ? "" : "This channel is not currently a Pinchflat source";
+    });
+
+    loading.classList.add("hidden");
+    content.classList.remove("hidden");
+  } catch (error) {
+    loading.textContent = error.message || String(error);
+  }
+}
+
+async function runSubscriptionSourceAction(action) {
+  if (!currentSubscriptionChannelId) return;
+
+  const button = document.querySelector(`[data-source-action="${CSS.escape(action)}"]`);
+  const status = document.getElementById("subscription-channel-action-status");
+  const originalText = button?.textContent || "Run";
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Working…";
+  }
+  status.textContent = "Sending action to Pinchflat…";
+
+  try {
+    const data = await apiPost(
+      `/api/subscriptions/${encodeURIComponent(currentSubscriptionChannelId)}/source-action`,
+      {action}
+    );
+    status.textContent = data.message || "Action started.";
+    showAjaxToast(data.message || "Pinchflat action started.", "success");
+  } catch (error) {
+    status.textContent = error.message || String(error);
+    showAjaxToast(status.textContent, "error");
+  } finally {
+    if (button) {
+      button.disabled = !currentSubscriptionChannelData?.subscription?.pinchflat_source_id;
+      button.textContent = originalText;
+    }
+  }
+}
+
+async function unsubscribeCurrentChannel() {
+  const channelId = currentSubscriptionChannelId;
+  if (!channelId) return;
+
+  const row = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
+  const title = currentSubscriptionChannelData?.subscription?.title || "this channel";
+
+  if (!window.confirm(`Unsubscribe from ${title} on YouTube?`)) {
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("_csrf", document.querySelector('meta[name="csrf-token"]').content);
+
+  try {
+    const response = await fetch(
+      `/subscriptions/${encodeURIComponent(channelId)}/unsubscribe`,
+      {
+        method:"POST",
+        headers:{
+          "Accept":"application/json",
+          "X-Requested-With":"XMLHttpRequest"
+        },
+        body:formData
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Unsubscribe failed.");
+
+    if (row && data.subscription) {
+      updateSubscriptionRowFromData(row, data.subscription);
+    }
+
+    showAjaxToast(data.message || "Unsubscribed.", "success");
+    closeSubscriptionChannelActions();
+    applyFilters({preserveScroll:true, anchorRow:row});
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  }
+}
+
+function confirmRemoveCurrentChannel(deleteMedia) {
+  const title = currentSubscriptionChannelData?.subscription?.title || "this channel";
+  const message = deleteMedia
+    ? `Delete ${title} from Pinchflat, unsubscribe from YouTube and permanently remove its downloaded media?`
+    : `Delete ${title} from Pinchflat and unsubscribe from YouTube? Existing downloaded media will be kept.`;
+
+  document.getElementById("subscription-confirm-message").textContent = message;
+  subscriptionConfirmAction = () => deleteCurrentChannelAndUnsubscribe(deleteMedia);
+
+  if (!subscriptionConfirmDialog.open) {
+    subscriptionConfirmDialog.showModal();
+  }
+}
+
+async function deleteCurrentChannelAndUnsubscribe(deleteMedia) {
+  closeSubscriptionConfirm();
+  const channelId = currentSubscriptionChannelId;
+  if (!channelId) return;
+
+  const status = document.getElementById("subscription-channel-action-status");
+  status.textContent = deleteMedia
+    ? "Removing source, subscription and downloaded media…"
+    : "Removing source and subscription…";
+
+  try {
+    const data = await apiPost(
+      `/api/subscriptions/${encodeURIComponent(channelId)}/delete-unsubscribe`,
+      {delete_media: !!deleteMedia}
+    );
+
+    const row = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
+    if (row && data.subscription) {
+      updateSubscriptionRowFromData(row, data.subscription);
+    }
+
+    showAjaxToast(data.message || "Channel removed.", "success");
+    closeSubscriptionChannelActions();
+    applyFilters({preserveScroll:true, anchorRow:row});
+  } catch (error) {
+    status.textContent = error.message || String(error);
+    showAjaxToast(status.textContent, "error");
+  }
+}
+
 function toggleSubscriptionsSection() {
   const content = document.getElementById(
     "subscriptions-content"
@@ -7021,62 +7512,32 @@ function updateSubscriptionDashboardCounts() {
 function updateSubscriptionRowFromData(row, item) {
   if (!row || !item) return;
 
-  row.dataset.status =
-    item.ui_status || "";
-
-  row.dataset.active =
-    item.active ? "1" : "0";
-
-  row.dataset.error =
-    item.last_error ? "1" : "0";
-
-  row.dataset.downloadEnabled =
-    item.download_enabled ? "1" : "0";
-
-  const enabled = row.querySelector(
-    'input[name="download_enabled"]'
-  );
-
-  if (enabled) {
-    enabled.checked = !!item.download_enabled;
+  row.dataset.status = item.ui_status || "";
+  row.dataset.active = item.active ? "1" : "0";
+  row.dataset.error = item.last_error ? "1" : "0";
+  row.dataset.downloadEnabled = item.download_enabled ? "1" : "0";
+  row.dataset.sourceId = item.pinchflat_source_id || "";
+  if (typeof item.is_favourite !== "undefined") {
+    row.dataset.favourite = item.is_favourite ? "1" : "0";
   }
 
-  const toggleText = row.querySelector(
-    ".source-toggle-text"
-  );
+  const enabled = row.querySelector('input[name="download_enabled"]');
+  if (enabled) enabled.checked = !!item.download_enabled;
 
+  const toggleText = row.querySelector(".source-toggle-text");
   if (toggleText) {
-    toggleText.textContent =
-      item.download_enabled
-        ? "Enabled"
-        : "Disabled";
+    toggleText.textContent = item.download_enabled ? "Enabled" : "Disabled";
   }
 
-  const cutoff = row.querySelector(
-    ".cutoff-cell code"
-  );
+  const cutoff = row.querySelector(".cutoff-cell code");
+  if (cutoff) cutoff.textContent = item.cutoff || "";
 
-  if (cutoff) {
-    cutoff.textContent =
-      item.cutoff || "";
-  }
+  const historyLabel = row.querySelector(".cutoff-cell .small");
+  if (historyLabel) historyLabel.textContent = item.history_label || "";
 
-  const historyLabel = row.querySelector(
-    ".cutoff-cell .small"
-  );
-
-  if (historyLabel) {
-    historyLabel.textContent =
-      item.history_label || "";
-  }
-
-  const errorCell = row.querySelector(
-    ".source-error-cell"
-  );
-
+  const errorCell = row.querySelector(".source-error-cell");
   if (errorCell) {
     errorCell.replaceChildren();
-
     if (item.last_error) {
       const error = document.createElement("div");
       error.className = "error-text";
@@ -7090,102 +7551,128 @@ function updateSubscriptionRowFromData(row, item) {
     }
   }
 
-  row.classList.remove(
-    "dirty",
-    "saving"
-  );
+  row.classList.remove("dirty", "saving", "queued-save");
 
-  const save = row.querySelector(
-    ".source-save-btn"
-  );
-
+  const save = row.querySelector(".source-save-btn");
   if (save) {
     save.disabled = false;
-    save.textContent = "Saved ✓";
-
-    setTimeout(
-      () => {
-        if (!row.classList.contains("dirty")) {
-          save.textContent = "Save";
-        }
-      },
-      1300
-    );
+    save.textContent = "Save changes";
+    save.hidden = true;
   }
+
+  updateBulkSaveOption();
 }
 
-async function saveSubscriptionRowAjax(event) {
-  event.preventDefault();
+const subscriptionSaveQueue = [];
+let subscriptionSaveQueueRunning = false;
 
-  const form = event.currentTarget;
-  const row = form.closest(".source-row");
+function enqueueSubscriptionSave(form, {silent=false}={}) {
+  return new Promise((resolve, reject) => {
+    const row = form?.closest(".source-row");
+    if (!form || !row) {
+      reject(new Error("Subscription row could not be found."));
+      return;
+    }
 
-  if (!row || row.classList.contains("saving")) {
-    return;
-  }
+    const existing = subscriptionSaveQueue.find(entry => entry.form === form);
+    if (existing || row.classList.contains("saving")) {
+      resolve({queued:true});
+      return;
+    }
 
-  const save = row.querySelector(
-    ".source-save-btn"
-  );
+    const save = row.querySelector(".source-save-btn");
+    row.classList.add("queued-save");
+    if (save) {
+      save.hidden = false;
+      save.disabled = true;
+      save.textContent = subscriptionSaveQueueRunning ? "Queued…" : "Saving…";
+    }
 
-  row.classList.add("saving");
+    subscriptionSaveQueue.push({form, row, save, silent, resolve, reject});
+    processSubscriptionSaveQueue();
+  });
+}
 
-  if (save) {
-    save.disabled = true;
-    save.textContent = "Saving…";
-  }
+async function processSubscriptionSaveQueue() {
+  if (subscriptionSaveQueueRunning) return;
+  subscriptionSaveQueueRunning = true;
 
-  try {
-    const response = await fetch(
-      form.action,
-      {
+  while (subscriptionSaveQueue.length) {
+    const entry = subscriptionSaveQueue.shift();
+    const {form, row, save, silent, resolve, reject} = entry;
+    const viewport = captureViewportState(row);
+
+    row.classList.remove("queued-save");
+    row.classList.add("saving");
+    if (save) {
+      save.hidden = false;
+      save.disabled = true;
+      save.textContent = "Saving…";
+    }
+
+    try {
+      const response = await fetch(form.action, {
         method:"POST",
         headers:{
           "Accept":"application/json",
           "X-Requested-With":"XMLHttpRequest"
         },
         body:new FormData(form)
+      });
+
+      const data = await response.json();
+
+      if (data.subscription) {
+        updateSubscriptionRowFromData(row, data.subscription);
       }
-    );
 
-    const data = await response.json();
+      updateSubscriptionDashboardCounts();
+      applyFilters({preserveScroll:true, anchorRow:row});
+      restoreViewportState(viewport);
 
-    if (data.subscription) {
-      updateSubscriptionRowFromData(
-        row,
-        data.subscription
-      );
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || data.message || "The source could not be saved.");
+      }
+
+      if (!silent) {
+        showAjaxToast(data.message || "Source saved.", "success");
+      }
+      resolve(data);
+    } catch (error) {
+      row.classList.remove("saving", "queued-save");
+      if (save) {
+        save.disabled = false;
+        save.hidden = false;
+        save.textContent = "Save changes";
+      }
+      restoreViewportState(viewport);
+      if (!silent) showAjaxToast(error.message || String(error), "error");
+      reject(error);
     }
 
-    updateSubscriptionDashboardCounts();
-    applyFilters();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(
-        data.error
-        || data.message
-        || "The source could not be saved."
-      );
+    // Give Pinchflat a small gap between source mutations. This avoids several
+    // expensive source-form updates hitting it at exactly the same time.
+    if (subscriptionSaveQueue.length) {
+      await new Promise(resolveDelay => setTimeout(resolveDelay, 150));
+      subscriptionSaveQueue.forEach(next => {
+        if (next.save) next.save.textContent = "Queued…";
+      });
     }
+  }
 
-    showAjaxToast(
-      data.message || "Source saved.",
-      "success"
-    );
-  } catch (error) {
-    row.classList.remove("saving");
+  subscriptionSaveQueueRunning = false;
+}
 
-    if (save) {
-      save.disabled = false;
-      save.textContent = "Save changes";
-    }
-
-    showAjaxToast(
-      error.message || String(error),
-      "error"
-    );
+async function saveSubscriptionRowAjax(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    await enqueueSubscriptionSave(form);
+  } catch (_) {
+    // The queue already displayed the error notification.
   }
 }
+
 
 async function unsubscribeSubscriptionAjax(event) {
   event.preventDefault();
@@ -7276,96 +7763,118 @@ async function submitBulkActionAjax(event) {
   event.preventDefault();
 
   const form = event.currentTarget;
-  const count = document.querySelectorAll(
-    ".source-select:checked"
-  ).length;
-
-  const action = document.getElementById(
-    "bulk-action"
-  )?.value || "";
-
-  if (
-    !count
-    || !action
-  ) {
-    return;
-  }
-
-  if (
-    !window.confirm(
-      `Apply "${action}" to ${count} selected source(s)?`
-    )
-  ) {
-    return;
-  }
-
-  const applyButton = document.querySelector(
-    'button[type="submit"][form="bulk-form"]'
+  const selected = Array.from(
+    document.querySelectorAll(".source-select:checked")
   );
+  const action = document.getElementById("bulk-action")?.value || "";
+
+  if (!selected.length || !action) return;
+
+  const applyButton = document.querySelector('button[type="submit"][form="bulk-form"]');
+
+  if (action === "save_changes") {
+    const dirtyRows = selected
+      .map(box => box.closest(".source-row"))
+      .filter(row => row?.classList.contains("dirty"));
+
+    if (!dirtyRows.length) {
+      updateBulkSaveOption();
+      return;
+    }
+
+    if (applyButton) {
+      applyButton.disabled = true;
+      applyButton.textContent = "Saving…";
+    }
+
+    let saved = 0;
+    let failed = 0;
+
+    for (const row of dirtyRows) {
+      const rowForm = document.getElementById(row.dataset.formId || "");
+      if (!rowForm) continue;
+      try {
+        await enqueueSubscriptionSave(rowForm, {silent:true});
+        saved += 1;
+      } catch (_) {
+        failed += 1;
+      }
+    }
+
+    showAjaxToast(
+      failed
+        ? `Saved ${saved} channel(s). ${failed} failed.`
+        : `Saved ${saved} changed channel(s).`,
+      failed ? "error" : "success"
+    );
+
+    if (applyButton) {
+      applyButton.disabled = false;
+      applyButton.textContent = "Apply";
+    }
+
+    updateBulkSaveOption();
+    return;
+  }
+
+  if (!window.confirm(`Apply "${action}" to ${selected.length} selected source(s)?`)) {
+    return;
+  }
 
   if (applyButton) {
     applyButton.disabled = true;
     applyButton.textContent = "Applying…";
   }
 
+  const viewport = captureViewportState(
+    selected[0]?.closest(".source-row") || null
+  );
+
   try {
-    const response = await fetch(
-      form.action,
-      {
-        method:"POST",
-        headers:{
-          "Accept":"application/json",
-          "X-Requested-With":"XMLHttpRequest"
-        },
-        body:new FormData(form)
-      }
-    );
+    const response = await fetch(form.action, {
+      method:"POST",
+      headers:{
+        "Accept":"application/json",
+        "X-Requested-With":"XMLHttpRequest"
+      },
+      body:new FormData(form)
+    });
 
     const data = await response.json();
 
-    for (
-      const item
-      of (data.subscriptions || [])
-    ) {
-      const row = Array.from(
-        document.querySelectorAll(
-          ".source-row"
-        )
-      ).find(
-        candidate =>
-          candidate.querySelector(
-            ".source-select"
-          )?.value === item.channel_id
+    for (const item of (data.subscriptions || [])) {
+      const row = document.querySelector(
+        `.source-row[data-channel-id="${CSS.escape(item.channel_id)}"]`
       );
+      updateSubscriptionRowFromData(row, item);
 
-      updateSubscriptionRowFromData(
-        row,
-        item
-      );
+      if (action === "favourite" || action === "unfavourite") {
+        const favourite = action === "favourite";
+        if (row) row.dataset.favourite = favourite ? "1" : "0";
+        document.querySelectorAll(
+          `.heart-btn[data-channel-id="${CSS.escape(item.channel_id)}"], .discover-channel-heart[data-channel-id="${CSS.escape(item.channel_id)}"]`
+        ).forEach(btn => setHeartButton(btn, favourite, "channel"));
+
+        [discoverResults.downloaded, discoverResults.liked, discoverResults.videos, discoverResults.shorts, discoverResults.top100]
+          .forEach(items => items.forEach(video => {
+            if (video.channel_id === item.channel_id) video.is_favourite_channel = favourite;
+          }));
+      }
     }
 
-    document.querySelectorAll(
-      ".source-select:checked"
-    ).forEach(
-      box => box.checked = false
-    );
-
+    document.querySelectorAll(".source-select:checked").forEach(box => box.checked = false);
     updateSelectedCount();
     updateSubscriptionDashboardCounts();
-    applyFilters();
+    applyFilters({preserveScroll:true, anchorRow:viewport.anchorRow});
+    restoreViewportState(viewport);
 
     showAjaxToast(
-      data.message
-      || "Bulk action completed.",
-      data.ok === false
-        ? "error"
-        : "success"
+      data.message || "Bulk action completed.",
+      data.ok === false ? "error" : "success"
     );
   } catch (error) {
-    showAjaxToast(
-      error.message || String(error),
-      "error"
-    );
+    restoreViewportState(viewport);
+    showAjaxToast(error.message || String(error), "error");
   } finally {
     if (applyButton) {
       applyButton.disabled = false;
@@ -7373,6 +7882,7 @@ async function submitBulkActionAjax(event) {
     }
   }
 }
+
 
 function bindSubscriptionAjaxForms() {
   document.querySelectorAll(
@@ -7402,6 +7912,11 @@ function bindSubscriptionAjaxForms() {
 }
 
 
+document.getElementById("subscription-confirm-go")?.addEventListener("click", () => {
+  const action = subscriptionConfirmAction;
+  if (action) action();
+});
+
 function toggleSourceDate(select) {
   const row = select.closest(".source-row");
   const input = row?.querySelector(".source-date");
@@ -7413,7 +7928,12 @@ function markSourceRowDirty(control) {
   if (!row) return;
   row.classList.add("dirty");
   const save = row.querySelector(".source-save-btn");
-  if (save) save.textContent = "Save changes";
+  if (save) {
+    save.hidden = false;
+    save.disabled = false;
+    save.textContent = "Save changes";
+  }
+  updateBulkSaveOption();
 }
 
 function sourceToggleChanged(input) {
@@ -7479,21 +7999,29 @@ async function pollSingleDownload(jobId) {
 const search = document.getElementById("source-search");
 const statusFilter = document.getElementById("status-filter");
 const sortFilter = document.getElementById("sort-filter");
+let subscriptionSearchTimer = null;
 
 function initialFilter() {
-  if (!search || !statusFilter || !sortFilter) {
-    return;
-  }
-
+  if (!search || !statusFilter || !sortFilter) return;
   search.value = localStorage.getItem("ytpf-search") || "";
   statusFilter.value = localStorage.getItem("ytpf-status") || "{{ 'all' if show_removed else 'active' }}";
   sortFilter.value = localStorage.getItem("ytpf-sort") || "title";
 }
 
-function applyFilters() {
-  if (!search || !statusFilter || !sortFilter) {
-    return;
-  }
+function scheduleSubscriptionFilter() {
+  if (subscriptionSearchTimer) clearTimeout(subscriptionSearchTimer);
+  subscriptionSearchTimer = setTimeout(() => {
+    applyFilters({preserveScroll:true});
+  }, 450);
+}
+
+function applyFilters(options={}) {
+  if (!search || !statusFilter || !sortFilter) return;
+
+  const preserveScroll = !!options.preserveScroll;
+  const viewport = preserveScroll
+    ? captureViewportState(options.anchorRow || null)
+    : null;
 
   localStorage.setItem("ytpf-search", search.value);
   localStorage.setItem("ytpf-status", statusFilter.value);
@@ -7503,6 +8031,7 @@ function applyFilters() {
   const filter = statusFilter.value;
   const body = document.getElementById("subscription-body");
   if (!body) return;
+
   const rows = Array.from(body.querySelectorAll(".source-row"));
 
   rows.forEach(row => {
@@ -7514,7 +8043,7 @@ function applyFilters() {
     row.classList.toggle("hidden-row", !(titleMatch && statusMatch));
   });
 
-  const visible = rows.filter(r => !r.classList.contains("hidden-row"));
+  const visible = rows.filter(row => !row.classList.contains("hidden-row"));
   visible.sort((a,b) => {
     if (pinFavouritesToTop && a.dataset.favourite !== b.dataset.favourite) {
       return a.dataset.favourite === "1" ? -1 : 1;
@@ -7524,30 +8053,41 @@ function applyFilters() {
     if (sortFilter.value === "storage") return Number(b.dataset.storage || 0) - Number(a.dataset.storage || 0);
     return a.dataset.title.localeCompare(b.dataset.title);
   });
+
   visible.forEach(row => body.appendChild(row));
 
-  const badge = document.getElementById(
-    "subscriptions-count-badge"
-  );
-
-  if (badge) {
-    badge.textContent = String(
-      visible.length
-    );
-  }
+  const badge = document.getElementById("subscriptions-count-badge");
+  if (badge) badge.textContent = String(visible.length);
 
   updateSelectedCount();
+
+  if (viewport) restoreViewportState(viewport);
 }
+
 
 function setAllVisible(checked) {
   document.querySelectorAll(".source-row:not(.hidden-row) .source-select").forEach(box => box.checked = checked);
   updateSelectedCount();
 }
 
+function updateBulkSaveOption() {
+  const option = document.getElementById("bulk-save-changes-option");
+  if (!option) return;
+  const dirtySelected = document.querySelectorAll(
+    ".source-row.dirty .source-select:checked"
+  ).length;
+  option.hidden = dirtySelected === 0;
+  option.disabled = dirtySelected === 0;
+  if (option.selected && dirtySelected === 0) {
+    document.getElementById("bulk-action").value = "";
+  }
+}
+
 function updateSelectedCount() {
   const n = document.querySelectorAll(".source-select:checked").length;
   const target = document.getElementById("selected-count");
   if (target) target.textContent = `${n} selected`;
+  updateBulkSaveOption();
 }
 
 function toggleBulkOptions() {
