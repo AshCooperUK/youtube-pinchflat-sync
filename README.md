@@ -2,6 +2,26 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.12.3
+
+Pinchflat source-action reliability update.
+
+- Fixes the unreliable source-action discovery used by Force Scan, Download Pending, Re-Download Existing, Refresh Metadata and Sync Files on Disk.
+- Stops trying to identify source actions by scraping visible button/form text from the Pinchflat source page.
+- Calls Pinchflat's documented SourceController routes directly:
+  - `/sources/:source_id/force_download_pending`
+  - `/sources/:source_id/force_redownload`
+  - `/sources/:source_id/force_index`
+  - `/sources/:source_id/force_metadata_refresh`
+  - `/sources/:source_id/sync_files_on_disk`
+- Loads the Pinchflat source page first to establish the Phoenix session and obtain its CSRF token.
+- Posts only the CSRF token to the forced-action route instead of accidentally sending unrelated source-edit form fields.
+- Treats Pinchflat's normal 302/303 redirect after queueing an action as success.
+- Force Scan remains the friendly app name for Pinchflat's `force_index` action.
+- HTTP 500 errors now include useful Pinchflat response text and a short tail of recent Pinchflat Docker logs where available.
+- Failed source actions are written to Settings → Logs → Activity with the detailed Pinchflat error.
+
+
 ## Version 2.12.2
 
 Subscription search placement update.

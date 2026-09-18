@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.12.2"
+VERSION = "2.12.3"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -9105,164 +9105,332 @@ def _pinchflat_action_matches(text, labels):
     return any(label in text for label in labels)
 
 
+PINCHFLAT_SOURCE_ACTION_ROUTES = {
+    "download_pending": "force_download_pending",
+    "redownload_existing": "force_redownload",
+    "force_scan": "force_index",
+    "refresh_metadata": "force_metadata_refresh",
+    "sync_files": "sync_files_on_disk",
+}
+
+
+PINCHFLAT_SOURCE_ACTION_NAMES = {
+    "download_pending": "Download Pending",
+    "redownload_existing": "Re-Download Existing",
+    "force_scan": "Force Scan",
+    "refresh_metadata": "Refresh Metadata",
+    "sync_files": "Sync Files on Disk",
+}
+
+
+def _pinchflat_csrf_token_from_html(html):
+    soup = BeautifulSoup(
+        html or "",
+        "html.parser",
+    )
+
+    csrf = soup.find(
+        "input",
+        attrs={
+            "name": "_csrf_token",
+        },
+    )
+
+    if csrf is not None:
+        value = str(
+            csrf.get("value")
+            or ""
+        ).strip()
+
+        if value:
+            return value
+
+    # Phoenix can also expose a CSRF token in a meta tag depending on the
+    # template/layout in use.
+    for attrs in (
+        {"name": "csrf-token"},
+        {"name": "_csrf_token"},
+    ):
+        meta = soup.find(
+            "meta",
+            attrs=attrs,
+        )
+
+        if meta is None:
+            continue
+
+        value = str(
+            meta.get("content")
+            or ""
+        ).strip()
+
+        if value:
+            return value
+
+    return ""
+
+
+def _pinchflat_error_text(response):
+    text = str(
+        getattr(
+            response,
+            "text",
+            "",
+        )
+        or ""
+    )
+
+    if not text:
+        return ""
+
+    try:
+        soup = BeautifulSoup(
+            text,
+            "html.parser",
+        )
+
+        # Prefer common Phoenix error containers/titles before falling back to
+        # the complete page text.
+        candidates = []
+
+        for selector in (
+            "main",
+            ".alert",
+            ".error",
+            ".flash",
+            "pre",
+        ):
+            for node in soup.select(selector):
+                value = " ".join(
+                    node.stripped_strings
+                )
+
+                if value:
+                    candidates.append(
+                        value
+                    )
+
+        if candidates:
+            text = max(
+                candidates,
+                key=len,
+            )
+        else:
+            text = " ".join(
+                soup.stripped_strings
+            )
+
+    except Exception:
+        pass
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
+
+    return text[:700]
+
+
+def _recent_pinchflat_log_hint(limit=40):
+    try:
+        logs = pinchflat_container_logs(
+            tail=max(
+                20,
+                min(
+                    int(limit),
+                    120,
+                ),
+            )
+        )
+    except Exception:
+        return ""
+
+    lines = [
+        line.strip()
+        for line in str(
+            logs or ""
+        ).splitlines()
+        if line.strip()
+    ]
+
+    if not lines:
+        return ""
+
+    # Keep only the final handful so an action error remains readable in the UI
+    # and Activity log.
+    return " | ".join(
+        lines[-6:]
+    )[:900]
+
+
 def execute_pinchflat_source_action(source_id, action_key):
-    source_id = str(source_id or "").strip()
-    action_key = str(action_key or "").strip()
-    labels = PINCHFLAT_SOURCE_ACTION_LABELS.get(action_key)
+    source_id = str(
+        source_id
+        or ""
+    ).strip()
+
+    action_key = str(
+        action_key
+        or ""
+    ).strip()
+
+    route = (
+        PINCHFLAT_SOURCE_ACTION_ROUTES.get(
+            action_key
+        )
+    )
+
+    friendly = (
+        PINCHFLAT_SOURCE_ACTION_NAMES.get(
+            action_key
+        )
+    )
 
     if not source_id:
-        raise RuntimeError("This channel is not linked to a Pinchflat source.")
+        raise RuntimeError(
+            "This channel is not linked to a Pinchflat source."
+        )
 
-    if not labels:
-        raise RuntimeError("Unknown Pinchflat source action.")
+    if not route or not friendly:
+        raise RuntimeError(
+            "Unknown Pinchflat source action."
+        )
 
     if not pinchflat_health():
-        raise RuntimeError("Pinchflat is not available.")
+        raise RuntimeError(
+            "Pinchflat is not available."
+        )
 
     session_obj = pinchflat_session()
-    source_url = f"{PINCHFLAT_URL}/sources/{source_id}"
-    response = session_obj.get(
+
+    source_url = (
+        f"{PINCHFLAT_URL}/sources/"
+        f"{quote(source_id, safe='')}"
+    )
+
+    # First load the source page. Apart from validating the source, this gives
+    # the Session the Phoenix cookie and supplies the CSRF token needed by the
+    # browser pipeline.
+    source_response = session_obj.get(
         source_url,
         timeout=30,
+        allow_redirects=True,
+    )
+
+    if source_response.status_code == 404:
+        raise RuntimeError(
+            "The Pinchflat source no longer exists."
+        )
+
+    if source_response.status_code >= 400:
+        detail = _pinchflat_error_text(
+            source_response
+        )
+
+        raise RuntimeError(
+            "Pinchflat could not open this source"
+            + (
+                f": {detail}"
+                if detail
+                else "."
+            )
+        )
+
+    csrf_token = (
+        _pinchflat_csrf_token_from_html(
+            source_response.text
+        )
+    )
+
+    target = (
+        f"{PINCHFLAT_URL}/sources/"
+        f"{quote(source_id, safe='')}/"
+        f"{route}"
+    )
+
+    payload = {}
+
+    if csrf_token:
+        payload["_csrf_token"] = (
+            csrf_token
+        )
+
+    # Pinchflat's SourceController actions take source_id from the path. They do
+    # not need source form fields. Posting the whole edit/source form was the
+    # cause of unreliable action matching in v2.12.0-v2.12.2.
+    result = session_obj.post(
+        target,
+        data=payload,
+        headers={
+            "Referer": source_url,
+        },
+        timeout=180,
         allow_redirects=False,
     )
 
-    if response.status_code == 404:
-        raise RuntimeError("The Pinchflat source no longer exists.")
-
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Pinchflat exposes the source tools as forms/buttons. Detect them from
-    # their visible labels instead of hard-coding internal routes so the app
-    # remains compatible with different Pinchflat releases.
-    for form in soup.find_all("form"):
-        controls = form.find_all(["button", "input"])
-
-        for control in controls:
-            control_text = _pinchflat_action_control_text(control)
-            form_text = _normalise_action_text(
-                form.get_text(" ", strip=True)
-            )
-
-            if not (
-                _pinchflat_action_matches(control_text, labels)
-                or _pinchflat_action_matches(form_text, labels)
-            ):
-                continue
-
-            payload = scrape_form_payload(form)
-
-            control_name = control.get("name")
-            if control_name:
-                payload[control_name] = control.get("value") or ""
-
-            action = (
-                control.get("formaction")
-                or form.get("action")
-                or source_url
-            )
-            target = (
-                action
-                if action.startswith(("http://", "https://"))
-                else f"{PINCHFLAT_URL}{action if action.startswith('/') else '/' + action}"
-            )
-
-            method = _normalise_action_text(
-                control.get("formmethod")
-                or form.get("method")
-                or "post"
-            ).upper()
-
-            override = _normalise_action_text(
-                payload.get("_method")
-                or ""
-            ).upper()
-
-            if override in {"POST", "PUT", "PATCH", "DELETE"}:
-                method = override
-                payload.pop("_method", None)
-
-            result = session_obj.request(
-                method,
-                target,
-                data=payload,
-                timeout=180,
-                allow_redirects=False,
-            )
-
-            if result.status_code >= 500:
-                body = " ".join(
-                    BeautifulSoup(
-                        result.text,
-                        "html.parser",
-                    ).stripped_strings
-                )
-                raise RuntimeError(
-                    f"Pinchflat returned HTTP {result.status_code}. "
-                    f"Response: {body[:450] or 'No error text returned.'}"
-                )
-
-            if result.status_code >= 400:
-                raise RuntimeError(
-                    f"Pinchflat returned HTTP {result.status_code} while running this action."
-                )
-
-            return True
-
-    # A few Pinchflat releases expose tools as links instead of forms.
-    for link in soup.find_all("a", href=True):
-        text = _normalise_action_text(
-            " ".join(
-                filter(
-                    None,
-                    [
-                        link.get_text(" ", strip=True),
-                        link.get("title") or "",
-                        link.get("aria-label") or "",
-                    ],
-                )
-            )
-        )
-
-        if not _pinchflat_action_matches(text, labels):
-            continue
-
-        href = link.get("href") or ""
-        target = (
-            href
-            if href.startswith(("http://", "https://"))
-            else f"{PINCHFLAT_URL}{href if href.startswith('/') else '/' + href}"
-        )
-        method = _normalise_action_text(
-            link.get("data-method")
-            or "get"
-        ).upper()
-
-        result = session_obj.request(
-            method,
-            target,
-            timeout=180,
-            allow_redirects=False,
-        )
-
-        if result.status_code >= 400:
-            raise RuntimeError(
-                f"Pinchflat returned HTTP {result.status_code} while running this action."
-            )
-
+    # A successful Pinchflat forced action redirects back to the source page.
+    if result.status_code in (
+        200,
+        201,
+        202,
+        204,
+        302,
+        303,
+    ):
         return True
 
-    friendly = {
-        "download_pending": "Download Pending",
-        "redownload_existing": "Re-Download Existing",
-        "force_scan": "Force Scan",
-        "refresh_metadata": "Refresh Metadata",
-        "sync_files": "Sync Files on Disk",
-    }.get(action_key, action_key)
+    detail = _pinchflat_error_text(
+        result
+    )
+
+    if result.status_code in (
+        404,
+        405,
+    ):
+        raise RuntimeError(
+            f"Pinchflat does not expose the {friendly} route on this version. "
+            f"HTTP {result.status_code} from /sources/{source_id}/{route}."
+        )
+
+    if result.status_code == 403:
+        raise RuntimeError(
+            f"Pinchflat rejected {friendly}. "
+            "The Pinchflat session or CSRF token was not accepted."
+        )
+
+    if result.status_code >= 500:
+        log_hint = (
+            _recent_pinchflat_log_hint()
+        )
+
+        message = (
+            f"Pinchflat returned HTTP {result.status_code} while running "
+            f"{friendly} using its official /sources/{source_id}/{route} route."
+        )
+
+        if detail:
+            message += (
+                f" Response: {detail}"
+            )
+
+        if log_hint:
+            message += (
+                f" Recent Pinchflat log: {log_hint}"
+            )
+
+        raise RuntimeError(
+            message
+        )
 
     raise RuntimeError(
-        f"Pinchflat did not expose a {friendly} action on this source page."
+        f"Pinchflat returned HTTP {result.status_code} while running "
+        f"{friendly}."
+        + (
+            f" Response: {detail}"
+            if detail
+            else ""
+        )
     )
 
 
@@ -12494,10 +12662,20 @@ def subscription_source_action_api(channel_id):
         )
 
     except Exception as exc:
+        error_message = str(exc)
+
+        log_activity(
+            "pinchflat",
+            f"{friendly.get(action, 'Source action')} failed",
+            error_message,
+            "error",
+            channel_id,
+        )
+
         return jsonify(
             {
                 "ok": False,
-                "error": str(exc),
+                "error": error_message,
             }
         ), 400
 
