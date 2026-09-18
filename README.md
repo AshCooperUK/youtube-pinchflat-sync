@@ -2,6 +2,17 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.12.2
+
+Subscription search placement update.
+
+- Moves the channel search box out of the Subscription tools popup and into the top-right of the Subscriptions card.
+- Places Search immediately before the blue visible-count badge, tools button and minimise button.
+- Search remains available even while the Subscriptions section is minimised.
+- Search remains live and debounced, with no submit button and no page reload.
+- Keeps status filtering, sorting, selection and bulk controls inside Subscription tools.
+- Adds responsive sizing so the search field fills the available width on smaller screens.
+
 ## Version 2.12.1
 
 Destructive channel removal fix.

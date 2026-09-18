@@ -317,6 +317,23 @@
     .source-save-actions .btn { width:104px; min-width:104px; height:var(--control-height); min-height:var(--control-height); padding:0 10px; font-size:12px; }
     .source-save-btn[hidden] { display:none !important; }
 
+    .subscription-header-actions {
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:10px;
+      margin-left:auto;
+      min-width:0;
+      flex:1 1 auto;
+    }
+
+    .subscription-header-search {
+      width:min(420px,34vw);
+      min-width:240px;
+      height:var(--control-height);
+      margin:0;
+    }
+
     .subscription-menu-btn svg {
       width:17px; height:17px; stroke:currentColor; fill:none; stroke-width:1.8;
       stroke-linecap:round; stroke-linejoin:round;
@@ -1865,6 +1882,24 @@
       .grid,.settings-grid { grid-template-columns:1fr; }
       h1 { font-size:25px; }
       .inline-range-form { flex-wrap:wrap; min-width:250px; }
+
+      .subscriptions-card > .header {
+        display:flex;
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      .subscription-header-actions {
+        width:100%;
+        margin-top:10px;
+        margin-left:0;
+      }
+
+      .subscription-header-search {
+        width:100%;
+        min-width:0;
+        flex:1 1 auto;
+      }
     }
   </style>
 </head>
@@ -2163,42 +2198,54 @@
         <div class="muted small">New subscriptions follow the policy in Settings. Filters and sorting are remembered in this browser.</div>
       </div>
 
-      <div class="section-window-controls">
-        <span
-          id="subscriptions-count-badge"
-          class="section-count-badge"
-          title="Subscriptions currently shown"
-        >{{ counts.active }}</span>
-
-        <button
-          class="latest-window-btn subscription-menu-btn"
-          type="button"
-          onclick="openSubscriptionTools()"
-          title="Subscription tools"
-          aria-label="Subscription tools"
+      <div class="subscription-header-actions">
+        <input
+          id="source-search"
+          class="subscription-header-search"
+          type="search"
+          placeholder="Search channels…"
+          autocomplete="off"
+          aria-label="Search subscriptions"
+          oninput="scheduleSubscriptionFilter()"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 7h16"></path>
-            <path d="M4 12h16"></path>
-            <path d="M4 17h16"></path>
-            <circle cx="9" cy="7" r="1.5"></circle>
-            <circle cx="15" cy="12" r="1.5"></circle>
-            <circle cx="11" cy="17" r="1.5"></circle>
-          </svg>
-        </button>
 
-        <button
-          class="latest-window-btn"
-          type="button"
-          id="subscriptions-minimise"
-          onclick="toggleSubscriptionsSection()"
-          title="Minimise subscriptions"
-          aria-label="Minimise subscriptions"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M6 17h12"></path>
-          </svg>
-        </button>
+        <div class="section-window-controls">
+          <span
+            id="subscriptions-count-badge"
+            class="section-count-badge"
+            title="Subscriptions currently shown"
+          >{{ counts.active }}</span>
+
+          <button
+            class="latest-window-btn subscription-menu-btn"
+            type="button"
+            onclick="openSubscriptionTools()"
+            title="Subscription tools"
+            aria-label="Subscription tools"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16"></path>
+              <path d="M4 12h16"></path>
+              <path d="M4 17h16"></path>
+              <circle cx="9" cy="7" r="1.5"></circle>
+              <circle cx="15" cy="12" r="1.5"></circle>
+              <circle cx="11" cy="17" r="1.5"></circle>
+            </svg>
+          </button>
+
+          <button
+            class="latest-window-btn"
+            type="button"
+            id="subscriptions-minimise"
+            onclick="toggleSubscriptionsSection()"
+            title="Minimise subscriptions"
+            aria-label="Minimise subscriptions"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 17h12"></path>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -2397,16 +2444,13 @@
   <div class="modal-head">
     <div>
       <h2 style="margin:0">Subscription tools</h2>
-      <div class="muted small">Search, sort, filter and apply changes to selected channels.</div>
+      <div class="muted small">Sort, filter and apply changes to selected channels.</div>
     </div>
     <button class="modal-close" type="button" onclick="closeSubscriptionTools()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
     <div class="subscription-tools-grid">
       <div class="subscription-tools-row">
-        <div class="grow">
-          <input id="source-search" type="text" placeholder="Search channels…" oninput="scheduleSubscriptionFilter()">
-        </div>
         <select id="status-filter" onchange="applyFilters({preserveScroll:true})">
           <option value="active">All active</option>
           <option value="enabled">Enabled</option>
