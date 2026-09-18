@@ -2541,7 +2541,7 @@
   <div class="modal-body">
     <p id="subscription-confirm-message"></p>
     <div class="actions">
-      <button id="subscription-confirm-go" class="btn danger" type="button">Confirm</button>
+      <button id="subscription-confirm-go" class="btn danger" type="button">Confirm removal</button>
       <button class="btn secondary" type="button" onclick="closeSubscriptionConfirm()">Cancel</button>
     </div>
   </div>
@@ -7354,34 +7354,122 @@ function confirmRemoveCurrentChannel(deleteMedia) {
 }
 
 async function deleteCurrentChannelAndUnsubscribe(deleteMedia) {
-  closeSubscriptionConfirm();
   const channelId = currentSubscriptionChannelId;
-  if (!channelId) return;
 
-  const status = document.getElementById("subscription-channel-action-status");
+  if (!channelId) {
+    closeSubscriptionConfirm();
+    return;
+  }
+
+  const row = document.querySelector(
+    `.source-row[data-channel-id="${CSS.escape(channelId)}"]`
+  );
+
+  const nextRow =
+    row?.nextElementSibling?.classList?.contains("source-row")
+      ? row.nextElementSibling
+      : (
+          row?.previousElementSibling?.classList?.contains("source-row")
+            ? row.previousElementSibling
+            : null
+        );
+
+  const viewport = captureViewportState(
+    nextRow || row || null
+  );
+
+  const confirmButton = document.getElementById(
+    "subscription-confirm-go"
+  );
+
+  const cancelButton = subscriptionConfirmDialog.querySelector(
+    'button[onclick="closeSubscriptionConfirm()"]'
+  );
+
+  const originalConfirmText =
+    confirmButton?.textContent || "Confirm";
+
+  if (confirmButton) {
+    confirmButton.disabled = true;
+    confirmButton.textContent = deleteMedia
+      ? "Removing media…"
+      : "Removing…";
+  }
+
+  if (cancelButton) {
+    cancelButton.disabled = true;
+  }
+
+  const status = document.getElementById(
+    "subscription-channel-action-status"
+  );
+
   status.textContent = deleteMedia
-    ? "Removing source, subscription and downloaded media…"
-    : "Removing source and subscription…";
+    ? "Unsubscribing, removing the Pinchflat source and deleting downloaded media…"
+    : "Unsubscribing and removing the Pinchflat source…";
 
   try {
     const data = await apiPost(
       `/api/subscriptions/${encodeURIComponent(channelId)}/delete-unsubscribe`,
-      {delete_media: !!deleteMedia}
+      {
+        delete_media: !!deleteMedia
+      }
     );
 
-    const row = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
-    if (row && data.subscription) {
-      updateSubscriptionRowFromData(row, data.subscription);
+    closeSubscriptionConfirm();
+
+    if (row) {
+      row.classList.add("ajax-removing");
+
+      await new Promise(
+        resolve => window.setTimeout(
+          resolve,
+          170
+        )
+      );
+
+      row.remove();
     }
 
-    showAjaxToast(data.message || "Channel removed.", "success");
+    updateSubscriptionDashboardCounts();
+    applyFilters({
+      preserveScroll: false
+    });
+
+    restoreViewportState(
+      viewport
+    );
+
+    showAjaxToast(
+      data.message || "Channel removed.",
+      "success"
+    );
+
     closeSubscriptionChannelActions();
-    applyFilters({preserveScroll:true, anchorRow:row});
+
   } catch (error) {
-    status.textContent = error.message || String(error);
-    showAjaxToast(status.textContent, "error");
+    status.textContent =
+      error.message
+      || String(error);
+
+    showAjaxToast(
+      status.textContent,
+      "error"
+    );
+
+  } finally {
+    if (confirmButton) {
+      confirmButton.disabled = false;
+      confirmButton.textContent =
+        originalConfirmText;
+    }
+
+    if (cancelButton) {
+      cancelButton.disabled = false;
+    }
   }
 }
+
 
 function toggleSubscriptionsSection() {
   const content = document.getElementById(

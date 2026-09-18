@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.12.0"
+VERSION = "2.12.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -398,6 +398,13 @@ def init_db():
 
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS manually_deleted_channels (
+                channel_id TEXT PRIMARY KEY,
+                title TEXT,
+                deleted_at TEXT NOT NULL,
+                absence_confirmed INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS activity (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL,
@@ -5103,6 +5110,36 @@ def refresh_subscriptions():
     removed_rows = []
 
     with db() as conn:
+        manual_deleted_rows = conn.execute(
+            """
+            SELECT *
+            FROM manually_deleted_channels
+            """
+        ).fetchall()
+
+        manual_deleted = {
+            row["channel_id"]: dict(row)
+            for row in manual_deleted_rows
+        }
+
+        # A destructive delete should disappear from the app immediately.
+        # YouTube can briefly return the old subscription after an unsubscribe.
+        # Keep suppressing it until at least one refresh sees it absent.
+        for deleted_channel_id, deleted_row in manual_deleted.items():
+            if (
+                deleted_channel_id not in current_ids
+                and not bool(deleted_row.get("absence_confirmed"))
+            ):
+                conn.execute(
+                    """
+                    UPDATE manually_deleted_channels
+                    SET absence_confirmed = 1
+                    WHERE channel_id = ?
+                    """,
+                    (deleted_channel_id,),
+                )
+                deleted_row["absence_confirmed"] = 1
+
         existing_active = conn.execute(
             """
             SELECT *
@@ -5118,6 +5155,34 @@ def refresh_subscriptions():
         ]
 
         for sub in subs:
+            deleted_marker = manual_deleted.get(
+                sub["channel_id"]
+            )
+
+            if deleted_marker:
+                if not bool(
+                    deleted_marker.get(
+                        "absence_confirmed"
+                    )
+                ):
+                    # YouTube has not yet reflected the explicit unsubscribe.
+                    # Do not recreate the deleted app row.
+                    continue
+
+                # We previously observed this channel absent and it has now
+                # appeared again. Treat this as a genuine future re-subscribe.
+                conn.execute(
+                    """
+                    DELETE FROM manually_deleted_channels
+                    WHERE channel_id = ?
+                    """,
+                    (sub["channel_id"],),
+                )
+                manual_deleted.pop(
+                    sub["channel_id"],
+                    None,
+                )
+
             existing = conn.execute(
                 """
                 SELECT *
@@ -12459,6 +12524,11 @@ def delete_and_unsubscribe_subscription_api(channel_id):
     item = dict(row)
     title = item.get("title") or channel_id
 
+    youtube_unsubscribed = False
+    source_id = None
+    source_gone = True
+    deleted_folder = None
+
     try:
         if item.get("active"):
             youtube_unsubscribe(
@@ -12469,6 +12539,7 @@ def delete_and_unsubscribe_subscription_api(channel_id):
                     None,
                 ),
             )
+            youtube_unsubscribed = True
 
         source_id = resolve_pinchflat_source_id(item)
         profile_id = subscription_media_profile_id(item)
@@ -12479,7 +12550,7 @@ def delete_and_unsubscribe_subscription_api(channel_id):
             EMBY_OUTPUT_PATH_TEMPLATE,
         )
 
-        source_gone = True
+        source_gone = not source_id
 
         if source_id:
             removal_row = dict(item)
@@ -12495,33 +12566,13 @@ def delete_and_unsubscribe_subscription_api(channel_id):
                 )
 
         if delete_media:
-            delete_subscription_download_folder(
+            deleted_folder = delete_subscription_download_folder(
                 title,
                 output_template,
             )
 
-        with db() as conn:
-            conn.execute(
-                """
-                UPDATE subscriptions
-                SET active = 0,
-                    removed_at = ?,
-                    download_enabled = 0,
-                    source_authorised = 0,
-                    pinchflat_added = ?,
-                    pinchflat_source_id = ?,
-                    last_error = ?
-                WHERE channel_id = ?
-                """,
-                (
-                    now_iso(),
-                    0 if source_gone else 1,
-                    None if source_gone else str(source_id or ""),
-                    None if source_gone else "Pinchflat source removal is still in progress.",
-                    channel_id,
-                ),
-            )
-
+        # If Pinchflat has not finished removing the source, keep the existing
+        # cleanup worker running after the subscription row itself is deleted.
         if not source_gone and source_id:
             schedule_unsubscribe_cleanup(
                 channel_id,
@@ -12533,14 +12584,72 @@ def delete_and_unsubscribe_subscription_api(channel_id):
                 checks=6,
             )
 
+        with db() as conn:
+            # Keep a small tombstone so a stale YouTube API response cannot
+            # immediately recreate a channel the user explicitly deleted.
+            conn.execute(
+                """
+                INSERT INTO manually_deleted_channels (
+                    channel_id,
+                    title,
+                    deleted_at,
+                    absence_confirmed
+                )
+                VALUES (?, ?, ?, 0)
+                ON CONFLICT(channel_id) DO UPDATE SET
+                    title = excluded.title,
+                    deleted_at = excluded.deleted_at,
+                    absence_confirmed = 0
+                """,
+                (
+                    channel_id,
+                    title,
+                    now_iso(),
+                ),
+            )
+
+            # "Delete Channel" now means delete it from the app, not merely
+            # retain an inactive row labelled "No longer subscribed".
+            conn.execute(
+                """
+                DELETE FROM subscriptions
+                WHERE channel_id = ?
+                """,
+                (channel_id,),
+            )
+
+        media_message = ""
+
+        if delete_media:
+            media_message = (
+                f" Downloaded folder removed: {deleted_folder}."
+                if deleted_folder
+                else (
+                    " Downloaded media removal was requested. "
+                    "No remaining channel folder was found by the app."
+                )
+            )
+
+        source_message = (
+            " Pinchflat source removal is still being reconciled in the background."
+            if not source_gone and source_id
+            else ""
+        )
+
         message = (
-            f"{title} was unsubscribed and removed from Pinchflat"
-            + (" with downloaded media removed." if delete_media else ".")
+            f"{title} was removed from the app"
+            + (
+                " and unsubscribed from YouTube."
+                if youtube_unsubscribed
+                else "."
+            )
+            + source_message
+            + media_message
         )
 
         log_activity(
             "youtube",
-            "Channel removed and unsubscribed",
+            "Channel deleted and unsubscribed",
             message,
             "success",
             channel_id,
@@ -12550,11 +12659,29 @@ def delete_and_unsubscribe_subscription_api(channel_id):
             {
                 "ok": True,
                 "message": message,
-                "subscription": subscription_ajax_payload(channel_id),
+                "deleted_from_app": True,
+                "youtube_unsubscribed": youtube_unsubscribed,
+                "pinchflat_source_removed": bool(source_gone),
+                "pinchflat_source_pending": bool(
+                    source_id and not source_gone
+                ),
+                "media_delete_requested": delete_media,
+                "media_folder_deleted": deleted_folder,
+                "channel_id": channel_id,
             }
         )
 
     except Exception as exc:
+        log_activity(
+            "youtube",
+            "Channel delete failed",
+            (
+                f"{title}: {exc}"
+            ),
+            "error",
+            channel_id,
+        )
+
         return jsonify(
             {
                 "ok": False,

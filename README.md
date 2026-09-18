@@ -2,6 +2,24 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.12.1
+
+Destructive channel removal fix.
+
+- Fixes `Delete Channel & Unsubscribe` and `Delete Channel & Unsubscribe & Remove Media` leaving an inactive `No longer subscribed` row in the main Subscriptions list.
+- A destructive Delete Channel action now removes the subscription row from the app database after the YouTube unsubscribe and Pinchflat removal request has been made.
+- The row disappears from the current page immediately without a full page reload.
+- The subscription count and dashboard counters update in place.
+- Adds a short-lived manual-delete tombstone so a stale YouTube subscriptions response cannot immediately recreate a channel just deleted by the user.
+- Once a later YouTube refresh has observed the channel absent, a genuine future re-subscribe is allowed and the channel is imported normally again.
+- Pinchflat cleanup jobs continue even after the app subscription row has been removed.
+- `Delete Channel & Unsubscribe & Remove Media` still asks Pinchflat to remove media and also removes the matching channel folder from the configured downloads tree when present.
+- The success message now reports whether Pinchflat removal is still being reconciled in the background and whether the app found and removed a remaining channel folder.
+- The confirmation button now changes to `Removing…` / `Removing media…` and disables both confirmation buttons while the operation runs.
+- Prevents accidental double-clicks while a destructive channel removal is in progress.
+- Failed removal now logs a clear activity error and keeps the channel management popup available for retry.
+
+
 ## Version 2.12.0
 
 Subscription workflow and source-management update.
