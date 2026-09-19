@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.13.0"
+VERSION = "2.13.0b"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -626,6 +626,11 @@ def init_db():
             "single_download_write_nfo": "1",
             "single_download_output_template": "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
             "emby_download_folder": "Emby Download",
+            "emby_server_url": os.getenv("EMBY_SERVER_URL", "").strip().rstrip("/"),
+            "emby_api_key": os.getenv("EMBY_API_KEY", "").strip(),
+            "emby_auto_refresh_after_download": "1",
+            "emby_library_path": "/media/Storage/Media/YouTube",
+            "emby_last_refresh_media_id": "",
             "auth_remember_login_days": "30",
             "auth_session_timeout_minutes": "720",
             "auth_lockout_attempts": "5",
@@ -719,6 +724,194 @@ def set_setting(key, value):
             """,
             (key, str(value)),
         )
+
+
+def emby_server_url():
+    return get_setting(
+        "emby_server_url",
+        os.getenv("EMBY_SERVER_URL", ""),
+    ).strip().rstrip("/")
+
+
+def emby_api_key():
+    return get_setting(
+        "emby_api_key",
+        os.getenv("EMBY_API_KEY", ""),
+    ).strip()
+
+
+def emby_configured():
+    return bool(emby_server_url() and emby_api_key())
+
+
+def emby_api_url(path):
+    base = emby_server_url()
+    if not base:
+        raise RuntimeError("Emby Server URL is not configured.")
+
+    path = str(path or "").lstrip("/")
+    if base.lower().endswith("/emby"):
+        return f"{base}/{path}"
+    return f"{base}/emby/{path}"
+
+
+def emby_api_request(method, path, **kwargs):
+    if not emby_configured():
+        raise RuntimeError("Configure the Emby Server URL and API key in Settings → API.")
+
+    headers = dict(kwargs.pop("headers", {}) or {})
+    headers["X-Emby-Token"] = emby_api_key()
+    headers.setdefault("Accept", "application/json")
+
+    response = requests.request(
+        method,
+        emby_api_url(path),
+        headers=headers,
+        timeout=kwargs.pop("timeout", 30),
+        **kwargs,
+    )
+    response.raise_for_status()
+    return response
+
+
+def emby_refresh_channel(channel_id="", channel_title=""):
+    label = str(channel_title or channel_id or "").strip()
+    library_root = get_setting(
+        "emby_library_path",
+        "/media/Storage/Media/YouTube",
+    ).strip().rstrip("/\\")
+
+    if not label or not library_root:
+        return False
+
+    channel_path = f"{library_root}/{label}"
+    try:
+        lookup = emby_api_request(
+            "GET",
+            "Items",
+            params={
+                "Path": channel_path,
+                "Fields": "Path",
+                "Limit": 10,
+            },
+            timeout=20,
+        )
+        payload = lookup.json() if lookup.content else {}
+        items = payload.get("Items") or payload.get("items") or []
+        selected = None
+        wanted_path = channel_path.rstrip("/\\").casefold()
+        wanted_name = label.casefold()
+
+        for item in items:
+            item_path = str(
+                item.get("Path") or item.get("path") or ""
+            ).rstrip("/\\")
+            item_name = str(item.get("Name") or item.get("name") or "")
+            if (
+                item_path.casefold() == wanted_path
+                or item_name.casefold() == wanted_name
+            ):
+                selected = item
+                break
+
+        if not selected:
+            return False
+
+        item_id = str(selected.get("Id") or selected.get("id") or "").strip()
+        if not item_id:
+            return False
+
+        emby_api_request(
+            "POST",
+            f"Items/{quote(item_id, safe='')}/Refresh",
+            params={"Recursive": "true"},
+            json={"ReplaceThumbnailImages": False},
+            timeout=45,
+        )
+        log_activity(
+            "emby",
+            "Emby channel refresh",
+            f"Started a recursive Emby refresh for {label}.",
+            "success",
+            channel_id or None,
+        )
+        return True
+    except Exception as exc:
+        log_activity(
+            "emby",
+            "Emby channel refresh fallback",
+            f"Could not refresh {label} directly: {exc}",
+            "info",
+            channel_id or None,
+        )
+        return False
+
+
+def emby_refresh_library(channel_id="", channel_title=""):
+    label = str(channel_title or channel_id or "").strip()
+
+    if label and emby_refresh_channel(channel_id, channel_title):
+        return True
+
+    response = emby_api_request("POST", "Library/Refresh", timeout=45)
+    detail = f" Requested for {label}." if label else ""
+    log_activity(
+        "emby",
+        "Emby library refresh",
+        "Emby library scan started." + detail,
+        "success",
+        channel_id or None,
+    )
+    return response
+
+
+def emby_test_connection():
+    response = emby_api_request("GET", "System/Info", timeout=15)
+    data = response.json() if response.content else {}
+    return {
+        "server_name": data.get("ServerName") or data.get("serverName") or "Emby",
+        "version": data.get("Version") or data.get("version") or "",
+        "id": data.get("Id") or data.get("id") or "",
+    }
+
+
+def emby_auto_refresh_new_downloads():
+    if not setting_bool("emby_auto_refresh_after_download", True):
+        return {"status": "disabled"}
+    if not emby_configured():
+        return {"status": "not_configured"}
+
+    try:
+        overview = pinchflat_download_overview(queue_limit=0)
+        latest = overview.get("last_downloaded") or {}
+        media_id = str(latest.get("media_item_id") or "").strip()
+        if not media_id:
+            return {"status": "no_download"}
+
+        previous = get_setting("emby_last_refresh_media_id", "").strip()
+        if media_id == previous:
+            return {"status": "unchanged"}
+
+        emby_refresh_library(
+            channel_id=str(latest.get("channel_id") or ""),
+            channel_title=str(latest.get("channel") or ""),
+        )
+        set_setting("emby_last_refresh_media_id", media_id)
+        return {
+            "status": "refreshed",
+            "media_item_id": media_id,
+        }
+    except Exception as exc:
+        log_activity(
+            "emby",
+            "Automatic Emby refresh failed",
+            str(exc),
+            "error",
+        )
+        return {
+            "status": "error",
+            "error": str(exc),
+        }
 
 
 def setting_bool(key, default=False):
@@ -9798,6 +9991,128 @@ def youtube_channel_popular_videos(creds, channel_id, limit=5):
         return [], str(exc)
 
 
+def youtube_channel_featured_channels(creds, channel_id, branding_channel=None, limit=10):
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return []
+
+    featured_ids = []
+    section_titles = {}
+
+    try:
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "channelSections",
+            "channelSections.list",
+            1,
+            params={
+                "part": "snippet,contentDetails",
+                "channelId": channel_id,
+            },
+        )
+
+        for section in response.json().get("items", []):
+            snippet = section.get("snippet") or {}
+            content = section.get("contentDetails") or {}
+            if snippet.get("type") != "multipleChannels":
+                continue
+
+            section_title = str(snippet.get("title") or "Featured channels").strip()
+            for featured_id in content.get("channels") or []:
+                featured_id = str(featured_id or "").strip()
+                if not featured_id or featured_id == channel_id:
+                    continue
+                if featured_id not in featured_ids:
+                    featured_ids.append(featured_id)
+                section_titles.setdefault(featured_id, section_title)
+    except Exception:
+        pass
+
+    branding_channel = branding_channel or {}
+    for featured_id in branding_channel.get("featuredChannelsUrls") or []:
+        featured_id = str(featured_id or "").strip()
+        if not featured_id or featured_id == channel_id:
+            continue
+        if featured_id not in featured_ids:
+            featured_ids.append(featured_id)
+        section_titles.setdefault(featured_id, "Featured channels")
+
+    featured_ids = featured_ids[:max(1, min(int(limit or 10), 25))]
+    if not featured_ids:
+        return []
+
+    try:
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "channels",
+            "channels.list",
+            1,
+            params={
+                "part": "snippet,statistics",
+                "id": ",".join(featured_ids),
+                "maxResults": len(featured_ids),
+            },
+        )
+    except Exception:
+        return []
+
+    rows_by_id = {
+        str(item.get("id") or ""): item
+        for item in response.json().get("items", [])
+    }
+
+    with db() as conn:
+        placeholders = ",".join("?" for _ in featured_ids)
+        subscribed = set()
+        if placeholders:
+            subscribed = {
+                str(row["channel_id"])
+                for row in conn.execute(
+                    f"""
+                    SELECT channel_id
+                    FROM subscriptions
+                    WHERE active = 1
+                      AND channel_id IN ({placeholders})
+                    """,
+                    featured_ids,
+                ).fetchall()
+            }
+
+    results = []
+    for featured_id in featured_ids:
+        item = rows_by_id.get(featured_id) or {}
+        snippet = item.get("snippet") or {}
+        statistics = item.get("statistics") or {}
+        thumbnails = snippet.get("thumbnails") or {}
+        image = (
+            thumbnails.get("high")
+            or thumbnails.get("medium")
+            or thumbnails.get("default")
+            or {}
+        )
+
+        if not item:
+            continue
+
+        results.append(
+            {
+                "channel_id": featured_id,
+                "title": snippet.get("title") or "YouTube channel",
+                "handle": snippet.get("customUrl") or "",
+                "thumbnail_url": image.get("url") or "",
+                "subscriber_count": int(statistics.get("subscriberCount") or 0),
+                "hidden_subscriber_count": bool(statistics.get("hiddenSubscriberCount")),
+                "channel_url": f"https://www.youtube.com/channel/{featured_id}",
+                "subscribed": featured_id in subscribed,
+                "section_title": section_titles.get(featured_id, "Featured channels"),
+            }
+        )
+
+    return results
+
+
 def youtube_channel_summary(channel_id, include_videos=True, include_popular=True, force=False):
     channel_id = str(channel_id or "").strip()
     if not channel_id:
@@ -9862,6 +10177,7 @@ def youtube_channel_summary(channel_id, include_videos=True, include_popular=Tru
         recent_videos = []
         popular_videos = []
         popular_error = ""
+        featured_channels = []
         if include_videos:
             try:
                 recent_videos = youtube_channel_recent_videos(creds, uploads_playlist, 5)
@@ -9869,6 +10185,15 @@ def youtube_channel_summary(channel_id, include_videos=True, include_popular=Tru
                 recent_videos = []
             if include_popular:
                 popular_videos, popular_error = youtube_channel_popular_videos(creds, channel_id, 5)
+            try:
+                featured_channels = youtube_channel_featured_channels(
+                    creds,
+                    channel_id,
+                    branding_channel=branding_channel,
+                    limit=10,
+                )
+            except Exception:
+                featured_channels = []
 
         category_counts = {}
         for video in recent_videos:
@@ -9931,6 +10256,7 @@ def youtube_channel_summary(channel_id, include_videos=True, include_popular=Tru
             "recent_videos": recent_videos,
             "popular_videos": popular_videos,
             "popular_error": popular_error,
+            "featured_channels": featured_channels,
             "history": channel_stats_history(channel_id),
         }
 
@@ -11480,6 +11806,11 @@ def index():
         emby_download_playlist_id=emby_playlist_id,
         emby_download_remove_after_success=setting_bool("emby_download_remove_after_success", True),
         emby_download_folder=get_setting("emby_download_folder", "Emby Download"),
+        emby_server_url=emby_server_url(),
+        emby_api_configured=emby_configured(),
+        emby_api_key_saved=bool(emby_api_key()),
+        emby_auto_refresh_after_download=setting_bool("emby_auto_refresh_after_download", True),
+        emby_library_path=get_setting("emby_library_path", "/media/Storage/Media/YouTube"),
         single_download_folder=get_setting("single_download_folder", "Single Downloads"),
         single_download_format=get_setting("single_download_format", "best"),
         single_download_audio_format=get_setting("single_download_audio_format", "m4a"),
@@ -12820,6 +13151,7 @@ def bulk_subscription_action():
 
     errors = 0
     changed = 0
+    emby_full_scan_needed = False
 
     for row in rows:
         try:
@@ -12955,6 +13287,13 @@ def bulk_subscription_action():
                 with pinchflat_source_action_lock:
                     execute_pinchflat_source_action(source_id, action)
 
+            elif action == "emby_refresh":
+                if not emby_refresh_channel(
+                    channel_id=row["channel_id"] or "",
+                    channel_title=row["title"] or "",
+                ):
+                    emby_full_scan_needed = True
+
             elif action == "unsubscribe":
                 unsubscribe_subscription(row["channel_id"])
 
@@ -12981,6 +13320,18 @@ def bulk_subscription_action():
                     """,
                     (str(exc)[:1000], row["channel_id"]),
                 )
+
+    if action == "emby_refresh" and emby_full_scan_needed:
+        try:
+            emby_refresh_library()
+        except Exception as exc:
+            errors += 1
+            log_activity(
+                "emby",
+                "Bulk Emby refresh failed",
+                str(exc),
+                "error",
+            )
 
     log_activity(
         "bulk",
@@ -14038,6 +14389,107 @@ def discover_videos():
         return jsonify({"ok": False, "error": str(exc)}), 400
 
 
+@app.post("/settings/apis")
+def save_api_settings():
+    server_url = str(request.form.get("emby_server_url") or "").strip().rstrip("/")
+    api_key = str(request.form.get("emby_api_key") or "").strip()
+    library_path = str(
+        request.form.get("emby_library_path")
+        or "/media/Storage/Media/YouTube"
+    ).strip()
+    auto_refresh = request.form.get("emby_auto_refresh_after_download") == "1"
+    clear_key = request.form.get("emby_clear_api_key") == "1"
+
+    set_setting("emby_server_url", server_url)
+    if clear_key:
+        set_setting("emby_api_key", "")
+    elif api_key:
+        set_setting("emby_api_key", api_key)
+
+    set_setting(
+        "emby_auto_refresh_after_download",
+        "1" if auto_refresh else "0",
+    )
+    set_setting(
+        "emby_library_path",
+        library_path or "/media/Storage/Media/YouTube",
+    )
+
+    # Seed the automatic-refresh marker when Emby is first configured. This
+    # means the monitor reacts to the next completed download rather than
+    # treating content which was already present as a new event.
+    if auto_refresh and not get_setting("emby_last_refresh_media_id", "").strip():
+        try:
+            overview = pinchflat_download_overview(queue_limit=0)
+            latest = overview.get("last_downloaded") or {}
+            media_id = str(latest.get("media_item_id") or "").strip()
+            if media_id:
+                set_setting("emby_last_refresh_media_id", media_id)
+        except Exception:
+            pass
+
+    log_activity(
+        "settings",
+        "Emby API settings updated",
+        (
+            f"Server: {server_url or 'not configured'}. "
+            f"Automatic refresh: {'enabled' if auto_refresh else 'disabled'}."
+        ),
+        "info",
+    )
+    flash("Emby API settings saved.", "success")
+    return redirect(url_for("index") + "#api")
+
+
+@app.get("/api/emby/test")
+def emby_test_api():
+    try:
+        info = emby_test_connection()
+        return jsonify(
+            {
+                "ok": True,
+                "message": (
+                    f"Connected to {info['server_name']}"
+                    + (f" · Emby {info['version']}" if info.get("version") else "")
+                ),
+                "server": info,
+            }
+        )
+    except Exception as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+            }
+        ), 400
+
+
+@app.post("/api/emby/refresh")
+def emby_refresh_api():
+    payload = request.get_json(silent=True) or {}
+    channel_id = str(payload.get("channel_id") or "").strip()
+    channel_title = str(payload.get("channel_title") or "").strip()
+
+    try:
+        emby_refresh_library(
+            channel_id=channel_id,
+            channel_title=channel_title,
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "message": "Emby library scan started.",
+            }
+        )
+    except Exception as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+            }
+        ), 400
+
+
 @app.post("/settings/youtube")
 def save_youtube_settings():
     try:
@@ -14232,6 +14684,13 @@ scheduler.add_job(
     "interval",
     minutes=1,
     id="unsubscribe-cleanup",
+    max_instances=1,
+)
+scheduler.add_job(
+    emby_auto_refresh_new_downloads,
+    "interval",
+    minutes=1,
+    id="emby-library-refresh-monitor",
     max_instances=1,
 )
 scheduler.start()
