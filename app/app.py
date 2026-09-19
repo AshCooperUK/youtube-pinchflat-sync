@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.12.4"
+VERSION = "2.13.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -232,6 +232,31 @@ YOUTUBE_LIKED_VIDEOS_CACHE = {
     "retrieved_at": "",
 }
 YOUTUBE_LIKED_VIDEOS_LOCK = threading.Lock()
+
+YOUTUBE_CHANNEL_DETAILS_CACHE_SECONDS = 21600
+YOUTUBE_CHANNEL_DETAILS_CACHE = {}
+YOUTUBE_CHANNEL_DETAILS_LOCK = threading.Lock()
+
+YOUTUBE_VIDEO_CATEGORIES = {
+    "1": "Film & Animation",
+    "2": "Autos & Vehicles",
+    "10": "Music",
+    "15": "Pets & Animals",
+    "17": "Sports",
+    "19": "Travel & Events",
+    "20": "Gaming",
+    "22": "People & Blogs",
+    "23": "Comedy",
+    "24": "Entertainment",
+    "25": "News & Politics",
+    "26": "Howto & Style",
+    "27": "Education",
+    "28": "Science & Technology",
+    "29": "Nonprofits & Activism",
+    "30": "Movies",
+    "43": "Shows",
+    "44": "Trailers",
+}
 
 YOUTUBE_CHANNEL_FEED_WORKERS = 24
 
@@ -540,6 +565,19 @@ def init_db():
                 added_at TEXT NOT NULL,
                 PRIMARY KEY (list_id, saved_video_id)
             );
+
+            CREATE TABLE IF NOT EXISTS channel_stats_history (
+                channel_id TEXT NOT NULL,
+                snapshot_date TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                subscriber_count INTEGER NOT NULL DEFAULT 0,
+                view_count INTEGER NOT NULL DEFAULT 0,
+                video_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (channel_id, snapshot_date)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_channel_stats_history_channel_date
+            ON channel_stats_history(channel_id, snapshot_date DESC);
             """
         )
 
@@ -608,6 +646,7 @@ def init_db():
             "page_show_summary_subscriptions": "1",
             "page_show_summary_downloads": "1",
             "page_show_summary_errors": "1",
+            "page_show_summary_latest_download": "1",
 
             "page_button_sync": "1",
             "page_button_refresh_youtube": "1",
@@ -617,7 +656,7 @@ def init_db():
             "page_button_logout": "1",
 
             "page_section_order": "summary,pinchflat,latest,subscriptions",
-            "page_summary_order": "google,pinchflat,subscriptions,downloads,errors",
+            "page_summary_order": "google,pinchflat,latest_download,subscriptions,downloads,errors",
         }
         for key, value in defaults.items():
             if value:
@@ -1822,7 +1861,7 @@ def youtube_video_metadata(video_id, force=False):
         "videos.list",
         1,
         params={
-            "part": "snippet,statistics,contentDetails",
+            "part": "snippet,statistics,contentDetails,status,topicDetails,liveStreamingDetails",
             "id": video_id,
             "maxResults": 1,
         },
@@ -1838,6 +1877,9 @@ def youtube_video_metadata(video_id, force=False):
     snippet = video.get("snippet") or {}
     statistics = video.get("statistics") or {}
     content_details = video.get("contentDetails") or {}
+    video_status = video.get("status") or {}
+    topic_details = video.get("topicDetails") or {}
+    live_details = video.get("liveStreamingDetails") or {}
     thumbnails = snippet.get("thumbnails") or {}
 
     thumbnail = (
@@ -1950,10 +1992,29 @@ def youtube_video_metadata(video_id, force=False):
         "channel_thumbnail_url": channel_thumbnail_url,
         "thumbnail_url": thumbnail.get("url") or "",
         "published_at": snippet.get("publishedAt") or "",
-        "view_count": int(
-            statistics.get("viewCount")
-            or 0
-        ),
+        "view_count": int(statistics.get("viewCount") or 0),
+        "like_count": int(statistics.get("likeCount") or 0),
+        "comment_count": int(statistics.get("commentCount") or 0),
+        "favourite_count": int(statistics.get("favoriteCount") or 0),
+        "category_id": str(snippet.get("categoryId") or ""),
+        "category": YOUTUBE_VIDEO_CATEGORIES.get(str(snippet.get("categoryId") or ""), ""),
+        "tags": list(snippet.get("tags") or []),
+        "default_language": snippet.get("defaultLanguage") or "",
+        "default_audio_language": snippet.get("defaultAudioLanguage") or "",
+        "definition": content_details.get("definition") or "",
+        "caption": content_details.get("caption") or "",
+        "licensed_content": bool(content_details.get("licensedContent")),
+        "dimension": content_details.get("dimension") or "",
+        "projection": content_details.get("projection") or "",
+        "privacy_status": video_status.get("privacyStatus") or "",
+        "embeddable": bool(video_status.get("embeddable", True)),
+        "made_for_kids": video_status.get("madeForKids"),
+        "topics": [youtube_topic_label(value) for value in (topic_details.get("topicCategories") or []) if youtube_topic_label(value)],
+        "live": bool(live_details),
+        "scheduled_start_time": live_details.get("scheduledStartTime") or "",
+        "actual_start_time": live_details.get("actualStartTime") or "",
+        "actual_end_time": live_details.get("actualEndTime") or "",
+        "concurrent_viewers": int(live_details.get("concurrentViewers") or 0),
         "duration": youtube_duration_label(
             raw_duration
         ),
@@ -1965,6 +2026,7 @@ def youtube_video_metadata(video_id, force=False):
         ),
         "is_subscribed": is_subscribed,
         "metadata_complete": True,
+        "metadata_rich": True,
     }
 
     with YOUTUBE_VIDEO_METADATA_LOCK:
@@ -5587,6 +5649,16 @@ def refresh_subscriptions():
             "warning" if policy_errors else "info",
         )
 
+    try:
+        record_missing_channel_stat_snapshots(current_ids, creds=creds)
+    except Exception as exc:
+        log_activity(
+            "youtube_refresh",
+            "Channel statistics snapshot failed",
+            str(exc),
+            "warning",
+        )
+
     return {
         "total": len(subs),
         "new": new_count,
@@ -9127,7 +9199,7 @@ PINCHFLAT_SOURCE_ACTION_NAMES = {
     "download_pending": "Download Pending",
     "redownload_existing": "Re-Download Existing",
     "force_scan": "Force Scan",
-    "refresh_metadata": "Refresh Metadata",
+    "refresh_metadata": "Refresh Media",
     "sync_files": "Sync Files on Disk",
 }
 
@@ -9443,10 +9515,302 @@ def execute_pinchflat_source_action(source_id, action_key):
     )
 
 
-def youtube_channel_summary(channel_id):
+def youtube_channel_age(published_at):
+    value = str(published_at or "").strip()
+    if not value:
+        return {"years": 0, "months": 0, "label": ""}
+
+    try:
+        created = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
+        delta = relativedelta(now, created)
+        years = max(int(delta.years or 0), 0)
+        months = max(int(delta.months or 0), 0)
+
+        if years:
+            label = f"{years} yr" + ("s" if years != 1 else "")
+        elif months:
+            label = f"{months} mo" + ("s" if months != 1 else "")
+        else:
+            label = "New channel"
+
+        return {"years": years, "months": months, "label": label}
+    except Exception:
+        return {"years": 0, "months": 0, "label": ""}
+
+
+def youtube_topic_label(value):
+    value = str(value or "").strip().rstrip("/")
+    if not value:
+        return ""
+    slug = value.rsplit("/", 1)[-1]
+    try:
+        from urllib.parse import unquote
+        slug = unquote(slug)
+    except Exception:
+        pass
+    return slug.replace("_", " ").replace("-", " ").strip()
+
+
+def record_channel_stat_snapshot(channel_id, subscriber_count, view_count, video_count, recorded_at=None):
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return
+
+    recorded_at = str(recorded_at or now_iso())
+    snapshot_date = recorded_at[:10]
+
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO channel_stats_history (
+                channel_id,
+                snapshot_date,
+                recorded_at,
+                subscriber_count,
+                view_count,
+                video_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(channel_id, snapshot_date) DO UPDATE SET
+                recorded_at = excluded.recorded_at,
+                subscriber_count = excluded.subscriber_count,
+                view_count = excluded.view_count,
+                video_count = excluded.video_count
+            """,
+            (
+                channel_id,
+                snapshot_date,
+                recorded_at,
+                int(subscriber_count or 0),
+                int(view_count or 0),
+                int(video_count or 0),
+            ),
+        )
+
+
+def channel_stats_history(channel_id, limit=730):
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return []
+
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT snapshot_date, recorded_at, subscriber_count, view_count, video_count
+            FROM channel_stats_history
+            WHERE channel_id = ?
+            ORDER BY snapshot_date DESC
+            LIMIT ?
+            """,
+            (channel_id, max(1, min(int(limit or 730), 5000))),
+        ).fetchall()
+
+    return [dict(row) for row in reversed(rows)]
+
+
+def record_missing_channel_stat_snapshots(channel_ids, creds=None):
+    ids = [str(item or "").strip() for item in channel_ids if str(item or "").strip()]
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        return 0
+
+    today = date.today().isoformat()
+    with db() as conn:
+        existing = {
+            row["channel_id"]
+            for row in conn.execute(
+                """
+                SELECT channel_id
+                FROM channel_stats_history
+                WHERE snapshot_date = ?
+                """,
+                (today,),
+            ).fetchall()
+        }
+
+    pending = [channel_id for channel_id in ids if channel_id not in existing]
+    if not pending:
+        return 0
+
+    creds = creds or load_credentials()
+    if not creds:
+        return 0
+
+    recorded = 0
+    for offset in range(0, len(pending), 50):
+        batch = pending[offset:offset + 50]
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "channels",
+            "channels.list",
+            1,
+            params={
+                "part": "statistics",
+                "id": ",".join(batch),
+                "maxResults": 50,
+            },
+        )
+        for item in response.json().get("items", []):
+            stats = item.get("statistics") or {}
+            record_channel_stat_snapshot(
+                item.get("id") or "",
+                stats.get("subscriberCount") or 0,
+                stats.get("viewCount") or 0,
+                stats.get("videoCount") or 0,
+            )
+            recorded += 1
+
+    return recorded
+
+
+def youtube_channel_recent_videos(creds, uploads_playlist_id, limit=5):
+    uploads_playlist_id = str(uploads_playlist_id or "").strip()
+    if not uploads_playlist_id:
+        return []
+
+    response = youtube_api_request(
+        creds,
+        "GET",
+        "playlistItems",
+        "playlistItems.list",
+        1,
+        params={
+            "part": "snippet,contentDetails",
+            "playlistId": uploads_playlist_id,
+            "maxResults": max(1, min(int(limit or 5), 20)),
+        },
+    )
+    playlist_items = response.json().get("items", [])
+    video_ids = [
+        str((item.get("contentDetails") or {}).get("videoId") or "").strip()
+        for item in playlist_items
+    ]
+    video_ids = [item for item in video_ids if item]
+    if not video_ids:
+        return []
+
+    details_response = youtube_api_request(
+        creds,
+        "GET",
+        "videos",
+        "videos.list",
+        1,
+        params={
+            "part": "snippet,statistics,contentDetails",
+            "id": ",".join(video_ids),
+            "maxResults": len(video_ids),
+        },
+    )
+    by_id = {item.get("id"): item for item in details_response.json().get("items", [])}
+    results = []
+    for video_id in video_ids:
+        item = by_id.get(video_id) or {}
+        snippet = item.get("snippet") or {}
+        stats = item.get("statistics") or {}
+        details = item.get("contentDetails") or {}
+        thumbs = snippet.get("thumbnails") or {}
+        thumb = thumbs.get("medium") or thumbs.get("high") or thumbs.get("default") or {}
+        category_id = str(snippet.get("categoryId") or "")
+        results.append({
+            "video_id": video_id,
+            "title": snippet.get("title") or "YouTube video",
+            "published_at": snippet.get("publishedAt") or "",
+            "thumbnail_url": thumb.get("url") or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+            "view_count": int(stats.get("viewCount") or 0),
+            "like_count": int(stats.get("likeCount") or 0),
+            "comment_count": int(stats.get("commentCount") or 0),
+            "duration": youtube_duration_label(details.get("duration") or ""),
+            "category_id": category_id,
+            "category": YOUTUBE_VIDEO_CATEGORIES.get(category_id, ""),
+            "video_url": f"https://www.youtube.com/watch?v={video_id}",
+        })
+    return results
+
+
+def youtube_channel_popular_videos(creds, channel_id, limit=5):
+    stats = api_usage_stats()
+    if stats.get("search_remaining", 0) <= 0:
+        return [], "Daily YouTube search limit reached."
+
+    try:
+        search_response = youtube_api_request(
+            creds,
+            "GET",
+            "search",
+            "search.list",
+            1,
+            params={
+                "part": "snippet",
+                "channelId": channel_id,
+                "type": "video",
+                "order": "viewCount",
+                "maxResults": max(1, min(int(limit or 5), 10)),
+                "safeSearch": "moderate",
+            },
+        )
+        ids = [
+            str((item.get("id") or {}).get("videoId") or "").strip()
+            for item in search_response.json().get("items", [])
+        ]
+        ids = [item for item in ids if item]
+        if not ids:
+            return [], ""
+
+        details_response = youtube_api_request(
+            creds,
+            "GET",
+            "videos",
+            "videos.list",
+            1,
+            params={
+                "part": "snippet,statistics,contentDetails",
+                "id": ",".join(ids),
+                "maxResults": len(ids),
+            },
+        )
+        by_id = {item.get("id"): item for item in details_response.json().get("items", [])}
+        rows = []
+        for video_id in ids:
+            item = by_id.get(video_id) or {}
+            snippet = item.get("snippet") or {}
+            vstats = item.get("statistics") or {}
+            details = item.get("contentDetails") or {}
+            thumbs = snippet.get("thumbnails") or {}
+            thumb = thumbs.get("medium") or thumbs.get("high") or thumbs.get("default") or {}
+            category_id = str(snippet.get("categoryId") or "")
+            rows.append({
+                "video_id": video_id,
+                "title": snippet.get("title") or "YouTube video",
+                "published_at": snippet.get("publishedAt") or "",
+                "thumbnail_url": thumb.get("url") or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg",
+                "view_count": int(vstats.get("viewCount") or 0),
+                "like_count": int(vstats.get("likeCount") or 0),
+                "comment_count": int(vstats.get("commentCount") or 0),
+                "duration": youtube_duration_label(details.get("duration") or ""),
+                "category_id": category_id,
+                "category": YOUTUBE_VIDEO_CATEGORIES.get(category_id, ""),
+                "video_url": f"https://www.youtube.com/watch?v={video_id}",
+            })
+        return rows, ""
+    except Exception as exc:
+        return [], str(exc)
+
+
+def youtube_channel_summary(channel_id, include_videos=True, include_popular=True, force=False):
     channel_id = str(channel_id or "").strip()
     if not channel_id:
         return {}
+
+    now_ts = time.time()
+    cache_key = f"{channel_id}:{1 if include_videos else 0}:{1 if include_popular else 0}"
+    with YOUTUBE_CHANNEL_DETAILS_LOCK:
+        cached = YOUTUBE_CHANNEL_DETAILS_CACHE.get(cache_key)
+    if cached and not force and cached.get("expires_at", 0) > now_ts:
+        result = dict(cached.get("data") or {})
+        result["history"] = channel_stats_history(channel_id)
+        return result
 
     try:
         creds = load_credentials()
@@ -9464,7 +9828,7 @@ def youtube_channel_summary(channel_id):
             "channels.list",
             1,
             params={
-                "part": "snippet,statistics,contentDetails",
+                "part": "snippet,statistics,contentDetails,topicDetails,brandingSettings,status",
                 "id": channel_id,
                 "maxResults": 1,
             },
@@ -9477,29 +9841,110 @@ def youtube_channel_summary(channel_id):
         item = items[0]
         snippet = item.get("snippet") or {}
         stats = item.get("statistics") or {}
+        content = item.get("contentDetails") or {}
+        topics = item.get("topicDetails") or {}
+        branding = item.get("brandingSettings") or {}
+        branding_channel = branding.get("channel") or {}
+        branding_image = branding.get("image") or {}
+        status = item.get("status") or {}
         thumbs = snippet.get("thumbnails") or {}
-        image = (
-            thumbs.get("high")
-            or thumbs.get("medium")
-            or thumbs.get("default")
-            or {}
+        image = thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {}
+        uploads_playlist = ((content.get("relatedPlaylists") or {}).get("uploads") or "")
+        published_at = snippet.get("publishedAt") or ""
+
+        record_channel_stat_snapshot(
+            channel_id,
+            stats.get("subscriberCount") or 0,
+            stats.get("viewCount") or 0,
+            stats.get("videoCount") or 0,
         )
 
-        return {
+        recent_videos = []
+        popular_videos = []
+        popular_error = ""
+        if include_videos:
+            try:
+                recent_videos = youtube_channel_recent_videos(creds, uploads_playlist, 5)
+            except Exception:
+                recent_videos = []
+            if include_popular:
+                popular_videos, popular_error = youtube_channel_popular_videos(creds, channel_id, 5)
+
+        category_counts = {}
+        for video in recent_videos:
+            category = video.get("category") or ""
+            if category:
+                category_counts[category] = category_counts.get(category, 0) + 1
+        primary_category = ""
+        if category_counts:
+            primary_category = sorted(category_counts.items(), key=lambda pair: (-pair[1], pair[0]))[0][0]
+
+        topic_categories = [
+            youtube_topic_label(value)
+            for value in (topics.get("topicCategories") or [])
+        ]
+        topic_categories = [item for item in topic_categories if item]
+        if not primary_category and topic_categories:
+            primary_category = topic_categories[0]
+
+        subscriber_count = int(stats.get("subscriberCount") or 0)
+        view_count = int(stats.get("viewCount") or 0)
+        video_count = int(stats.get("videoCount") or 0)
+        avg_views = int(view_count / video_count) if video_count else 0
+        views_per_subscriber = round(view_count / subscriber_count, 1) if subscriber_count else 0
+        recent_view_values = [int(video.get("view_count") or 0) for video in recent_videos]
+        recent_like_values = [int(video.get("like_count") or 0) for video in recent_videos]
+        recent_comment_values = [int(video.get("comment_count") or 0) for video in recent_videos]
+        recent_average_views = int(sum(recent_view_values) / len(recent_view_values)) if recent_view_values else 0
+        recent_average_likes = int(sum(recent_like_values) / len(recent_like_values)) if recent_like_values else 0
+        recent_average_comments = int(sum(recent_comment_values) / len(recent_comment_values)) if recent_comment_values else 0
+        latest_upload_at = recent_videos[0].get("published_at") if recent_videos else ""
+
+        result = {
+            "channel_id": channel_id,
             "title": snippet.get("title") or "",
             "description": snippet.get("description") or "",
+            "handle": snippet.get("customUrl") or "",
             "custom_url": snippet.get("customUrl") or "",
-            "published_at": snippet.get("publishedAt") or "",
-            "country": snippet.get("country") or "",
+            "published_at": published_at,
+            "age": youtube_channel_age(published_at),
+            "country": snippet.get("country") or branding_channel.get("country") or "",
+            "default_language": snippet.get("defaultLanguage") or branding_channel.get("defaultLanguage") or "",
             "thumbnail_url": image.get("url") or "",
-            "subscriber_count": int(stats.get("subscriberCount") or 0),
-            "view_count": int(stats.get("viewCount") or 0),
-            "video_count": int(stats.get("videoCount") or 0),
+            "banner_url": branding_image.get("bannerExternalUrl") or "",
+            "subscriber_count": subscriber_count,
+            "view_count": view_count,
+            "video_count": video_count,
+            "average_views_per_video": avg_views,
+            "views_per_subscriber": views_per_subscriber,
+            "recent_average_views": recent_average_views,
+            "recent_average_likes": recent_average_likes,
+            "recent_average_comments": recent_average_comments,
+            "latest_upload_at": latest_upload_at,
             "hidden_subscriber_count": bool(stats.get("hiddenSubscriberCount")),
+            "privacy_status": status.get("privacyStatus") or "",
+            "made_for_kids": status.get("madeForKids"),
+            "keywords": branding_channel.get("keywords") or "",
+            "topics": topic_categories,
+            "category": primary_category,
+            "uploads_playlist_id": uploads_playlist,
+            "recent_videos": recent_videos,
+            "popular_videos": popular_videos,
+            "popular_error": popular_error,
+            "history": channel_stats_history(channel_id),
         }
+
+        with YOUTUBE_CHANNEL_DETAILS_LOCK:
+            cached_data = dict(result)
+            cached_data.pop("history", None)
+            YOUTUBE_CHANNEL_DETAILS_CACHE[cache_key] = {
+                "expires_at": now_ts + YOUTUBE_CHANNEL_DETAILS_CACHE_SECONDS,
+                "data": cached_data,
+            }
+
+        return result
     except Exception:
         return {}
-
 
 def delete_pinchflat_source(
     source_id=None,
@@ -10738,6 +11183,10 @@ def index():
             "page_show_summary_errors",
             True,
         ),
+        "show_summary_latest_download": setting_bool(
+            "page_show_summary_latest_download",
+            True,
+        ),
 
         "button_sync": setting_bool(
             "page_button_sync",
@@ -10786,6 +11235,7 @@ def index():
         (
             "google",
             "pinchflat",
+            "latest_download",
             "subscriptions",
             "downloads",
             "errors",
@@ -10793,6 +11243,7 @@ def index():
         (
             "google",
             "pinchflat",
+            "latest_download",
             "subscriptions",
             "downloads",
             "errors",
@@ -11691,6 +12142,7 @@ def save_page_view_settings():
         "page_show_summary_subscriptions",
         "page_show_summary_downloads",
         "page_show_summary_errors",
+        "page_show_summary_latest_download",
 
         "page_button_sync",
         "page_button_refresh_youtube",
@@ -11737,6 +12189,7 @@ def save_page_view_settings():
         in {
             "google",
             "pinchflat",
+            "latest_download",
             "subscriptions",
             "downloads",
             "errors",
@@ -11763,6 +12216,7 @@ def save_page_view_settings():
     valid_summary = [
         "google",
         "pinchflat",
+        "latest_download",
         "subscriptions",
         "downloads",
         "errors",
@@ -12402,11 +12856,10 @@ def bulk_subscription_action():
                 prospective["needs_review"] = 0
 
                 with pinchflat_source_action_lock:
-                    with pinchflat_source_action_lock:
-                        apply_subscription_source_authority(
-                            prospective,
-                            apply_settings=True,
-                        )
+                    apply_subscription_source_authority(
+                        prospective,
+                        apply_settings=True,
+                    )
             elif action == "range":
                 mode = request.form.get(
                     "bulk_history_mode",
@@ -12473,11 +12926,10 @@ def bulk_subscription_action():
 
             elif action == "retry":
                 with pinchflat_source_action_lock:
-                    with pinchflat_source_action_lock:
-                        apply_subscription_source_authority(
-                            prospective,
-                            apply_settings=True,
-                        )
+                    apply_subscription_source_authority(
+                        prospective,
+                        apply_settings=True,
+                    )
 
                 with db() as conn:
                     conn.execute(
@@ -12489,6 +12941,28 @@ def bulk_subscription_action():
                         """,
                         (row["channel_id"],),
                     )
+
+            elif action in {
+                "download_pending",
+                "redownload_existing",
+                "force_scan",
+                "refresh_metadata",
+                "sync_files",
+            }:
+                source_id = resolve_pinchflat_source_id(row)
+                if not source_id:
+                    raise RuntimeError("Channel is not currently a Pinchflat source.")
+                with pinchflat_source_action_lock:
+                    execute_pinchflat_source_action(source_id, action)
+
+            elif action == "unsubscribe":
+                unsubscribe_subscription(row["channel_id"])
+
+            elif action in {"delete_unsubscribe", "delete_unsubscribe_media"}:
+                delete_and_unsubscribe_subscription(
+                    row["channel_id"],
+                    delete_media=(action == "delete_unsubscribe_media"),
+                )
 
             else:
                 raise RuntimeError("Unknown bulk action.")
@@ -12523,13 +12997,14 @@ def bulk_subscription_action():
 
     updated = [
         payload
-        for payload in (
-            subscription_ajax_payload(
-                channel_id
-            )
-            for channel_id in channel_ids
-        )
+        for payload in (subscription_ajax_payload(channel_id) for channel_id in channel_ids)
         if payload
+    ]
+    deleted_ids = [
+        channel_id
+        for channel_id in channel_ids
+        if action in {"delete_unsubscribe", "delete_unsubscribe_media"}
+        and not subscription_ajax_payload(channel_id)
     ]
 
     if ajax:
@@ -12540,6 +13015,7 @@ def bulk_subscription_action():
                 "changed": changed,
                 "errors": errors,
                 "subscriptions": updated,
+                "deleted_channel_ids": deleted_ids,
             }
         )
 
@@ -12554,68 +13030,66 @@ def bulk_subscription_action():
     )
 
 
-@app.get("/api/subscriptions/<channel_id>/details")
-def subscription_details_api(channel_id):
+@app.get("/api/channels/<channel_id>/details")
+def channel_details_api(channel_id):
     with db() as conn:
         row = conn.execute(
             "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
             (channel_id,),
         ).fetchone()
 
-    if row is None:
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Subscription was not found.",
-            }
-        ), 404
-
-    item = subscription_view(row)
-    source_id = resolve_pinchflat_source_id(item)
-    profile_id = subscription_media_profile_id(item)
-    profile_name = (
-        media_profile_settings(profile_id).get("name")
-        or str(profile_id)
-    )
-
-    disk_bytes = channel_disk_usage(
-        item.get("title") or channel_id,
-        storage_snapshot(),
-    )
-
-    return jsonify(
-        {
-            "ok": True,
-            "subscription": {
-                "channel_id": item.get("channel_id") or "",
-                "title": item.get("title") or "YouTube channel",
-                "channel_url": item.get("channel_url") or "",
-                "thumbnail_url": item.get("thumbnail_url") or "",
-                "active": bool(item.get("active")),
-                "favourite": item.get("channel_id") in favourite_channel_ids(),
-                "download_enabled": bool(item.get("download_enabled")),
-                "pinchflat_added": bool(item.get("pinchflat_added")),
-                "pinchflat_source_id": str(source_id or ""),
-                "pinchflat_source_url": (
-                    f"{PINCHFLAT_URL}/sources/{source_id}"
-                    if source_id
-                    else ""
-                ),
-                "ui_status": item.get("ui_status") or "",
-                "cutoff": item.get("cutoff") or "",
-                "history_label": item.get("history_label") or "",
-                "media_profile_id": str(profile_id or ""),
-                "media_profile_name": profile_name,
-                "subscribed_at": item.get("subscribed_at") or "",
-                "first_seen_at": item.get("first_seen_at") or "",
-                "removed_at": item.get("removed_at") or "",
-                "last_error": item.get("last_error") or "",
-                "disk_bytes": disk_bytes,
-                "disk_usage": format_bytes(disk_bytes),
-            },
-            "youtube": youtube_channel_summary(channel_id),
+    subscription = None
+    if row is not None:
+        item = subscription_view(row)
+        source_id = resolve_pinchflat_source_id(item)
+        profile_id = subscription_media_profile_id(item)
+        profile_name = media_profile_settings(profile_id).get("name") or str(profile_id)
+        disk_bytes = channel_disk_usage(item.get("title") or channel_id, storage_snapshot())
+        subscription = {
+            "channel_id": item.get("channel_id") or "",
+            "title": item.get("title") or "YouTube channel",
+            "channel_url": item.get("channel_url") or "",
+            "thumbnail_url": item.get("thumbnail_url") or "",
+            "active": bool(item.get("active")),
+            "favourite": item.get("channel_id") in favourite_channel_ids(),
+            "download_enabled": bool(item.get("download_enabled")),
+            "pinchflat_added": bool(item.get("pinchflat_added")),
+            "pinchflat_source_id": str(source_id or ""),
+            "pinchflat_source_url": f"{PINCHFLAT_URL}/sources/{source_id}" if source_id else "",
+            "ui_status": item.get("ui_status") or "",
+            "cutoff": item.get("cutoff") or "",
+            "history_label": item.get("history_label") or "",
+            "media_profile_id": str(profile_id or ""),
+            "media_profile_name": profile_name,
+            "subscribed_at": item.get("subscribed_at") or "",
+            "first_seen_at": item.get("first_seen_at") or "",
+            "removed_at": item.get("removed_at") or "",
+            "last_error": item.get("last_error") or "",
+            "disk_bytes": disk_bytes,
+            "disk_usage": format_bytes(disk_bytes),
         }
+
+    video_mode = request.args.get("videos", "1").strip().lower()
+    include_videos = video_mode != "0"
+    include_popular = video_mode not in {"0", "recent"}
+    youtube = youtube_channel_summary(
+        channel_id,
+        include_videos=include_videos,
+        include_popular=include_popular,
     )
+    if not youtube and subscription is None:
+        return jsonify({"ok": False, "error": "Channel information was not found."}), 404
+
+    return jsonify({
+        "ok": True,
+        "subscription": subscription,
+        "youtube": youtube,
+    })
+
+
+@app.get("/api/subscriptions/<channel_id>/details")
+def subscription_details_api(channel_id):
+    return channel_details_api(channel_id)
 
 
 @app.post("/api/subscriptions/<channel_id>/source-action")
@@ -12627,7 +13101,7 @@ def subscription_source_action_api(channel_id):
         "download_pending": "Download Pending",
         "redownload_existing": "Re-Download Existing",
         "force_scan": "Force Scan",
-        "refresh_metadata": "Refresh Metadata",
+        "refresh_metadata": "Refresh Media",
         "sync_files": "Sync Files on Disk",
     }
 
@@ -12710,398 +13184,232 @@ def subscription_source_action_api(channel_id):
         ), 400
 
 
-@app.post("/api/subscriptions/<channel_id>/delete-unsubscribe")
-def delete_and_unsubscribe_subscription_api(channel_id):
-    payload = request.get_json(silent=True) or {}
-    delete_media = bool(payload.get("delete_media"))
-
+def unsubscribe_subscription(channel_id):
     with db() as conn:
         row = conn.execute(
             "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
             (channel_id,),
         ).fetchone()
-
     if row is None:
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Subscription was not found.",
-            }
-        ), 404
+        raise RuntimeError("Subscription was not found.")
+
+    row_dict = dict(row)
+    youtube_unsubscribe(channel_id, row_value(row, "youtube_subscription_id", None))
+
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET active = 0,
+                removed_at = ?,
+                download_enabled = 0,
+                source_authorised = 0,
+                last_error = NULL
+            WHERE channel_id = ?
+            """,
+            (now_iso(), channel_id),
+        )
+
+    policy = unsubscribe_policy()
+    source_id = resolve_pinchflat_source_id(row_dict)
+    if policy == "disable" and source_id:
+        update_pinchflat_source_settings(
+            source_id,
+            cutoff=subscription_cutoff(row_dict),
+            download_enabled=False,
+            media_profile_id=subscription_media_profile_id(row_dict),
+        )
+    elif policy in {"remove", "remove_delete"}:
+        delete_files = policy == "remove_delete"
+        output_template = media_profile_settings(subscription_media_profile_id(row_dict)).get(
+            "output_path_template", EMBY_OUTPUT_PATH_TEMPLATE
+        )
+        source_gone = not source_id
+        if source_id:
+            removal_row = dict(row_dict)
+            removal_row["pinchflat_source_id"] = str(source_id)
+            removal_row["pinchflat_added"] = 1
+            prepare_pinchflat_source_for_removal(removal_row)
+            source_gone = delete_pinchflat_source(
+                source_id,
+                delete_files=delete_files,
+                subscription=removal_row,
+            )
+        if delete_files:
+            delete_subscription_download_folder(row_dict.get("title") or channel_id, output_template)
+        if source_gone:
+            clear_subscription_pinchflat_link(channel_id, source_id)
+        elif source_id:
+            with db() as conn:
+                conn.execute(
+                    """
+                    UPDATE subscriptions
+                    SET pinchflat_added = 1,
+                        pinchflat_source_id = ?,
+                        download_enabled = 0,
+                        source_authorised = 0,
+                        last_error = ?
+                    WHERE channel_id = ?
+                    """,
+                    (str(source_id), "Pinchflat source removal is still in progress.", channel_id),
+                )
+        schedule_unsubscribe_cleanup(
+            channel_id,
+            row_dict.get("title") or channel_id,
+            output_template,
+            source_id=source_id,
+            delete_files=delete_files,
+            delay_seconds=300,
+            checks=6,
+        )
+
+    title = row_dict.get("title") or channel_id
+    message = f"Unsubscribed from {title} on YouTube."
+    log_activity("youtube", "YouTube subscription removed", message, "success", channel_id)
+    return {
+        "ok": True,
+        "message": message,
+        "channel_id": channel_id,
+        "subscription": subscription_ajax_payload(channel_id),
+    }
+
+
+def delete_and_unsubscribe_subscription(channel_id, delete_media=False):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("Subscription was not found.")
 
     item = dict(row)
     title = item.get("title") or channel_id
-
     youtube_unsubscribed = False
     source_id = None
     source_gone = True
     deleted_folder = None
 
-    try:
-        if item.get("active"):
-            youtube_unsubscribe(
-                channel_id,
-                row_value(
-                    row,
-                    "youtube_subscription_id",
-                    None,
-                ),
-            )
-            youtube_unsubscribed = True
+    if item.get("active"):
+        youtube_unsubscribe(channel_id, row_value(row, "youtube_subscription_id", None))
+        youtube_unsubscribed = True
 
-        source_id = resolve_pinchflat_source_id(item)
-        profile_id = subscription_media_profile_id(item)
-        output_template = media_profile_settings(
-            profile_id
-        ).get(
-            "output_path_template",
-            EMBY_OUTPUT_PATH_TEMPLATE,
-        )
+    source_id = resolve_pinchflat_source_id(item)
+    profile_id = subscription_media_profile_id(item)
+    output_template = media_profile_settings(profile_id).get(
+        "output_path_template", EMBY_OUTPUT_PATH_TEMPLATE
+    )
+    source_gone = not source_id
 
-        source_gone = not source_id
-
-        if source_id:
-            removal_row = dict(item)
-            removal_row["pinchflat_source_id"] = str(source_id)
-            removal_row["pinchflat_added"] = 1
-
-            with pinchflat_source_action_lock:
-                prepare_pinchflat_source_for_removal(removal_row)
-                source_gone = delete_pinchflat_source(
-                    source_id,
-                    delete_files=delete_media,
-                    subscription=removal_row,
-                )
-
-        if delete_media:
-            deleted_folder = delete_subscription_download_folder(
-                title,
-                output_template,
-            )
-
-        # If Pinchflat has not finished removing the source, keep the existing
-        # cleanup worker running after the subscription row itself is deleted.
-        if not source_gone and source_id:
-            schedule_unsubscribe_cleanup(
-                channel_id,
-                title,
-                output_template,
-                source_id=source_id,
+    if source_id:
+        removal_row = dict(item)
+        removal_row["pinchflat_source_id"] = str(source_id)
+        removal_row["pinchflat_added"] = 1
+        with pinchflat_source_action_lock:
+            prepare_pinchflat_source_for_removal(removal_row)
+            source_gone = delete_pinchflat_source(
+                source_id,
                 delete_files=delete_media,
-                delay_seconds=300,
-                checks=6,
+                subscription=removal_row,
             )
 
-        with db() as conn:
-            # Keep a small tombstone so a stale YouTube API response cannot
-            # immediately recreate a channel the user explicitly deleted.
-            conn.execute(
-                """
-                INSERT INTO manually_deleted_channels (
-                    channel_id,
-                    title,
-                    deleted_at,
-                    absence_confirmed
-                )
-                VALUES (?, ?, ?, 0)
-                ON CONFLICT(channel_id) DO UPDATE SET
-                    title = excluded.title,
-                    deleted_at = excluded.deleted_at,
-                    absence_confirmed = 0
-                """,
-                (
-                    channel_id,
-                    title,
-                    now_iso(),
-                ),
-            )
+    if delete_media:
+        deleted_folder = delete_subscription_download_folder(title, output_template)
 
-            # "Delete Channel" now means delete it from the app, not merely
-            # retain an inactive row labelled "No longer subscribed".
-            conn.execute(
-                """
-                DELETE FROM subscriptions
-                WHERE channel_id = ?
-                """,
-                (channel_id,),
-            )
-
-        media_message = ""
-
-        if delete_media:
-            media_message = (
-                f" Downloaded folder removed: {deleted_folder}."
-                if deleted_folder
-                else (
-                    " Downloaded media removal was requested. "
-                    "No remaining channel folder was found by the app."
-                )
-            )
-
-        source_message = (
-            " Pinchflat source removal is still being reconciled in the background."
-            if not source_gone and source_id
-            else ""
-        )
-
-        message = (
-            f"{title} was removed from the app"
-            + (
-                " and unsubscribed from YouTube."
-                if youtube_unsubscribed
-                else "."
-            )
-            + source_message
-            + media_message
-        )
-
-        log_activity(
-            "youtube",
-            "Channel deleted and unsubscribed",
-            message,
-            "success",
+    if not source_gone and source_id:
+        schedule_unsubscribe_cleanup(
             channel_id,
+            title,
+            output_template,
+            source_id=source_id,
+            delete_files=delete_media,
+            delay_seconds=300,
+            checks=6,
         )
 
-        return jsonify(
-            {
-                "ok": True,
-                "message": message,
-                "deleted_from_app": True,
-                "youtube_unsubscribed": youtube_unsubscribed,
-                "pinchflat_source_removed": bool(source_gone),
-                "pinchflat_source_pending": bool(
-                    source_id and not source_gone
-                ),
-                "media_delete_requested": delete_media,
-                "media_folder_deleted": deleted_folder,
-                "channel_id": channel_id,
-            }
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO manually_deleted_channels (channel_id, title, deleted_at, absence_confirmed)
+            VALUES (?, ?, ?, 0)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                title = excluded.title,
+                deleted_at = excluded.deleted_at,
+                absence_confirmed = 0
+            """,
+            (channel_id, title, now_iso()),
         )
+        conn.execute("DELETE FROM subscriptions WHERE channel_id = ?", (channel_id,))
 
+    media_message = ""
+    if delete_media:
+        media_message = (
+            f" Downloaded folder removed: {deleted_folder}."
+            if deleted_folder
+            else " Downloaded media removal was requested. No remaining channel folder was found by the app."
+        )
+    source_message = (
+        " Pinchflat source removal is still being reconciled in the background."
+        if not source_gone and source_id else ""
+    )
+    message = (
+        f"{title} was removed from the app"
+        + (" and unsubscribed from YouTube." if youtube_unsubscribed else ".")
+        + source_message
+        + media_message
+    )
+    log_activity("youtube", "Channel deleted and unsubscribed", message, "success", channel_id)
+    return {
+        "ok": True,
+        "message": message,
+        "deleted_from_app": True,
+        "youtube_unsubscribed": youtube_unsubscribed,
+        "pinchflat_source_removed": bool(source_gone),
+        "pinchflat_source_pending": bool(source_id and not source_gone),
+        "media_delete_requested": bool(delete_media),
+        "media_folder_deleted": deleted_folder,
+        "channel_id": channel_id,
+    }
+
+
+@app.post("/api/subscriptions/<channel_id>/delete-unsubscribe")
+def delete_and_unsubscribe_subscription_api(channel_id):
+    payload = request.get_json(silent=True) or {}
+    delete_media = bool(payload.get("delete_media"))
+    try:
+        return jsonify(delete_and_unsubscribe_subscription(channel_id, delete_media))
     except Exception as exc:
-        log_activity(
-            "youtube",
-            "Channel delete failed",
-            (
-                f"{title}: {exc}"
-            ),
-            "error",
-            channel_id,
-        )
-
-        return jsonify(
-            {
-                "ok": False,
-                "error": str(exc),
-                "subscription": subscription_ajax_payload(channel_id),
-            }
-        ), 400
+        log_activity("youtube", "Channel delete failed", str(exc), "error", channel_id)
+        return jsonify({
+            "ok": False,
+            "error": str(exc),
+            "subscription": subscription_ajax_payload(channel_id),
+        }), 400
 
 
 @app.post("/subscriptions/<channel_id>/unsubscribe")
 def unsubscribe_from_youtube(channel_id):
     ajax = is_ajax_request()
-
-    with db() as conn:
-        row = conn.execute(
-            "SELECT * FROM subscriptions WHERE channel_id = ?",
-            (channel_id,),
-        ).fetchone()
-
-    if row is None:
-        if ajax:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": "Subscription was not found.",
-                }
-            ), 404
-
-        flash(
-            "Subscription was not found.",
-            "error",
-        )
-        return redirect(
-            url_for("index")
-            + "#subscriptions"
-        )
-
-    row_dict = dict(row)
-
     try:
-        youtube_unsubscribe(
-            channel_id,
-            row_value(
-                row,
-                "youtube_subscription_id",
-                None,
-            ),
-        )
-
-        with db() as conn:
-            conn.execute(
-                """
-                UPDATE subscriptions
-                SET active = 0,
-                    removed_at = ?,
-                    download_enabled = 0,
-                    source_authorised = 0,
-                    last_error = NULL
-                WHERE channel_id = ?
-                """,
-                (now_iso(), channel_id),
-            )
-
-        policy = unsubscribe_policy()
-        source_id = resolve_pinchflat_source_id(row_dict)
-
-        if policy == "disable" and source_id:
-            update_pinchflat_source_settings(
-                source_id,
-                cutoff=subscription_cutoff(row_dict),
-                download_enabled=False,
-                media_profile_id=subscription_media_profile_id(row_dict),
-            )
-
-        elif policy in {"remove", "remove_delete"}:
-            delete_files = policy == "remove_delete"
-            output_template = media_profile_settings(
-                subscription_media_profile_id(row_dict)
-            ).get(
-                "output_path_template",
-                EMBY_OUTPUT_PATH_TEMPLATE,
-            )
-
-            source_gone = not source_id
-
-            if source_id:
-                removal_row = dict(row_dict)
-                removal_row["pinchflat_source_id"] = str(source_id)
-                removal_row["pinchflat_added"] = 1
-
-                prepare_pinchflat_source_for_removal(removal_row)
-
-                source_gone = delete_pinchflat_source(
-                    source_id,
-                    delete_files=delete_files,
-                    subscription=removal_row,
-                )
-
-            if delete_files:
-                delete_subscription_download_folder(
-                    row_dict.get("title") or channel_id,
-                    output_template,
-                )
-
-            if source_gone:
-                clear_subscription_pinchflat_link(
-                    channel_id,
-                    source_id,
-                )
-            elif source_id:
-                with db() as conn:
-                    conn.execute(
-                        """
-                        UPDATE subscriptions
-                        SET pinchflat_added = 1,
-                            pinchflat_source_id = ?,
-                            download_enabled = 0,
-                            source_authorised = 0,
-                            last_error = ?
-                        WHERE channel_id = ?
-                        """,
-                        (
-                            str(source_id),
-                            "Pinchflat source removal is still in progress.",
-                            channel_id,
-                        ),
-                    )
-
-            schedule_unsubscribe_cleanup(
-                channel_id,
-                row_dict.get("title") or channel_id,
-                output_template,
-                source_id=source_id,
-                delete_files=delete_files,
-                delay_seconds=300,
-                checks=6,
-            )
-
-        log_activity(
-            "youtube",
-            "YouTube subscription removed",
-            f"Unsubscribed from {row_dict.get('title') or channel_id}.",
-            "success",
-            channel_id,
-        )
-        message = (
-            f"Unsubscribed from {row_dict.get('title') or channel_id} on YouTube."
-        )
-
-        if not ajax:
-            flash(
-                message,
-                "success",
-            )
-
+        result = unsubscribe_subscription(channel_id)
+        if ajax:
+            return jsonify(result)
+        flash(result["message"], "success")
     except Exception as exc:
         with db() as conn:
             conn.execute(
-                """
-                UPDATE subscriptions
-                SET last_error = ?
-                WHERE channel_id = ?
-                """,
+                "UPDATE subscriptions SET last_error = ? WHERE channel_id = ?",
                 (str(exc)[:1000], channel_id),
             )
-
-        log_activity(
-            "youtube",
-            "YouTube unsubscribe failed",
-            f"{row_dict.get('title') or channel_id}: {exc}",
-            "error",
-            channel_id,
-        )
-        message = (
-            f"Unsubscribe failed: {exc}"
-        )
-
+        log_activity("youtube", "YouTube unsubscribe failed", str(exc), "error", channel_id)
         if ajax:
-            return jsonify(
-                {
-                    "ok": False,
-                    "error": message,
-                    "subscription": (
-                        subscription_ajax_payload(
-                            channel_id
-                        )
-                    ),
-                }
-            ), 400
-
-        flash(
-            message,
-            "error",
-        )
-
-    if ajax:
-        return jsonify(
-            {
-                "ok": True,
-                "message": message,
-                "subscription": (
-                    subscription_ajax_payload(
-                        channel_id
-                    )
-                ),
-            }
-        )
-
-    return redirect(
-        url_for("index")
-        + "#subscriptions"
-    )
+            return jsonify({
+                "ok": False,
+                "error": f"Unsubscribe failed: {exc}",
+                "subscription": subscription_ajax_payload(channel_id),
+            }), 400
+        flash(f"Unsubscribe failed: {exc}", "error")
+    return redirect(url_for("index") + "#subscriptions")
 
 
 @app.post("/single-download/start")

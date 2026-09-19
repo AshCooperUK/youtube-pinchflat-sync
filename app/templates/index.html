@@ -1911,7 +1911,91 @@
         flex:1 1 auto;
       }
     }
-  </style>
+  
+    .channel-popup-link {
+      border:0; background:transparent; padding:0; margin:0; font:inherit; color:inherit; text-align:inherit; cursor:pointer;
+    }
+    .channel-avatar-popup-button { display:block; width:40px; height:40px; border-radius:50%; }
+    .pinchflat-channel-link.channel-popup-link { color:inherit; text-decoration:underline; text-decoration-color:transparent; }
+    .pinchflat-channel-link.channel-popup-link:hover { text-decoration-color:currentColor; }
+    .discover-main-link.channel-popup-link { border:0; background:transparent; color:inherit; cursor:pointer; }
+
+    /* v2.13 channel insights, latest download tile and richer media player */
+    .latest-download-summary-card { min-width:0; }
+    .latest-download-summary-button {
+      display:grid; grid-template-columns:112px minmax(0,1fr); gap:10px; align-items:center;
+      width:100%; margin-top:8px; padding:0; border:0; background:transparent; color:var(--text);
+      text-align:left; cursor:pointer; min-width:0;
+    }
+    .latest-download-summary-button:disabled { cursor:default; opacity:.72; }
+    .latest-download-summary-button img {
+      width:112px; aspect-ratio:16/9; object-fit:cover; border-radius:9px; border:1px solid var(--line); background:#08111f;
+    }
+    .latest-download-summary-copy { display:flex; flex-direction:column; gap:4px; min-width:0; }
+    .latest-download-summary-copy strong,
+    .latest-download-summary-copy span { overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-box-orient:vertical; }
+    .latest-download-summary-copy strong { -webkit-line-clamp:2; line-clamp:2; line-height:1.25; }
+    .latest-download-summary-copy span { -webkit-line-clamp:1; line-clamp:1; color:var(--muted); font-size:12px; }
+
+    #subscription-channel-dialog { width:min(1180px,96vw); max-height:94vh; }
+    #subscription-channel-dialog .modal-body { max-height:calc(94vh - 78px); overflow:auto; }
+    .subscription-channel-identity { min-width:0; }
+    .subscription-channel-heading-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .subscription-channel-byline { display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-top:5px; color:var(--muted); font-size:13px; }
+    .subscription-channel-links { margin-top:10px !important; }
+    .subscription-info-tile small { display:block; margin-top:4px; color:var(--muted); line-height:1.25; }
+    .channel-insight-panel,
+    .channel-video-panel,
+    .channel-about-panel {
+      margin-top:16px; padding:16px; border:1px solid var(--line); border-radius:14px; background:#0b1626;
+    }
+    .channel-panel-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; }
+    .channel-panel-head h3, .channel-about-panel h3 { margin:0 0 4px; }
+    .channel-chart-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .channel-chart-controls select { width:auto; min-width:130px; height:34px; padding:0 30px 0 10px; }
+    .channel-range-buttons, .channel-video-tabs { display:flex; gap:4px; padding:3px; border:1px solid var(--line); border-radius:10px; background:#08111f; }
+    .channel-range-buttons button, .channel-video-tabs button {
+      border:0; border-radius:7px; background:transparent; color:var(--muted); padding:7px 10px; cursor:pointer; font-weight:700;
+    }
+    .channel-range-buttons button.active, .channel-video-tabs button.active { background:#31527f; color:#fff; }
+    .channel-history-chart { display:block; width:100%; height:260px; margin-top:14px; border-radius:10px; background:rgba(255,255,255,.012); overflow:visible; }
+    .channel-history-summary { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; color:var(--muted); font-size:12px; }
+    .channel-history-summary strong { color:var(--text); }
+    .channel-video-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-top:14px; }
+    .channel-video-card { min-width:0; cursor:pointer; border:0; padding:0; background:transparent; color:var(--text); text-align:left; }
+    .channel-video-card img { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:10px; border:1px solid var(--line); background:#08111f; }
+    .channel-video-card strong { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; margin-top:7px; line-height:1.28; font-size:13px; }
+    .channel-video-card span { display:block; color:var(--muted); font-size:11px; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .channel-keyword-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+    .channel-keyword-chip { padding:5px 8px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:11px; background:#08111f; }
+
+    .latest-popup-main-column { min-width:0; }
+    .latest-video-detail-panel { margin-top:14px; padding:16px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+    .latest-video-stat-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; }
+    .latest-video-stat { padding:10px; border:1px solid var(--line); border-radius:10px; background:#0b1626; min-width:0; }
+    .latest-video-stat span, .latest-popup-channel-stat-grid span { display:block; color:var(--muted); font-size:11px; }
+    .latest-video-stat strong, .latest-popup-channel-stat-grid strong { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; }
+    .channel-summary-button { width:100%; border:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+    .channel-summary-button:hover .latest-popup-channel-name { text-decoration:underline; }
+    .latest-popup-channel-stat-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:16px; }
+    .latest-popup-channel-stat-grid > div { padding:9px 10px; border:1px solid var(--line); border-radius:9px; background:#0b1626; min-width:0; }
+    .latest-popup-tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+    .latest-popup-tag { padding:4px 7px; border-radius:999px; background:#0b1626; border:1px solid var(--line); color:var(--muted); font-size:11px; }
+    .latest-popup-channel-description { max-height:160px; overflow:auto; white-space:pre-wrap; line-height:1.45; }
+
+    @media(max-width:1100px) {
+      .channel-video-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .latest-video-stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
+    @media(max-width:760px) {
+      .latest-download-summary-button { grid-template-columns:88px minmax(0,1fr); }
+      .latest-download-summary-button img { width:88px; }
+      .channel-video-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .channel-panel-head { display:block; }
+      .channel-chart-controls { margin-top:10px; }
+      .latest-popup-channel-stat-grid { grid-template-columns:1fr 1fr; }
+    }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -2042,6 +2126,19 @@
       {% elif is_admin %}
         <div class="muted small">Docker power control unavailable</div>
       {% endif %}
+    </div>
+    {% endif %}
+
+    {% if page_view.show_summary_latest_download %}
+    <div class="card latest-download-summary-card" data-summary-tile="latest_download" id="latest-download-summary-card">
+      <div class="muted small">Latest download</div>
+      <button id="latest-download-summary-button" class="latest-download-summary-button" type="button" disabled>
+        <img id="latest-download-summary-thumb" src="{{ url_for('static', filename='channel-placeholder.svg') }}" alt="Latest downloaded video">
+        <span class="latest-download-summary-copy">
+          <strong id="latest-download-summary-title">No completed download yet</strong>
+          <span id="latest-download-summary-channel">Pinchflat</span>
+        </span>
+      </button>
     </div>
     {% endif %}
 
@@ -2321,7 +2418,7 @@
             <td class="channel-cell">
               <div class="channel-card">
                 <div class="channel-image-wrap">
-                  <a href="{{ sub['channel_url'] }}" target="_blank" title="{{ sub['title'] }}">
+                  <a href="{{ sub['channel_url'] }}" data-channel-popup-id="{{ sub['channel_id'] }}" onclick="return openChannelLink(event, this)" title="View {{ sub['title'] }} channel details">
                     <img
                       class="channel-avatar"
                       src="{{ sub['thumbnail_url'] or url_for('static', filename='channel-placeholder.svg') }}"
@@ -2343,7 +2440,7 @@
                     onclick="toggleChannelFavouriteFromButton(this)"
                   >{{ '♥' if sub['is_favourite'] else '♡' }}</button>
                 </div>
-                <a class="channel-title" title="{{ sub['title'] }}" href="{{ sub['channel_url'] }}" target="_blank">{{ sub["title"] }}</a>
+                <a class="channel-title" title="View {{ sub['title'] }} channel details" href="{{ sub['channel_url'] }}" data-channel-popup-id="{{ sub['channel_id'] }}" onclick="return openChannelLink(event, this)">{{ sub["title"] }}</a>
                 {% if not sub["active"] %}<div class="small bad">No longer subscribed</div>{% endif %}
               </div>
             </td>
@@ -2508,13 +2605,27 @@
             <select id="bulk-action" name="bulk_action" form="bulk-form" onchange="toggleBulkOptions()" required>
               <option value="">Choose a bulk action…</option>
               <option id="bulk-save-changes-option" value="save_changes" hidden>Save selected changes</option>
-              <option value="enable">Enable downloads</option>
-              <option value="disable">Disable downloads</option>
-              <option value="range">Set download range</option>
-              <option value="profile">Set Media Profile</option>
-              <option value="favourite">Make favourite</option>
-              <option value="unfavourite">Remove favourite</option>
-              <option value="retry">Retry errors</option>
+              <optgroup label="Subscription settings">
+                <option value="enable">Enable downloads</option>
+                <option value="disable">Disable downloads</option>
+                <option value="range">Set download range</option>
+                <option value="profile">Set Media Profile</option>
+                <option value="favourite">Make favourite</option>
+                <option value="unfavourite">Remove favourite</option>
+                <option value="retry">Retry errors</option>
+              </optgroup>
+              <optgroup label="Pinchflat source actions">
+                <option value="download_pending">Download Pending</option>
+                <option value="redownload_existing">Re-Download Existing</option>
+                <option value="force_scan">Force Scan</option>
+                <option value="refresh_metadata">Refresh Media</option>
+                <option value="sync_files">Sync Files on Disk</option>
+              </optgroup>
+              <optgroup label="YouTube and channel removal">
+                <option value="unsubscribe">Unsubscribe</option>
+                <option value="delete_unsubscribe">Unsubscribe &amp; Delete Channel</option>
+                <option value="delete_unsubscribe_media">Unsubscribe, Delete Channel &amp; Remove Media</option>
+              </optgroup>
             </select>
           </label>
 
@@ -2556,10 +2667,10 @@
 </dialog>
 
 <dialog id="subscription-channel-dialog">
-  <div class="modal-head">
+  <div class="modal-head channel-modal-head">
     <div>
       <h2 style="margin:0">Channel</h2>
-      <div class="muted small">YouTube subscription and Pinchflat source management.</div>
+      <div class="muted small">Live YouTube details, local history and Pinchflat controls.</div>
     </div>
     <button class="modal-close" type="button" onclick="closeSubscriptionChannelActions()" aria-label="Close">×</button>
   </div>
@@ -2568,47 +2679,121 @@
     <div id="subscription-channel-content" class="hidden">
       <div class="subscription-channel-hero">
         <img id="subscription-channel-avatar" src="{{ url_for('static', filename='channel-placeholder.svg') }}" alt="YouTube channel">
-        <div style="min-width:0">
-          <h2 id="subscription-channel-title" class="subscription-channel-title">YouTube channel</h2>
-          <div class="actions" style="margin-top:8px">
+        <div class="subscription-channel-identity">
+          <div class="subscription-channel-heading-row">
+            <div style="min-width:0">
+              <h2 id="subscription-channel-title" class="subscription-channel-title">YouTube channel</h2>
+              <div class="subscription-channel-byline">
+                <span id="subscription-channel-handle">@channel</span>
+                <span aria-hidden="true">•</span>
+                <span id="subscription-channel-age">—</span>
+              </div>
+            </div>
+          </div>
+          <div class="actions subscription-channel-links">
             <a id="subscription-channel-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank" rel="noopener">Open YouTube channel</a>
             <a id="subscription-channel-pinchflat-link" class="btn ghost hidden" href="#" target="_blank" rel="noopener">Open Pinchflat source</a>
           </div>
-          <div id="subscription-channel-description" class="subscription-channel-description"></div>
         </div>
       </div>
 
-      <div class="subscription-info-grid">
+      <div class="subscription-info-grid channel-public-stats">
+        <div class="subscription-info-tile"><span class="muted small">YouTube subscribers</span><strong id="subscription-channel-subscribers">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube views</span><strong id="subscription-channel-views">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube videos</span><strong id="subscription-channel-videos">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Average views / video</span><strong id="subscription-channel-average-views">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube country</span><strong id="subscription-channel-country">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube category</span><strong id="subscription-channel-category">—</strong><small>Based on recent uploads/topics</small></div>
+        <div class="subscription-info-tile"><span class="muted small">Channel created</span><strong id="subscription-channel-created">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Channel age</span><strong id="subscription-channel-age-tile">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Latest upload</span><strong id="subscription-channel-latest-upload">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Recent average views</span><strong id="subscription-channel-recent-views">—</strong><small>Average of the latest five uploads</small></div>
+        <div class="subscription-info-tile"><span class="muted small">Recent average likes</span><strong id="subscription-channel-recent-likes">—</strong><small>Average of the latest five uploads</small></div>
+        <div class="subscription-info-tile"><span class="muted small">Recent average comments</span><strong id="subscription-channel-recent-comments">—</strong><small>Average of the latest five uploads</small></div>
+        <div class="subscription-info-tile"><span class="muted small">Views per subscriber</span><strong id="subscription-channel-views-per-subscriber">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Made for kids</span><strong id="subscription-channel-made-for-kids">—</strong></div>
+      </div>
+
+      <div id="subscription-channel-local-stats" class="subscription-info-grid">
         <div class="subscription-info-tile"><span class="muted small">Status</span><strong id="subscription-channel-status">—</strong></div>
         <div class="subscription-info-tile"><span class="muted small">Media Profile</span><strong id="subscription-channel-profile">—</strong></div>
         <div class="subscription-info-tile"><span class="muted small">Download range</span><strong id="subscription-channel-range">—</strong></div>
         <div class="subscription-info-tile"><span class="muted small">Disk usage</span><strong id="subscription-channel-storage">—</strong></div>
-        <div class="subscription-info-tile"><span class="muted small">YouTube subscribers</span><strong id="subscription-channel-subscribers">—</strong></div>
-        <div class="subscription-info-tile"><span class="muted small">YouTube videos</span><strong id="subscription-channel-videos">—</strong></div>
-        <div class="subscription-info-tile"><span class="muted small">YouTube views</span><strong id="subscription-channel-views">—</strong></div>
         <div class="subscription-info-tile"><span class="muted small">Pinchflat source</span><strong id="subscription-channel-source">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">YouTube topics</span><strong id="subscription-channel-topics">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Default language</span><strong id="subscription-channel-language">—</strong></div>
+        <div class="subscription-info-tile"><span class="muted small">Privacy</span><strong id="subscription-channel-privacy">—</strong></div>
+      </div>
+
+      <div class="channel-insight-panel">
+        <div class="channel-panel-head">
+          <div>
+            <h3>Channel growth history</h3>
+            <div class="muted small">Daily snapshots collected by Pinchflat Sync from v2.13.0 onwards.</div>
+          </div>
+          <div class="channel-chart-controls">
+            <select id="channel-chart-metric" onchange="renderChannelHistoryChart()">
+              <option value="views">Views</option>
+              <option value="subscribers">Subscribers</option>
+              <option value="videos">Videos</option>
+            </select>
+            <div class="channel-range-buttons" id="channel-history-range-buttons">
+              <button type="button" data-days="7" onclick="setChannelHistoryRange(7,this)">7D</button>
+              <button type="button" class="active" data-days="28" onclick="setChannelHistoryRange(28,this)">28D</button>
+              <button type="button" data-days="90" onclick="setChannelHistoryRange(90,this)">3M</button>
+              <button type="button" data-days="365" onclick="setChannelHistoryRange(365,this)">1Y</button>
+              <button type="button" data-days="0" onclick="setChannelHistoryRange(0,this)">Max</button>
+            </div>
+          </div>
+        </div>
+        <div id="channel-history-empty" class="muted small hidden">More points will appear as daily snapshots are collected.</div>
+        <svg id="channel-history-chart" class="channel-history-chart" viewBox="0 0 900 260" preserveAspectRatio="none" aria-label="Channel history chart"></svg>
+        <div id="channel-history-summary" class="channel-history-summary"></div>
+      </div>
+
+      <div class="channel-video-panel">
+        <div class="channel-panel-head">
+          <div>
+            <h3>Channel videos</h3>
+            <div class="muted small">Popular videos use YouTube search and are cached to reduce API use.</div>
+          </div>
+          <div class="channel-video-tabs">
+            <button id="channel-videos-popular-tab" class="active" type="button" onclick="showChannelVideoTab('popular')">Popular</button>
+            <button id="channel-videos-latest-tab" type="button" onclick="showChannelVideoTab('latest')">Latest</button>
+          </div>
+        </div>
+        <div id="channel-video-grid" class="channel-video-grid"></div>
+        <div id="channel-video-note" class="muted small"></div>
+      </div>
+
+      <div class="channel-about-panel">
+        <h3>About</h3>
+        <div id="subscription-channel-description" class="subscription-channel-description"></div>
+        <div id="subscription-channel-keywords" class="channel-keyword-list"></div>
       </div>
 
       {% if is_admin %}
-      <div class="profile-section" style="margin-top:16px">
-        <h3>Pinchflat source actions</h3>
-        <div class="subscription-action-grid">
-          <button class="btn secondary" type="button" data-source-action="download_pending" onclick="runSubscriptionSourceAction('download_pending')">Download Pending</button>
-          <button class="btn secondary" type="button" data-source-action="redownload_existing" onclick="runSubscriptionSourceAction('redownload_existing')">Re-Download Existing</button>
-          <button class="btn secondary" type="button" data-source-action="force_scan" onclick="runSubscriptionSourceAction('force_scan')">Force Scan</button>
-          <button class="btn secondary" type="button" data-source-action="refresh_metadata" onclick="runSubscriptionSourceAction('refresh_metadata')">Refresh Metadata</button>
-          <button class="btn secondary" type="button" data-source-action="sync_files" onclick="runSubscriptionSourceAction('sync_files')">Sync Files on Disk</button>
-          <button id="subscription-channel-unsubscribe" class="btn secondary" type="button" onclick="unsubscribeCurrentChannel()" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
+      <div id="subscription-channel-management" class="channel-subscription-management">
+        <div class="profile-section" style="margin-top:16px">
+          <h3>Pinchflat source actions</h3>
+          <div class="subscription-action-grid">
+            <button class="btn secondary" type="button" data-source-action="download_pending" onclick="runSubscriptionSourceAction('download_pending')">Download Pending</button>
+            <button class="btn secondary" type="button" data-source-action="redownload_existing" onclick="runSubscriptionSourceAction('redownload_existing')">Re-Download Existing</button>
+            <button class="btn secondary" type="button" data-source-action="force_scan" onclick="runSubscriptionSourceAction('force_scan')">Force Scan</button>
+            <button class="btn secondary" type="button" data-source-action="refresh_metadata" onclick="runSubscriptionSourceAction('refresh_metadata')">Refresh Media</button>
+            <button class="btn secondary" type="button" data-source-action="sync_files" onclick="runSubscriptionSourceAction('sync_files')">Sync Files on Disk</button>
+            <button id="subscription-channel-unsubscribe" class="btn secondary" type="button" onclick="unsubscribeCurrentChannel()" {% if not google_write_ready %}disabled title="Reconnect Google with write access first"{% endif %}>Unsubscribe</button>
+          </div>
+          <div id="subscription-channel-action-status" class="subscription-action-status muted small"></div>
         </div>
-        <div id="subscription-channel-action-status" class="subscription-action-status muted small"></div>
-      </div>
 
-      <div class="subscription-danger-zone">
-        <h3 style="margin-top:0">Remove channel</h3>
-        <p class="muted small">These actions unsubscribe on YouTube and remove the Pinchflat source. Downloaded media is only deleted by the second option.</p>
-        <div class="subscription-danger-actions">
-          <button class="btn danger" type="button" onclick="confirmRemoveCurrentChannel(false)">Delete Channel &amp; Unsubscribe</button>
-          <button class="btn danger" type="button" onclick="confirmRemoveCurrentChannel(true)">Delete Channel &amp; Unsubscribe &amp; Remove Media</button>
+        <div class="subscription-danger-zone">
+          <h3 style="margin-top:0">Remove channel</h3>
+          <p class="muted small">These actions unsubscribe on YouTube and remove the Pinchflat source. Downloaded media is only deleted by the second option.</p>
+          <div class="subscription-danger-actions">
+            <button class="btn danger" type="button" onclick="confirmRemoveCurrentChannel(false)">Unsubscribe &amp; Delete Channel</button>
+            <button class="btn danger" type="button" onclick="confirmRemoveCurrentChannel(true)">Unsubscribe, Delete Channel &amp; Remove Media</button>
+          </div>
         </div>
       </div>
       {% endif %}
@@ -2631,41 +2816,78 @@
 </dialog>
 
 <dialog id="latest-video-dialog">
-  <div class="modal-head">
+  <div class="modal-head latest-media-head">
     <div style="min-width:0">
-      <h2 id="latest-popup-header-channel" class="latest-popup-header-channel">YouTube channel</h2>
-      <div id="latest-popup-header-video" class="latest-popup-header-video">YouTube video</div>
+      <h2 id="latest-popup-header-video" class="latest-popup-header-channel">YouTube video</h2>
+      <div id="latest-popup-header-channel" class="latest-popup-header-video">YouTube channel</div>
     </div>
     <button class="modal-close" onclick="closeLatestVideo()" aria-label="Close">×</button>
   </div>
 
   <div class="modal-body">
     <div class="latest-popup-shell">
-      <div class="latest-popup-player">
-        <iframe
-          id="latest-video-player"
-          src=""
-          title="YouTube video player"
-          allow="autoplay; encrypted-media; picture-in-picture"
-          referrerpolicy="strict-origin-when-cross-origin"
-          allowfullscreen
-        ></iframe>
+      <div class="latest-popup-main-column">
+        <div class="latest-popup-player">
+          <iframe
+            id="latest-video-player"
+            src=""
+            title="YouTube video player"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            referrerpolicy="strict-origin-when-cross-origin"
+            allowfullscreen
+          ></iframe>
+        </div>
+
+        <div class="latest-video-detail-panel">
+          <div class="latest-video-stat-grid">
+            <div class="latest-video-stat"><span>Views</span><strong id="latest-popup-views">—</strong></div>
+            <div class="latest-video-stat"><span>Likes</span><strong id="latest-popup-likes">—</strong></div>
+            <div class="latest-video-stat"><span>Comments</span><strong id="latest-popup-comments">—</strong></div>
+            <div class="latest-video-stat"><span>Published</span><strong id="latest-popup-published">—</strong></div>
+            <div class="latest-video-stat"><span>Duration</span><strong id="latest-popup-duration">—</strong></div>
+            <div class="latest-video-stat"><span>Category</span><strong id="latest-popup-category">—</strong></div>
+            <div class="latest-video-stat"><span>Quality</span><strong id="latest-popup-quality">—</strong></div>
+            <div class="latest-video-stat"><span>Captions</span><strong id="latest-popup-captions">—</strong></div>
+            <div class="latest-video-stat"><span>Language</span><strong id="latest-popup-language">—</strong></div>
+            <div class="latest-video-stat"><span>Audio language</span><strong id="latest-popup-audio-language">—</strong></div>
+            <div class="latest-video-stat"><span>Privacy</span><strong id="latest-popup-privacy">—</strong></div>
+            <div class="latest-video-stat"><span>Licensed content</span><strong id="latest-popup-licensed">—</strong></div>
+            <div class="latest-video-stat"><span>Embeddable</span><strong id="latest-popup-embeddable">—</strong></div>
+            <div class="latest-video-stat"><span>Video format</span><strong id="latest-popup-format">—</strong></div>
+          </div>
+
+          <div class="latest-popup-section-label">Description</div>
+          <div id="latest-popup-description" class="latest-popup-description"></div>
+          <div id="latest-popup-tags" class="latest-popup-tags"></div>
+        </div>
       </div>
 
       <div class="latest-popup-info">
-        <div class="latest-popup-channel-summary">
-          <a id="latest-popup-channel-avatar-link" href="https://www.youtube.com" target="_blank" rel="noopener">
-            <img
-              id="latest-popup-channel-avatar"
-              class="latest-popup-channel-avatar"
-              src="{{ url_for('static', filename='channel-placeholder.svg') }}"
-              alt="YouTube channel"
-            >
-          </a>
-          <div style="min-width:0">
-            <a id="latest-popup-channel" class="latest-popup-channel-name" href="https://www.youtube.com" target="_blank" rel="noopener">YouTube channel</a>
-            <div id="latest-popup-stats" class="latest-popup-stats"></div>
-          </div>
+        <button id="latest-popup-channel-summary-button" class="latest-popup-channel-summary channel-summary-button" type="button">
+          <img
+            id="latest-popup-channel-avatar"
+            class="latest-popup-channel-avatar"
+            src="{{ url_for('static', filename='channel-placeholder.svg') }}"
+            alt="YouTube channel"
+          >
+          <span style="min-width:0;text-align:left">
+            <strong id="latest-popup-channel" class="latest-popup-channel-name">YouTube channel</strong>
+            <span id="latest-popup-channel-handle" class="latest-popup-stats"></span>
+            <span id="latest-popup-stats" class="latest-popup-stats"></span>
+          </span>
+        </button>
+
+        <div id="latest-popup-channel-stats" class="latest-popup-channel-stat-grid">
+          <div><span>Subscribers</span><strong id="latest-popup-channel-subscribers">—</strong></div>
+          <div><span>Total views</span><strong id="latest-popup-channel-views">—</strong></div>
+          <div><span>Videos</span><strong id="latest-popup-channel-videos">—</strong></div>
+          <div><span>Country</span><strong id="latest-popup-channel-country">—</strong></div>
+          <div><span>Category</span><strong id="latest-popup-channel-category">—</strong></div>
+          <div><span>Age</span><strong id="latest-popup-channel-age">—</strong></div>
+          <div><span>Created</span><strong id="latest-popup-channel-created">—</strong></div>
+          <div><span>Recent avg. views</span><strong id="latest-popup-channel-recent-views">—</strong></div>
+          <div><span>Views / subscriber</span><strong id="latest-popup-channel-vps">—</strong></div>
+          <div><span>Language</span><strong id="latest-popup-channel-language">—</strong></div>
         </div>
 
         <div class="latest-popup-action-grid">
@@ -2677,8 +2899,8 @@
           <a id="latest-popup-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank" rel="noopener">Open on YouTube</a>
         </div>
 
-        <div class="latest-popup-section-label">Description</div>
-        <div id="latest-popup-description" class="latest-popup-description"></div>
+        <div class="latest-popup-section-label">Channel description</div>
+        <div id="latest-popup-channel-description" class="latest-popup-channel-description muted small"></div>
       </div>
     </div>
   </div>
@@ -3061,6 +3283,7 @@
 
             <label><input type="checkbox" name="page_show_summary_google" value="1" {% if page_view.show_summary_google %}checked{% endif %}> Google</label>
             <label><input type="checkbox" name="page_show_summary_pinchflat" value="1" {% if page_view.show_summary_pinchflat %}checked{% endif %}> Pinchflat</label>
+            <label><input type="checkbox" name="page_show_summary_latest_download" value="1" {% if page_view.show_summary_latest_download %}checked{% endif %}> Latest download</label>
             <label><input type="checkbox" name="page_show_summary_subscriptions" value="1" {% if page_view.show_summary_subscriptions %}checked{% endif %}> Subscriptions</label>
             <label><input type="checkbox" name="page_show_summary_downloads" value="1" {% if page_view.show_summary_downloads %}checked{% endif %}> Downloads</label>
             <label><input type="checkbox" name="page_show_summary_errors" value="1" {% if page_view.show_summary_errors %}checked{% endif %}> Errors</label>
@@ -3146,6 +3369,7 @@
                   <strong>
                     {% if item == "google" %}Google
                     {% elif item == "pinchflat" %}Pinchflat
+                    {% elif item == "latest_download" %}Latest download
                     {% elif item == "subscriptions" %}Subscriptions
                     {% elif item == "downloads" %}Downloads
                     {% elif item == "errors" %}Errors
@@ -4055,6 +4279,9 @@ const subscriptionChannelDialog = document.getElementById("subscription-channel-
 const subscriptionConfirmDialog = document.getElementById("subscription-confirm-dialog");
 let currentSubscriptionChannelId = "";
 let currentSubscriptionChannelData = null;
+let channelHistoryRangeDays = 28;
+let channelVideoTab = "popular";
+let latestDownloadSummaryItem = null;
 let subscriptionConfirmAction = null;
 const singleDownloadDialog = document.getElementById("single-download-dialog");
 const pinchflatQueueDialog = document.getElementById("pinchflat-queue-dialog");
@@ -4223,7 +4450,7 @@ async function fetchCompleteVideoMetadata(item) {
     item.video_id
     || item.youtube_id;
 
-  if (item.metadata_complete) {
+  if (item.metadata_rich) {
     return {
       ...item,
       video_id: videoId
@@ -4364,15 +4591,18 @@ function pinchflatChannelElement(item) {
     || item?.channel_title
     || "Pinchflat";
 
-  if (item?.channel_url) {
-    const link = document.createElement("a");
-    link.className = "pinchflat-channel-link";
-    link.href = item.channel_url;
-    link.target = "_blank";
-    link.rel = "noopener";
-    link.textContent = label;
-    link.title = `Open ${label} on YouTube`;
-    return link;
+  if (item?.channel_id) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "pinchflat-channel-link channel-popup-link";
+    button.textContent = label;
+    button.title = `View ${label} channel details`;
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openChannelDetails(item.channel_id);
+    });
+    return button;
   }
 
   const span = document.createElement("span");
@@ -4553,6 +4783,34 @@ function renderPinchflatLastDownload(data) {
 }
 
 
+function renderLatestDownloadSummary(item) {
+  latestDownloadSummaryItem = item || null;
+
+  const button = document.getElementById("latest-download-summary-button");
+  const thumb = document.getElementById("latest-download-summary-thumb");
+  const title = document.getElementById("latest-download-summary-title");
+  const channel = document.getElementById("latest-download-summary-channel");
+  if (!button || !thumb || !title || !channel) return;
+
+  if (!item) {
+    button.disabled = true;
+    button.onclick = null;
+    thumb.src = "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    title.textContent = "No completed download yet";
+    channel.textContent = "Pinchflat";
+    return;
+  }
+
+  thumb.src = item.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+  thumb.onerror = () => { thumb.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
+  title.textContent = item.title || "YouTube video";
+  title.title = item.title || "YouTube video";
+  channel.textContent = item.channel || item.channel_title || "Pinchflat";
+  channel.title = channel.textContent;
+  button.disabled = !item.youtube_id;
+  button.onclick = item.youtube_id ? () => openPinchflatMedia(item) : null;
+}
+
 function renderPinchflatQueue(data) {
   const waitingTarget = document.getElementById("queue-summary-waiting");
   const activeTarget = document.getElementById("queue-summary-active");
@@ -4690,6 +4948,7 @@ async function loadPinchflatDownloadOverview(force=false) {
 
     renderPinchflatActiveDownloads(data);
     renderPinchflatLastDownload(data);
+    renderLatestDownloadSummary(data.last_downloaded || null);
 
     const newLastDownloadedId =
       data?.last_downloaded?.youtube_id
@@ -5339,70 +5598,143 @@ function updateLatestPopupButtons() {
   }
 }
 
-function openLatestVideo(item) {
-  latestPopupVideo = item;
+function renderLatestVideoDetails(item) {
+  if (!item) return;
 
-  const player = document.getElementById("latest-video-player");
-  const popupShell = document.querySelector("#latest-video-dialog .latest-popup-shell");
   const headerChannel = document.getElementById("latest-popup-header-channel");
   const headerVideo = document.getElementById("latest-popup-header-video");
   const channel = document.getElementById("latest-popup-channel");
   const channelAvatar = document.getElementById("latest-popup-channel-avatar");
-  const channelAvatarLink = document.getElementById("latest-popup-channel-avatar-link");
   const stats = document.getElementById("latest-popup-stats");
   const description = document.getElementById("latest-popup-description");
   const youtubeLink = document.getElementById("latest-popup-youtube-link");
+  const channelSummaryButton = document.getElementById("latest-popup-channel-summary-button");
 
-  if (popupShell) {
-    popupShell.classList.toggle(
-      "short-mode",
-      !!item.is_short
-    );
+  headerVideo.textContent = item.title || "YouTube video";
+  headerVideo.title = item.title || "";
+  headerChannel.textContent = item.channel_title || "YouTube channel";
+  headerChannel.title = item.channel_title || "";
+  channel.textContent = item.channel_title || "YouTube channel";
+
+  channelAvatar.src = item.channel_thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+  channelAvatar.alt = `${item.channel_title || "YouTube"} channel`;
+  channelAvatar.onerror = () => { channelAvatar.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
+
+  if (channelSummaryButton) {
+    channelSummaryButton.disabled = !item.channel_id;
+    channelSummaryButton.onclick = item.channel_id ? () => openChannelDetails(item.channel_id) : null;
   }
+
+  const bits = [formatLatestViewCount(item.view_count), formatLatestAge(item.published_at)].filter(Boolean);
+  stats.textContent = bits.join(" · ");
+  description.textContent = item.description || "No description provided for this video.";
+  youtubeLink.href = (item.is_short ? item.shorts_url : item.video_url) || item.video_url || "https://www.youtube.com";
+
+  const values = {
+    "latest-popup-views": item.view_count ? formatCompactNumber(item.view_count) : "—",
+    "latest-popup-likes": item.like_count ? formatCompactNumber(item.like_count) : "—",
+    "latest-popup-comments": item.comment_count ? formatCompactNumber(item.comment_count) : "—",
+    "latest-popup-published": formatChannelDate(item.published_at),
+    "latest-popup-duration": item.duration || "—",
+    "latest-popup-category": item.category || "—",
+    "latest-popup-quality": item.definition ? String(item.definition).toUpperCase() : "—",
+    "latest-popup-captions": item.caption === "true" ? "Available" : item.caption === "false" ? "None" : "—",
+    "latest-popup-language": item.default_language || "—",
+    "latest-popup-audio-language": item.default_audio_language || "—",
+    "latest-popup-privacy": item.privacy_status || "—",
+    "latest-popup-licensed": item.licensed_content === true ? "Yes" : item.licensed_content === false ? "No" : "—",
+    "latest-popup-embeddable": item.embeddable === true ? "Yes" : item.embeddable === false ? "No" : "—",
+    "latest-popup-format": [item.dimension ? String(item.dimension).toUpperCase() : "", item.projection || ""].filter(Boolean).join(" · ") || "—"
+  };
+  Object.entries(values).forEach(([id,value]) => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = value;
+  });
+
+  const tags = document.getElementById("latest-popup-tags");
+  if (tags) {
+    tags.innerHTML = "";
+    [...(item.topics || []), ...(item.tags || []).slice(0,12)].filter(Boolean).slice(0,16).forEach(value => {
+      const chip = document.createElement("span");
+      chip.className = "latest-popup-tag";
+      chip.textContent = value;
+      tags.appendChild(chip);
+    });
+  }
+
+  updateLatestPopupButtons();
+}
+
+async function loadLatestPopupChannelDetails(channelId, expectedVideoId) {
+  if (!channelId) return;
+  try {
+    const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/details?videos=recent`, {headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    if (!response.ok || !data.ok || !data.youtube) return;
+    if (!latestPopupVideo || latestPopupVideo.video_id !== expectedVideoId) return;
+
+    const yt = data.youtube;
+    latestPopupVideo.channel_title = yt.title || latestPopupVideo.channel_title;
+    latestPopupVideo.channel_thumbnail_url = yt.thumbnail_url || latestPopupVideo.channel_thumbnail_url;
+
+    document.getElementById("latest-popup-channel").textContent = yt.title || latestPopupVideo.channel_title || "YouTube channel";
+    document.getElementById("latest-popup-channel-handle").textContent = yt.handle || yt.custom_url || "";
+    document.getElementById("latest-popup-channel-description").textContent = yt.description || "No channel description was returned.";
+
+    const avatar = document.getElementById("latest-popup-channel-avatar");
+    if (avatar && yt.thumbnail_url) avatar.src = yt.thumbnail_url;
+
+    const fields = {
+      "latest-popup-channel-subscribers": yt.hidden_subscriber_count ? "Hidden" : formatCompactNumber(yt.subscriber_count),
+      "latest-popup-channel-views": yt.view_count ? formatCompactNumber(yt.view_count) : "—",
+      "latest-popup-channel-videos": yt.video_count ? formatCompactNumber(yt.video_count) : "—",
+      "latest-popup-channel-country": formatCountryName(yt.country),
+      "latest-popup-channel-category": yt.category || (yt.topics || [])[0] || "—",
+      "latest-popup-channel-age": yt.age?.label || "—",
+      "latest-popup-channel-created": formatChannelDate(yt.published_at),
+      "latest-popup-channel-recent-views": yt.recent_average_views ? formatCompactNumber(yt.recent_average_views) : "—",
+      "latest-popup-channel-vps": yt.views_per_subscriber ? `${new Intl.NumberFormat("en-GB", {maximumFractionDigits:1}).format(yt.views_per_subscriber)}×` : "—",
+      "latest-popup-channel-language": yt.default_language || "—"
+    };
+    Object.entries(fields).forEach(([id,value]) => {
+      const target = document.getElementById(id);
+      if (target) target.textContent = value;
+    });
+  } catch (_) {}
+}
+
+function openLatestVideo(item) {
+  const videoId = item?.video_id || item?.youtube_id || "";
+  if (!videoId) return;
+
+  latestPopupVideo = {...item, video_id:videoId};
+  const player = document.getElementById("latest-video-player");
+  const popupShell = document.querySelector("#latest-video-dialog .latest-popup-shell");
+
+  if (popupShell) popupShell.classList.toggle("short-mode", !!item.is_short);
 
   const origin = encodeURIComponent(window.location.origin);
   const widgetReferrer = encodeURIComponent(window.location.href);
-  player.src =
-    `https://www.youtube-nocookie.com/embed/${encodeURIComponent(item.video_id)}` +
-    `?autoplay=1&rel=0&playsinline=1&origin=${origin}` +
-    `&widget_referrer=${widgetReferrer}`;
+  player.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&rel=0&playsinline=1&origin=${origin}&widget_referrer=${widgetReferrer}`;
 
-  headerChannel.textContent = item.channel_title || "YouTube channel";
-  headerChannel.title = item.channel_title || "";
-  headerVideo.textContent = item.title || "YouTube video";
-  headerVideo.title = item.title || "";
+  renderLatestVideoDetails(latestPopupVideo);
+  ["latest-popup-channel-subscribers","latest-popup-channel-views","latest-popup-channel-videos","latest-popup-channel-country","latest-popup-channel-category","latest-popup-channel-age","latest-popup-channel-created","latest-popup-channel-recent-views","latest-popup-channel-vps","latest-popup-channel-language"].forEach(id => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = "—";
+  });
+  const channelDescription = document.getElementById("latest-popup-channel-description");
+  if (channelDescription) channelDescription.textContent = "Loading channel details…";
 
-  channel.textContent = item.channel_title || "YouTube channel";
-  channel.href = item.channel_url || "https://www.youtube.com";
-  channelAvatarLink.href = item.channel_url || "https://www.youtube.com";
-  channelAvatar.src =
-    item.channel_thumbnail_url ||
-    "{{ url_for('static', filename='channel-placeholder.svg') }}";
-  channelAvatar.alt = `${item.channel_title || "YouTube"} channel`;
-  channelAvatar.onerror = () => {
-    channelAvatar.src =
-      "{{ url_for('static', filename='channel-placeholder.svg') }}";
-  };
+  if (!latestVideoDialog.open) latestVideoDialog.showModal();
 
-  const bits = [
-    formatLatestViewCount(item.view_count),
-    formatLatestAge(item.published_at)
-  ].filter(Boolean);
-  stats.textContent = bits.join(" · ");
+  fetchCompleteVideoMetadata(latestPopupVideo).then(enriched => {
+    if (!latestPopupVideo || latestPopupVideo.video_id !== videoId) return;
+    latestPopupVideo = {...latestPopupVideo, ...enriched, video_id:videoId};
+    renderLatestVideoDetails(latestPopupVideo);
+    loadLatestPopupChannelDetails(latestPopupVideo.channel_id, videoId);
+  });
 
-  description.textContent =
-    item.description || "No description provided for this video.";
-
-  youtubeLink.href =
-    (item.is_short ? item.shorts_url : item.video_url)
-    || item.video_url
-    || "https://www.youtube.com";
-
-  updateLatestPopupButtons();
-
-  if (!latestVideoDialog.open) {
-    latestVideoDialog.showModal();
-  }
+  if (latestPopupVideo.channel_id) loadLatestPopupChannelDetails(latestPopupVideo.channel_id, videoId);
 }
 
 function closeLatestVideo() {
@@ -5686,11 +6018,15 @@ function renderLatestSubscriptionVideos(items, shorts=latestSubscriptionShorts) 
     const meta = document.createElement("div");
     meta.className = "latest-video-meta";
 
-    const avatarLink = document.createElement("a");
-    avatarLink.href = item.channel_url;
-    avatarLink.target = "_blank";
-    avatarLink.rel = "noopener";
-    avatarLink.title = `Open ${item.channel_title} on YouTube`;
+    const avatarLink = document.createElement("button");
+    avatarLink.type = "button";
+    avatarLink.className = "channel-popup-link channel-avatar-popup-button";
+    avatarLink.title = `View ${item.channel_title} channel details`;
+    avatarLink.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openChannelDetails(item.channel_id || "");
+    });
 
     const avatar = document.createElement("img");
     avatar.className = "latest-channel-avatar";
@@ -5714,13 +6050,16 @@ function renderLatestSubscriptionVideos(items, shorts=latestSubscriptionShorts) 
     title.style.width = "100%";
     title.addEventListener("click", () => openLatestVideo(item));
 
-    const channel = document.createElement("a");
-    channel.className = "latest-video-channel";
-    channel.href = item.channel_url;
-    channel.target = "_blank";
-    channel.rel = "noopener";
+    const channel = document.createElement("button");
+    channel.type = "button";
+    channel.className = "latest-video-channel channel-popup-link";
     channel.textContent = item.channel_title || "YouTube channel";
-    channel.title = item.channel_title || "";
+    channel.title = `View ${item.channel_title || "YouTube channel"} channel details`;
+    channel.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openChannelDetails(item.channel_id || "");
+    });
 
     const stats = document.createElement("div");
     stats.className = "latest-video-stats";
@@ -6668,12 +7007,14 @@ function renderTop100Tiles(items) {
     heart.textContent = item.is_favourite_channel ? "♥" : "♡";
     heart.onclick = () => toggleChannelFavourite(heart, item.channel_id, item.channel_title, item.channel_url, item.channel_avatar_url || "");
 
-    const link = document.createElement("a");
-    link.className = "discover-main-link";
-    link.href = item.channel_url;
-    link.target = "_blank";
-    link.rel = "noopener";
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "discover-main-link channel-popup-link";
     link.title = `#${item.rank} ${item.channel_title}`;
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      openChannelDetails(item.channel_id || "");
+    });
 
     const img = document.createElement("img");
     img.className = "discover-avatar";
@@ -7286,12 +7627,229 @@ function formatLargeNumber(value) {
   return new Intl.NumberFormat("en-GB").format(number);
 }
 
-async function openSubscriptionChannelActions(button) {
-  const channelId = button?.dataset.channelId || "";
+function formatCompactNumber(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return "—";
+  if (number < 1000) return new Intl.NumberFormat("en-GB").format(number);
+  return new Intl.NumberFormat("en-GB", {
+    notation:"compact",
+    maximumFractionDigits:number >= 100000 ? 0 : 1
+  }).format(number).toLowerCase();
+}
+
+function formatCountryName(code) {
+  const value = String(code || "").trim().toUpperCase();
+  if (!value) return "—";
+  try {
+    return new Intl.DisplayNames(["en-GB"], {type:"region"}).of(value) || value;
+  } catch (_) {
+    return value;
+  }
+}
+
+function formatChannelDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", {day:"numeric", month:"short", year:"numeric"}).format(date);
+}
+
+function openChannelLink(event, element) {
+  const channelId = element?.dataset?.channelPopupId || "";
+  if (!channelId) return true;
+  event?.preventDefault();
+  openChannelDetails(channelId);
+  return false;
+}
+
+function openSubscriptionChannelActions(button) {
+  return openChannelDetails(button?.dataset?.channelId || "");
+}
+
+function parseChannelKeywords(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  const matches = text.match(/"[^"]+"|\S+/g) || [];
+  return matches.map(item => item.replace(/^"|"$/g, "")).filter(Boolean).slice(0, 24);
+}
+
+function setChannelHistoryRange(days, button) {
+  channelHistoryRangeDays = Number(days || 0);
+  document.querySelectorAll("#channel-history-range-buttons button").forEach(btn => btn.classList.remove("active"));
+  button?.classList.add("active");
+  renderChannelHistoryChart();
+}
+
+function chartMetricLabel(metric) {
+  if (metric === "subscribers") return "Subscribers";
+  if (metric === "videos") return "Videos";
+  return "Views";
+}
+
+function renderChannelHistoryChart() {
+  const svg = document.getElementById("channel-history-chart");
+  const empty = document.getElementById("channel-history-empty");
+  const summary = document.getElementById("channel-history-summary");
+  if (!svg || !summary) return;
+
+  const yt = currentSubscriptionChannelData?.youtube || {};
+  let rows = Array.isArray(yt.history) ? [...yt.history] : [];
+  const metric = document.getElementById("channel-chart-metric")?.value || "views";
+  const key = metric === "subscribers" ? "subscriber_count" : metric === "videos" ? "video_count" : "view_count";
+
+  if (channelHistoryRangeDays > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - channelHistoryRangeDays + 1);
+    cutoff.setHours(0,0,0,0);
+    rows = rows.filter(row => {
+      const date = new Date(`${row.snapshot_date}T00:00:00`);
+      return !Number.isNaN(date.getTime()) && date >= cutoff;
+    });
+  }
+
+  svg.innerHTML = "";
+  summary.innerHTML = "";
+
+  if (!rows.length) {
+    empty?.classList.remove("hidden");
+    return;
+  }
+  empty?.classList.toggle("hidden", rows.length > 1);
+
+  const width = 900;
+  const height = 260;
+  const padLeft = 64;
+  const padRight = 18;
+  const padTop = 18;
+  const padBottom = 38;
+  const values = rows.map(row => Number(row[key] || 0));
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+  if (min === max) {
+    const spread = Math.max(Math.abs(max) * 0.03, 1);
+    min = Math.max(0, min - spread);
+    max += spread;
+  } else {
+    const spread = Math.max((max - min) * 0.12, 1);
+    min = Math.max(0, min - spread);
+    max += spread;
+  }
+
+  const x = index => padLeft + ((width - padLeft - padRight) * (rows.length === 1 ? 0.5 : index / (rows.length - 1)));
+  const y = value => padTop + (height - padTop - padBottom) * (1 - ((value - min) / (max - min)));
+  const ns = "http://www.w3.org/2000/svg";
+
+  for (let i = 0; i < 5; i += 1) {
+    const ratio = i / 4;
+    const yPos = padTop + (height - padTop - padBottom) * ratio;
+    const value = max - ((max - min) * ratio);
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", padLeft);
+    line.setAttribute("x2", width - padRight);
+    line.setAttribute("y1", yPos);
+    line.setAttribute("y2", yPos);
+    line.setAttribute("stroke", "rgba(148,163,184,.18)");
+    line.setAttribute("stroke-width", "1");
+    svg.appendChild(line);
+
+    const label = document.createElementNS(ns, "text");
+    label.setAttribute("x", padLeft - 8);
+    label.setAttribute("y", yPos + 4);
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("fill", "#91a4bf");
+    label.setAttribute("font-size", "11");
+    label.textContent = formatCompactNumber(Math.round(value));
+    svg.appendChild(label);
+  }
+
+  const points = rows.map((row,index) => `${x(index)},${y(Number(row[key] || 0))}`).join(" ");
+  const polyline = document.createElementNS(ns, "polyline");
+  polyline.setAttribute("points", points);
+  polyline.setAttribute("fill", "none");
+  polyline.setAttribute("stroke", "#3b82f6");
+  polyline.setAttribute("stroke-width", "3");
+  polyline.setAttribute("stroke-linecap", "round");
+  polyline.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(polyline);
+
+  rows.forEach((row,index) => {
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", x(index));
+    circle.setAttribute("cy", y(Number(row[key] || 0)));
+    circle.setAttribute("r", rows.length > 45 ? "2" : "4");
+    circle.setAttribute("fill", "#60a5fa");
+    const title = document.createElementNS(ns, "title");
+    title.textContent = `${formatChannelDate(row.snapshot_date)} · ${chartMetricLabel(metric)} ${formatLargeNumber(row[key])}`;
+    circle.appendChild(title);
+    svg.appendChild(circle);
+  });
+
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  const change = Number(last[key] || 0) - Number(first[key] || 0);
+  const changeText = `${change >= 0 ? "+" : ""}${formatLargeNumber(change)}`;
+  summary.innerHTML = `<span><strong>${chartMetricLabel(metric)}:</strong> ${formatLargeNumber(last[key])}</span><span><strong>Change:</strong> ${changeText}</span><span><strong>Snapshots:</strong> ${rows.length}</span><span><strong>From:</strong> ${formatChannelDate(first.snapshot_date)}</span>`;
+}
+
+function showChannelVideoTab(tab) {
+  channelVideoTab = tab === "latest" ? "latest" : "popular";
+  document.getElementById("channel-videos-popular-tab")?.classList.toggle("active", channelVideoTab === "popular");
+  document.getElementById("channel-videos-latest-tab")?.classList.toggle("active", channelVideoTab === "latest");
+  renderChannelVideos();
+}
+
+function renderChannelVideos() {
+  const grid = document.getElementById("channel-video-grid");
+  const note = document.getElementById("channel-video-note");
+  if (!grid || !note) return;
+
+  const yt = currentSubscriptionChannelData?.youtube || {};
+  const videos = channelVideoTab === "latest"
+    ? (yt.recent_videos || [])
+    : (yt.popular_videos || []);
+  grid.innerHTML = "";
+
+  if (!videos.length) {
+    grid.innerHTML = `<div class="muted small">No ${channelVideoTab} video data is available.</div>`;
+  } else {
+    videos.forEach(video => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "channel-video-card";
+      const img = document.createElement("img");
+      img.src = video.thumbnail_url || (video.video_id ? `https://i.ytimg.com/vi/${video.video_id}/mqdefault.jpg` : "");
+      img.alt = video.title || "YouTube video";
+      img.loading = "lazy";
+      const title = document.createElement("strong");
+      title.textContent = video.title || "YouTube video";
+      const meta = document.createElement("span");
+      meta.textContent = [formatCompactNumber(video.view_count) + " views", video.duration, formatLatestAge(video.published_at)].filter(Boolean).join(" · ");
+      button.append(img,title,meta);
+      button.onclick = () => openLatestVideo({
+        ...video,
+        channel_id: yt.channel_id || currentSubscriptionChannelId,
+        channel_title: yt.title || currentSubscriptionChannelData?.subscription?.title || "YouTube channel",
+        channel_url: `https://www.youtube.com/channel/${yt.channel_id || currentSubscriptionChannelId}`,
+        channel_thumbnail_url: yt.thumbnail_url || "",
+        metadata_complete:false
+      });
+      grid.appendChild(button);
+    });
+  }
+
+  note.textContent = channelVideoTab === "popular" && yt.popular_error
+    ? `Popular videos unavailable: ${yt.popular_error}`
+    : "";
+}
+
+async function openChannelDetails(channelId) {
+  channelId = String(channelId || "").trim();
   if (!channelId) return;
 
   currentSubscriptionChannelId = channelId;
   currentSubscriptionChannelData = null;
+  channelHistoryRangeDays = 28;
+  channelVideoTab = "popular";
 
   const loading = document.getElementById("subscription-channel-loading");
   const content = document.getElementById("subscription-channel-content");
@@ -7300,61 +7858,81 @@ async function openSubscriptionChannelActions(button) {
   loading.textContent = "Loading channel information…";
   loading.classList.remove("hidden");
   content.classList.add("hidden");
-  status.textContent = "";
+  if (status) status.textContent = "";
 
-  if (!subscriptionChannelDialog.open) {
-    subscriptionChannelDialog.showModal();
-  }
+  if (!subscriptionChannelDialog.open) subscriptionChannelDialog.showModal();
 
   try {
-    const response = await fetch(
-      `/api/subscriptions/${encodeURIComponent(channelId)}/details`,
-      {headers:{"Accept":"application/json"}}
-    );
+    const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/details`, {headers:{"Accept":"application/json"}});
     const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Channel information could not be loaded.");
-    }
+    if (!response.ok || !data.ok) throw new Error(data.error || "Channel information could not be loaded.");
 
     currentSubscriptionChannelData = data;
-    const sub = data.subscription || {};
+    const sub = data.subscription || null;
     const yt = data.youtube || {};
+    const titleText = yt.title || sub?.title || "YouTube channel";
 
     const avatar = document.getElementById("subscription-channel-avatar");
-    avatar.src = yt.thumbnail_url || sub.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
-    avatar.onerror = () => {
-      avatar.onerror = null;
-      avatar.src = "{{ url_for('static', filename='channel-placeholder.svg') }}";
-    };
+    avatar.src = yt.thumbnail_url || sub?.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    avatar.onerror = () => { avatar.onerror = null; avatar.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
 
-    document.getElementById("subscription-channel-title").textContent = sub.title || yt.title || "YouTube channel";
+    document.getElementById("subscription-channel-title").textContent = titleText;
+    const handle = String(yt.handle || yt.custom_url || "").trim();
+    document.getElementById("subscription-channel-handle").textContent = handle || "@channel";
+    document.getElementById("subscription-channel-age").textContent = yt.age?.label || "Age unavailable";
+    document.getElementById("subscription-channel-age-tile").textContent = yt.age?.label || "—";
     document.getElementById("subscription-channel-description").textContent = yt.description || "No YouTube channel description was returned.";
 
     const youtubeLink = document.getElementById("subscription-channel-youtube-link");
-    youtubeLink.href = sub.channel_url || `https://www.youtube.com/channel/${channelId}`;
+    youtubeLink.href = sub?.channel_url || `https://www.youtube.com/channel/${channelId}`;
 
     const pinchflatLink = document.getElementById("subscription-channel-pinchflat-link");
-    if (sub.pinchflat_source_url) {
-      pinchflatLink.href = sub.pinchflat_source_url;
-      pinchflatLink.classList.remove("hidden");
-    } else {
-      pinchflatLink.classList.add("hidden");
-    }
+    if (sub?.pinchflat_source_url) { pinchflatLink.href = sub.pinchflat_source_url; pinchflatLink.classList.remove("hidden"); }
+    else pinchflatLink.classList.add("hidden");
 
-    document.getElementById("subscription-channel-status").textContent =
-      `${sub.active ? "Subscribed" : "Unsubscribed"} · ${sub.download_enabled ? "Enabled" : "Disabled"}`;
-    document.getElementById("subscription-channel-profile").textContent = sub.media_profile_name || "—";
-    document.getElementById("subscription-channel-range").textContent = sub.history_label || sub.cutoff || "—";
-    document.getElementById("subscription-channel-storage").textContent = sub.disk_usage || "0 B";
-    document.getElementById("subscription-channel-subscribers").textContent = yt.hidden_subscriber_count ? "Hidden" : formatLargeNumber(yt.subscriber_count);
-    document.getElementById("subscription-channel-videos").textContent = yt.video_count ? formatLargeNumber(yt.video_count) : "—";
-    document.getElementById("subscription-channel-views").textContent = yt.view_count ? formatLargeNumber(yt.view_count) : "—";
-    document.getElementById("subscription-channel-source").textContent = sub.pinchflat_source_id ? `#${sub.pinchflat_source_id}` : "Not in Pinchflat";
+    document.getElementById("subscription-channel-subscribers").textContent = yt.hidden_subscriber_count ? "Hidden" : formatCompactNumber(yt.subscriber_count);
+    document.getElementById("subscription-channel-videos").textContent = yt.video_count ? formatCompactNumber(yt.video_count) : "—";
+    document.getElementById("subscription-channel-views").textContent = yt.view_count ? formatCompactNumber(yt.view_count) : "—";
+    document.getElementById("subscription-channel-average-views").textContent = yt.average_views_per_video ? formatCompactNumber(yt.average_views_per_video) : "—";
+    document.getElementById("subscription-channel-country").textContent = formatCountryName(yt.country);
+    document.getElementById("subscription-channel-category").textContent = yt.category || "—";
+    document.getElementById("subscription-channel-created").textContent = formatChannelDate(yt.published_at);
+    document.getElementById("subscription-channel-latest-upload").textContent = yt.latest_upload_at ? `${formatChannelDate(yt.latest_upload_at)} · ${formatLatestAge(yt.latest_upload_at)}` : "—";
+    document.getElementById("subscription-channel-recent-views").textContent = yt.recent_average_views ? formatCompactNumber(yt.recent_average_views) : "—";
+    document.getElementById("subscription-channel-recent-likes").textContent = yt.recent_average_likes ? formatCompactNumber(yt.recent_average_likes) : "—";
+    document.getElementById("subscription-channel-recent-comments").textContent = yt.recent_average_comments ? formatCompactNumber(yt.recent_average_comments) : "—";
+    document.getElementById("subscription-channel-views-per-subscriber").textContent = yt.views_per_subscriber ? `${new Intl.NumberFormat("en-GB", {maximumFractionDigits:1}).format(yt.views_per_subscriber)}×` : "—";
+    document.getElementById("subscription-channel-made-for-kids").textContent = yt.made_for_kids === true ? "Yes" : yt.made_for_kids === false ? "No" : "Not specified";
+    document.getElementById("subscription-channel-topics").textContent = (yt.topics || []).slice(0,3).join(" · ") || "—";
+    document.getElementById("subscription-channel-language").textContent = yt.default_language || "—";
+    document.getElementById("subscription-channel-privacy").textContent = yt.privacy_status || "—";
 
+    document.getElementById("subscription-channel-status").textContent = sub ? `${sub.active ? "Subscribed" : "Unsubscribed"} · ${sub.download_enabled ? "Enabled" : "Disabled"}` : "Not in subscriptions";
+    document.getElementById("subscription-channel-profile").textContent = sub?.media_profile_name || "—";
+    document.getElementById("subscription-channel-range").textContent = sub?.history_label || sub?.cutoff || "—";
+    document.getElementById("subscription-channel-storage").textContent = sub?.disk_usage || "—";
+    document.getElementById("subscription-channel-source").textContent = sub?.pinchflat_source_id ? `#${sub.pinchflat_source_id}` : "Not in Pinchflat";
+
+    const management = document.getElementById("subscription-channel-management");
+    if (management) management.classList.toggle("hidden", !sub);
     document.querySelectorAll("[data-source-action]").forEach(actionButton => {
-      actionButton.disabled = !sub.pinchflat_source_id;
-      actionButton.title = sub.pinchflat_source_id ? "" : "This channel is not currently a Pinchflat source";
+      actionButton.disabled = !sub?.pinchflat_source_id;
+      actionButton.title = sub?.pinchflat_source_id ? "" : "This channel is not currently a Pinchflat source";
     });
+
+    const keywords = document.getElementById("subscription-channel-keywords");
+    keywords.innerHTML = "";
+    parseChannelKeywords(yt.keywords).forEach(keyword => {
+      const chip = document.createElement("span");
+      chip.className = "channel-keyword-chip";
+      chip.textContent = keyword;
+      keywords.appendChild(chip);
+    });
+
+    document.getElementById("channel-chart-metric").value = "views";
+    document.querySelectorAll("#channel-history-range-buttons button").forEach(btn => btn.classList.toggle("active", btn.dataset.days === "28"));
+    showChannelVideoTab("popular");
+    renderChannelHistoryChart();
 
     loading.classList.add("hidden");
     content.classList.remove("hidden");
@@ -8001,7 +8579,29 @@ async function submitBulkActionAjax(event) {
     return;
   }
 
-  if (!window.confirm(`Apply "${action}" to ${selected.length} selected source(s)?`)) {
+  const bulkActionLabels = {
+    enable:"Enable downloads",
+    disable:"Disable downloads",
+    range:"Set download range",
+    profile:"Set Media Profile",
+    favourite:"Make favourite",
+    unfavourite:"Remove favourite",
+    retry:"Retry errors",
+    download_pending:"Download Pending",
+    redownload_existing:"Re-Download Existing",
+    force_scan:"Force Scan",
+    refresh_metadata:"Refresh Media",
+    sync_files:"Sync Files on Disk",
+    unsubscribe:"Unsubscribe",
+    delete_unsubscribe:"Unsubscribe & Delete Channel",
+    delete_unsubscribe_media:"Unsubscribe, Delete Channel & Remove Media"
+  };
+  const actionLabel = bulkActionLabels[action] || action;
+  const destructive = new Set(["unsubscribe","delete_unsubscribe","delete_unsubscribe_media"]).has(action);
+  const confirmText = destructive
+    ? `${actionLabel} for ${selected.length} selected channel(s)? This action changes or removes subscriptions.`
+    : `${actionLabel} for ${selected.length} selected channel(s)?`;
+  if (!window.confirm(confirmText)) {
     return;
   }
 
@@ -8044,6 +8644,11 @@ async function submitBulkActionAjax(event) {
             if (video.channel_id === item.channel_id) video.is_favourite_channel = favourite;
           }));
       }
+    }
+
+    for (const channelId of (data.deleted_channel_ids || [])) {
+      const row = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
+      row?.remove();
     }
 
     document.querySelectorAll(".source-select:checked").forEach(box => box.checked = false);
@@ -8309,9 +8914,11 @@ document.getElementById("bulk-range")?.addEventListener("change", function() {
 
 function confirmBulkAction() {
   const count = document.querySelectorAll(".source-select:checked").length;
-  const action = document.getElementById("bulk-action").value;
+  const select = document.getElementById("bulk-action");
+  const action = select?.value || "";
   if (!count || !action) return false;
-  return window.confirm(`Apply "${action}" to ${count} selected source(s)?`);
+  const label = select.options[select.selectedIndex]?.textContent?.trim() || action;
+  return window.confirm(`${label} for ${count} selected channel(s)?`);
 }
 
 applyConfiguredPageOrder();
@@ -8344,6 +8951,9 @@ setLatestSectionMinimised(
   {% if page_view.load_pinchflat_downloads %}
   await loadPinchflatDownloadOverview(true);
   startPinchflatDownloadPolling();
+  {% elif page_view.show_summary_latest_download %}
+  await loadPinchflatDownloadOverview(true);
+  setInterval(() => loadPinchflatDownloadOverview(false), 15000);
   {% endif %}
 
   {% if google_connected and page_view.load_latest_videos %}

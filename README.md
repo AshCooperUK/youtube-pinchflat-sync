@@ -2,6 +2,19 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.13.0
+
+Channel insights, richer media details and bulk Pinchflat management.
+
+- Adds Pinchflat source actions and destructive channel actions to Subscription tools bulk actions.
+- Makes linked channel names open the in-app Channel view instead of leaving the dashboard.
+- Expands Channel with the current handle, channel age, compact subscriber counts, country, category, public statistics, recent-upload averages, topics, keywords and source details.
+- Adds local daily channel-stat snapshots and an interactive Views, Subscribers and Videos history graph. Historical points build from this release onwards.
+- Adds Popular and Latest video panels to Channel. Popular video lookups are cached to reduce YouTube API use.
+- Adds a configurable Latest download dashboard status tile. Clicking the tile opens the shared media player.
+- Expands the media player with richer video statistics, language, privacy, licensing, format details and a matching channel information panel.
+- Keeps explicit Open YouTube controls available where you want to leave the app.
+
 ## Version 2.12.4
 
 Dashboard usability and persistent-login update.
