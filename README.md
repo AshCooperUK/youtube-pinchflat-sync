@@ -2,16 +2,32 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 2.14.0.12
+## Version 2.15.0.0
 
-### v2.14.0.12
+### v2.15.0.0
 
-- Redesigns Discover → Random Shorts to use the same visual language as the main media player.
-- Replaces the old large Shorts text buttons with the shared icon action dock for favourite, subscribe, like, one-time download and YouTube.
-- Adds a matching channel information card with global channel image controls, banner and public channel statistics.
-- Adds a compact video overview for views, likes, comments, date, duration and category.
-- Makes Short descriptions use the same clickable-link handling as the main media player.
-- Adds repository screenshots under `docs/screenshots` so GitHub displays app previews directly from the README after the files are pushed.
+- Adds Settings → Video Retention with a master switch and separate policies for favourite and non-favourite channels.
+- Retention age is based on the original YouTube upload date rather than the local file creation date.
+- Adds a configurable minimum number of newest videos to keep per channel and a grace period for newly downloaded historical media.
+- Adds per-channel retention overrides with channel search and a one-click return to the inherited group policy.
+- Adds Cleanup Preview showing eligible videos, reclaimable storage, affected channels and protected media before anything is deleted.
+- Adds manual Run cleanup now plus scheduled Daily, Every 3 days or Weekly cleanup.
+- Protects favourite videos when enabled and always excludes One-time Downloads from automatic retention cleanup.
+- Adds a purple retention shield around channel artwork. Pressing it opens that channel's retention policy directly.
+- Adds an individual video protection shield to the media player, Channel video tiles, Discover, Random Shorts and Favourite Video tiles.
+- Adds retention information to Channel details, including policy source, minimum kept, stored media, eligible media and reclaimable space.
+- Uses Pinchflat's media deletion path with prevent-download state so retention cleanup does not immediately download removed videos again.
+- Respects Pinchflat's native Prevent Automatic Deletion flag.
+- Refreshes the detected Emby YouTube library after a retention cleanup removes media.
+- Video Retention defaults to Off after upgrade, so no files are deleted until the feature is explicitly enabled.
+- Reorganises Settings into a grouped sidebar: General, Dashboard, YouTube, Pinchflat, Emby, Downloads, Video Retention, Favourites, Automation, Security and Diagnostics.
+- Reorders Dashboard settings to match the physical top-to-bottom dashboard layout and adds clear descriptions beside each setting.
+- Consolidates the old API, Logs and Advanced settings areas into the relevant YouTube, Emby, Pinchflat and Diagnostics sections.
+- Removes the old editable Download Paths settings card. Pinchflat subscription paths now remain owned by the selected Media Profile, One-time Download owns its own path, and Emby Download owns its playlist path under Automation.
+- Clarifies One-time Download settings and confirms every Single Download action uses the saved resolution, audio-only format, folder, filename template and metadata options.
+- Fixes One-time Download Emby refresh so the app detects and scans the Emby library or folder associated with the configured Single Downloads path instead of always scanning the main Pinchflat YouTube library.
+- Applies the same targeted Emby library detection to the Emby Download playlist folder.
+- Adds separate Emby status rows and manual scan buttons for Pinchflat downloads, One-time Downloads and Emby Download.
 
 ## Screenshots
 
@@ -109,8 +125,8 @@ Dashboard layout and built-in function reference update.
 - Supports an Emby library rooted at the YouTube directory itself or a subfolder such as `YouTube/shows`.
 - Channel-level Refresh Emby first refreshes the matching channel item recursively.
 - If a new channel folder has not been indexed yet, only the detected Emby YouTube library is refreshed. Other Emby libraries are not scanned.
-- Settings → API → Emby now reports the automatically detected YouTube library when Test connection is used.
-- Settings → API → Emby Scan Library Files now scans only the detected YouTube library.
+- Settings → Emby → Emby now reports the automatically detected YouTube library when Test connection is used.
+- Settings → Emby → Emby Scan Library Files now scans only the detected YouTube library.
 - Automatic refresh after a completed Pinchflat download and Bulk Refresh Emby use the same targeted library logic.
 - Reworks Discover video controls into a consistent icon system.
 - Discover → Downloaded shows Favourite, Refresh in Emby and YouTube subscription state/actions.

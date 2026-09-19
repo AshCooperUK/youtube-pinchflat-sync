@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.14.0.12"
+VERSION = "2.15.0.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -305,6 +305,7 @@ download_queue = queue.Queue()
 download_worker_started = False
 storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
 storage_cache_lock = threading.Lock()
+retention_cleanup_lock = threading.Lock()
 
 
 def db():
@@ -583,6 +584,44 @@ def init_db():
                 PRIMARY KEY (list_id, saved_video_id)
             );
 
+            CREATE TABLE IF NOT EXISTS video_retention_overrides (
+                channel_id TEXT PRIMARY KEY,
+                retention_days INTEGER,
+                minimum_videos INTEGER,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS retention_protected_videos (
+                video_id TEXT PRIMARY KEY,
+                channel_id TEXT,
+                title TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS retention_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                status TEXT NOT NULL DEFAULT 'running',
+                candidate_count INTEGER NOT NULL DEFAULT 0,
+                deleted_count INTEGER NOT NULL DEFAULT 0,
+                reclaimed_bytes INTEGER NOT NULL DEFAULT 0,
+                errors INTEGER NOT NULL DEFAULT 0,
+                message TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS retention_deletions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                deleted_at TEXT NOT NULL,
+                video_id TEXT,
+                media_item_id INTEGER,
+                channel_id TEXT,
+                channel_title TEXT,
+                title TEXT,
+                size_bytes INTEGER NOT NULL DEFAULT 0,
+                reason TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS channel_stats_history (
                 channel_id TEXT NOT NULL,
                 snapshot_date TEXT NOT NULL,
@@ -631,6 +670,15 @@ def init_db():
             "pinchflat_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "pinchflat_force_index_favourite_minutes": "0",
             "pinchflat_force_index_nonfavourite_minutes": "0",
+            "retention_enabled": "0",
+            "retention_favourite_days": "365",
+            "retention_favourite_min_videos": "20",
+            "retention_nonfavourite_days": "90",
+            "retention_nonfavourite_min_videos": "5",
+            "retention_grace_days": "7",
+            "retention_cleanup_interval_hours": "24",
+            "retention_protect_favourite_videos": "1",
+            "retention_last_run_at": "",
             "auto_retry": "1",
             "auto_create_media_profile": "1",
             "emby_download_enabled": "1",
@@ -686,6 +734,7 @@ def init_db():
             "page_channel_control_downloads": "1",
             "page_channel_control_scan": "1",
             "page_channel_control_delete": "1",
+            "page_channel_control_retention": "1",
 
             "page_section_order": "summary,pinchflat,latest,subscriptions",
             "page_summary_order": "google,pinchflat,latest_download,subscriptions,downloads,errors",
@@ -784,7 +833,7 @@ def emby_api_url(path):
 
 def emby_api_request(method, path, **kwargs):
     if not emby_configured():
-        raise RuntimeError("Configure the Emby Server URL and API key in Settings → API.")
+        raise RuntimeError("Configure the Emby Server URL and API key in Settings → Emby.")
 
     headers = dict(kwargs.pop("headers", {}) or {})
     headers["X-Emby-Token"] = emby_api_key()
@@ -881,6 +930,203 @@ def _emby_container_destinations_for_host_source(host_source):
     return list(dict.fromkeys(destinations))
 
 
+def _emby_container_mount_mappings():
+    """Return host->container bind mappings for local Emby containers."""
+    mappings = []
+    for container in _docker_containers_with_mounts():
+        names = [str(name or "").lstrip("/") for name in container.get("Names") or []]
+        image = str(container.get("Image") or "")
+        identity = " ".join(names + [image]).casefold()
+        if "emby" not in identity:
+            continue
+
+        for mount in container.get("Mounts") or []:
+            source = str(mount.get("Source") or "").strip()
+            destination = str(mount.get("Destination") or "").strip()
+            if source and destination:
+                mappings.append({"source": source, "destination": destination})
+
+    unique = []
+    seen = set()
+    for item in mappings:
+        key = (_normalise_media_path(item["source"]), _normalise_media_path(item["destination"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _path_join_text(root, relative):
+    root = str(root or "").strip().rstrip("/\\")
+    relative = str(relative or "").strip().replace("\\", "/").strip("/")
+    if not relative:
+        return root
+    separator = "\\" if "\\" in root and "/" not in root else "/"
+    return root + separator + relative.replace("/", separator)
+
+
+def emby_detect_download_library(relative_folder=""):
+    """
+    Resolve the most specific Emby library for a path below the app's
+    /downloads bind.  This is used by direct downloads so a separate Emby
+    library such as ``YouTube Single Downloads`` is refreshed instead of the
+    main Pinchflat YouTube library.
+    """
+    if not emby_configured():
+        raise RuntimeError("Configure the Emby Server URL and API key in Settings → Emby.")
+
+    relative_folder = str(relative_folder or "").strip().replace("\\", "/").strip("/")
+    host_root = _download_host_mount_source()
+    host_target = _path_join_text(host_root, relative_folder) if host_root else ""
+    virtual_folders = emby_virtual_folders()
+    mount_mappings = _emby_container_mount_mappings()
+
+    target_candidates = []
+    if host_target:
+        target_candidates.append((host_target, "matching Docker host path", 170))
+
+    host_root_norm = _normalise_media_path(host_root)
+    host_target_norm = _normalise_media_path(host_target)
+    for mapping in mount_mappings:
+        source = mapping["source"]
+        destination = mapping["destination"]
+        source_norm = _normalise_media_path(source)
+        if host_target_norm and source_norm == host_target_norm:
+            target_candidates.append((destination, "matching Emby Docker bind", 168))
+        elif host_root_norm and source_norm == host_root_norm:
+            target_candidates.append((_path_join_text(destination, relative_folder), "mapped through Emby Docker bind", 166))
+        elif host_target_norm and source_norm and host_target_norm.startswith(source_norm + "/"):
+            relative_from_mount = host_target_norm[len(source_norm) + 1:]
+            target_candidates.append((_path_join_text(destination, relative_from_mount), "mapped through parent Emby Docker bind", 164))
+
+    # Some Emby installations see the same host paths as the app.  Keep the
+    # app-visible path as a low-priority exact candidate as well.
+    target_candidates.append((str(DOWNLOAD_ROOT / relative_folder), "matching app download path", 120))
+
+    best = None
+    best_score = -1
+    target_basename = _path_basename(relative_folder)
+
+    for folder in virtual_folders:
+        name = str(folder.get("Name") or folder.get("name") or "").strip()
+        locations = folder.get("Locations") or folder.get("locations") or []
+        if isinstance(locations, str):
+            locations = [locations]
+
+        for location in locations or [""]:
+            location = str(location or "").strip()
+            normal_location = _normalise_media_path(location)
+            score = 0
+            reason = ""
+
+            for candidate, candidate_reason, candidate_score in target_candidates:
+                if normal_location and normal_location == _normalise_media_path(candidate):
+                    if candidate_score > score:
+                        score = candidate_score
+                        reason = candidate_reason
+
+            if relative_folder and target_basename:
+                if _path_basename(location).casefold() == target_basename.casefold() and score < 92:
+                    score = 92
+                    reason = "matching download folder name"
+                if name.casefold() == target_basename.casefold() and score < 90:
+                    score = 90
+                    reason = "matching Emby library name"
+                if target_basename.casefold() in name.casefold() and score < 78:
+                    score = 78
+                    reason = "similar Emby library name"
+
+            if score <= best_score:
+                continue
+
+            item_id = str(
+                folder.get("ItemId")
+                or folder.get("itemId")
+                or folder.get("Id")
+                or folder.get("id")
+                or ""
+            ).strip()
+            if not item_id and location:
+                item_id = _emby_item_id_for_path(location)
+
+            best = {
+                "name": name or (target_basename or "YouTube"),
+                "item_id": item_id,
+                "location": location,
+                "host_source": host_root,
+                "app_path": str(DOWNLOAD_ROOT / relative_folder),
+                "match_reason": reason,
+                "relative_folder": relative_folder,
+                "score": score,
+                "scope": "library",
+            }
+            best_score = score
+
+    # If the direct-download subfolder is not its own Emby library, refresh
+    # that folder item inside the main YouTube library where possible.
+    if relative_folder and (not best or best_score < 100):
+        root_library = emby_detect_youtube_library()
+        target_path = _join_emby_path(root_library.get("location"), relative_folder)
+        target_item_id = _emby_item_id_for_path(target_path)
+        if target_item_id:
+            return {
+                **root_library,
+                "name": f"{root_library.get('name') or 'YouTube'} / {target_basename}",
+                "item_id": target_item_id,
+                "location": target_path,
+                "relative_folder": relative_folder,
+                "match_reason": "download subfolder inside detected YouTube library",
+                "scope": "folder",
+            }
+
+        # The folder may not have been indexed yet.  Scan only the parent
+        # YouTube library so Emby creates it, rather than touching every Emby
+        # library on the server.
+        return {
+            **root_library,
+            "relative_folder": relative_folder,
+            "target_location": target_path,
+            "match_reason": "parent YouTube library fallback for a new download folder",
+            "scope": "parent_library",
+        }
+
+    if not best or best_score < 70:
+        raise RuntimeError(
+            f"The Emby library for /downloads/{relative_folder or ''} could not be detected. "
+            "No whole-server Emby scan was started."
+        )
+
+    if not best.get("item_id"):
+        raise RuntimeError(
+            f"Matched the Emby library {best.get('name') or target_basename or 'YouTube'}, but its item ID could not be resolved."
+        )
+
+    return best
+
+
+def emby_refresh_download_library(relative_folder, label="Direct Downloads"):
+    """Refresh one direct-download library/folder and then its metadata."""
+    target = emby_detect_download_library(relative_folder)
+    item_id = str(target.get("item_id") or "").strip()
+    if not item_id:
+        raise RuntimeError(f"Emby item ID for {label} could not be resolved.")
+
+    _emby_refresh_item(item_id, recursive=True)
+    _emby_schedule_metadata_refresh(
+        item_id,
+        recursive=True,
+        label=target.get("name") or label,
+    )
+    log_activity(
+        "emby",
+        f"{label} Emby refresh",
+        f"Started an Emby scan for {target.get('name') or label}; a Replace all metadata pass will follow.",
+        "success",
+    )
+    return {"scope": target.get("scope") or "library", "library": target}
+
+
 def emby_virtual_folders():
     response = emby_api_request("GET", "Library/VirtualFolders", timeout=20)
     payload = response.json() if response.content else []
@@ -926,7 +1172,7 @@ def emby_detect_youtube_library():
     retained as safe fallbacks for remote Emby servers.
     """
     if not emby_configured():
-        raise RuntimeError("Configure the Emby Server URL and API key in Settings → API.")
+        raise RuntimeError("Configure the Emby Server URL and API key in Settings → Emby.")
 
     host_source = _download_host_mount_source()
     emby_mounts = _emby_container_destinations_for_host_source(host_source)
@@ -5422,23 +5668,28 @@ def run_download_job(job_id):
 
         storage_snapshot(force=True)
 
-        # A one-off Single Download writes its media/NFO directly into the
-        # shared YouTube library rather than passing through Pinchflat. Ask
-        # Emby to discover the new file, then perform the delayed FullRefresh
-        # metadata pass used by the rest of the Emby integration.
-        if job.get("source_type") == "single" and emby_configured():
+        # Direct downloads may live in their own Emby library below the shared
+        # /downloads bind.  Refresh the most specific matching library/folder
+        # instead of always refreshing the main Pinchflat YouTube library.
+        if job.get("source_type") in {"single", "emby_download"} and emby_configured():
             try:
-                emby_refresh_library()
+                if job.get("source_type") == "single":
+                    direct_folder = get_setting("single_download_folder", "Single Downloads")
+                    direct_label = "One-time Download"
+                else:
+                    direct_folder = get_setting("emby_download_folder", "Emby Download")
+                    direct_label = "Emby Download"
+                emby_refresh_download_library(direct_folder, direct_label)
                 log_activity(
                     "emby",
-                    "Single Download Emby refresh",
-                    f"Queued the YouTube library scan and metadata refresh after {info.get('title') or job['youtube_url']} completed.",
+                    f"{direct_label} refresh queued",
+                    f"Queued the targeted Emby scan and metadata refresh after {info.get('title') or job['youtube_url']} completed.",
                     "success",
                 )
             except Exception as exc:
                 log_activity(
                     "emby",
-                    "Single Download Emby refresh failed",
+                    f"{direct_label} Emby refresh failed",
                     f"{info.get('title') or job['youtube_url']}: {exc}",
                     "warning",
                 )
@@ -5681,6 +5932,13 @@ def favourite_channel_ids(user_id=None):
     return {row["channel_id"] for row in rows}
 
 
+def all_favourite_channel_ids():
+    """Return channel favourites across users for server-wide storage policies."""
+    with db() as conn:
+        rows = conn.execute("SELECT DISTINCT channel_id FROM favourite_channels").fetchall()
+    return {row["channel_id"] for row in rows if row["channel_id"]}
+
+
 def set_channel_favourite_state(channel_id, favourite, user_id=None):
     user_id = user_id or current_user_id()
     channel_id = str(channel_id or "").strip()
@@ -5749,6 +6007,15 @@ def favourite_video_ids(user_id=None):
             (user_id,),
         ).fetchall()
     return {row["video_id"] for row in rows}
+
+
+def all_favourite_video_ids():
+    """Return favourite videos across users for server-wide storage policies."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT video_id FROM saved_videos WHERE favourite = 1"
+        ).fetchall()
+    return {row["video_id"] for row in rows if row["video_id"]}
 
 
 def annotate_favourites(items, user_id=None):
@@ -6101,6 +6368,544 @@ def scheduled_pinchflat_force_index():
 
     _scheduled_pinchflat_force_index_group(True)
     _scheduled_pinchflat_force_index_group(False)
+
+
+RETENTION_DAY_OPTIONS = (
+    (0, "Keep forever"),
+    (30, "30 days"),
+    (60, "60 days"),
+    (90, "3 months"),
+    (180, "6 months"),
+    (270, "9 months"),
+    (365, "1 year"),
+    (730, "2 years"),
+    (1095, "3 years"),
+)
+RETENTION_CLEANUP_INTERVAL_OPTIONS = (
+    (24, "Daily"),
+    (72, "Every 3 days"),
+    (168, "Weekly"),
+)
+
+
+def retention_settings():
+    return {
+        "enabled": setting_bool("retention_enabled", False),
+        "favourite_days": setting_int("retention_favourite_days", 365, 0, 3650),
+        "favourite_min_videos": setting_int("retention_favourite_min_videos", 20, 0, 10000),
+        "nonfavourite_days": setting_int("retention_nonfavourite_days", 90, 0, 3650),
+        "nonfavourite_min_videos": setting_int("retention_nonfavourite_min_videos", 5, 0, 10000),
+        "grace_days": setting_int("retention_grace_days", 7, 0, 365),
+        "cleanup_interval_hours": setting_int("retention_cleanup_interval_hours", 24, 1, 744),
+        "protect_favourite_videos": setting_bool("retention_protect_favourite_videos", True),
+        "last_run_at": get_setting("retention_last_run_at", "").strip(),
+    }
+
+
+def retention_override(channel_id):
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return None
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM video_retention_overrides WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def retention_policy_for_channel(channel_id, favourite=None):
+    settings = retention_settings()
+    channel_id = str(channel_id or "").strip()
+    if favourite is None:
+        favourite = channel_id in all_favourite_channel_ids()
+    override = retention_override(channel_id)
+    if override:
+        days = int(override.get("retention_days") or 0)
+        minimum = int(override.get("minimum_videos") or 0)
+        source = "Channel override"
+    elif favourite:
+        days = int(settings["favourite_days"] or 0)
+        minimum = int(settings["favourite_min_videos"] or 0)
+        source = "Favourite channel policy"
+    else:
+        days = int(settings["nonfavourite_days"] or 0)
+        minimum = int(settings["nonfavourite_min_videos"] or 0)
+        source = "Non-favourite channel policy"
+    return {
+        "enabled": bool(settings["enabled"]),
+        "days": max(0, days),
+        "minimum_videos": max(0, minimum),
+        "source": source,
+        "override": bool(override),
+        "favourite": bool(favourite),
+    }
+
+
+def retention_days_label(days):
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 0
+    if days <= 0:
+        return "Keep forever"
+    if days == 365:
+        return "1 year"
+    if days % 365 == 0:
+        years = days // 365
+        return f"{years} years"
+    if days == 30:
+        return "30 days"
+    if days == 60:
+        return "60 days"
+    if days % 30 == 0:
+        months = days // 30
+        return f"{months} month" + ("" if months == 1 else "s")
+    return f"{days} days"
+
+
+def _retention_datetime(value):
+    value = str(value or "").strip()
+    if not value:
+        return None
+    candidates = [value]
+    if len(value) == 8 and value.isdigit():
+        candidates.insert(0, f"{value[:4]}-{value[4:6]}-{value[6:8]}")
+    for candidate in candidates:
+        try:
+            parsed = datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            try:
+                parsed_date = date.fromisoformat(candidate[:10])
+                return datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _retention_subtitle_paths(value):
+    if not value:
+        return []
+    data = value
+    if isinstance(value, str):
+        try:
+            data = json.loads(value)
+        except Exception:
+            return []
+    paths = []
+    if isinstance(data, (list, tuple)):
+        for item in data:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                paths.append(item[-1])
+            elif isinstance(item, str):
+                paths.append(item)
+    return [str(path) for path in paths if path]
+
+
+def _retention_media_paths(media):
+    values = []
+    for field in (
+        "media_filepath", "filepath", "file_path", "thumbnail_filepath",
+        "metadata_filepath", "nfo_filepath",
+    ):
+        value = media.get(field)
+        if value:
+            values.append(str(value))
+    values.extend(_retention_subtitle_paths(media.get("subtitle_filepaths")))
+    seen = set()
+    result = []
+    for value in values:
+        path = pinchflat_shared_download_path(value)
+        if path is None:
+            continue
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def _retention_media_size(media):
+    total = 0
+    for path in _retention_media_paths(media):
+        try:
+            if path.is_file():
+                total += int(path.stat().st_size)
+        except OSError:
+            pass
+    if total <= 0:
+        try:
+            total = int(media.get("media_size_bytes") or 0)
+        except (TypeError, ValueError):
+            total = 0
+    return max(0, total)
+
+
+def pinchflat_retention_inventory(channel_id=""):
+    """Return downloaded Pinchflat media with source and on-disk metadata."""
+    requested_channel_id = str(channel_id or "").strip()
+    conn = pinchflat_db_readonly()
+    if conn is None:
+        return []
+    try:
+        tables = pinchflat_table_names(conn)
+        if "media_items" not in tables:
+            return []
+        media_columns = pinchflat_table_columns(conn, "media_items")
+        source_columns = pinchflat_table_columns(conn, "sources") if "sources" in tables else set()
+        filepath_column = next(
+            (name for name in ("media_filepath", "filepath", "file_path") if name in media_columns),
+            None,
+        )
+        if not filepath_column:
+            return []
+        wanted_media = [
+            name for name in (
+                "id", "uuid", "title", "media_id", "youtube_id", "youtube_video_id",
+                "video_id", "original_url", "webpage_url", "url", "media_url", "source_id",
+                "media_filepath", "filepath", "file_path", "thumbnail_filepath",
+                "metadata_filepath", "nfo_filepath", "subtitle_filepaths", "media_size_bytes",
+                "uploaded_at", "upload_date", "media_downloaded_at", "downloaded_at",
+                "inserted_at", "updated_at", "prevent_download", "prevent_culling", "culled_at",
+            ) if name in media_columns
+        ]
+        query = (
+            f"SELECT {', '.join(wanted_media)} FROM media_items "
+            f"WHERE {filepath_column} IS NOT NULL AND TRIM({filepath_column}) != ''"
+        )
+        rows = conn.execute(query).fetchall()
+        media_rows = [dict(row) for row in rows]
+        source_ids = {int(row["source_id"]) for row in media_rows if row.get("source_id") not in (None, "")}
+        source_map = {}
+        if source_ids and source_columns:
+            wanted_source = [
+                name for name in (
+                    "id", "custom_name", "collection_name", "collection_id", "original_url", "collection_type"
+                ) if name in source_columns
+            ]
+            placeholders = ",".join("?" for _ in source_ids)
+            source_rows = conn.execute(
+                f"SELECT {', '.join(wanted_source)} FROM sources WHERE id IN ({placeholders})",
+                tuple(sorted(source_ids)),
+            ).fetchall()
+            source_map = {int(row["id"]): dict(row) for row in source_rows}
+        result = []
+        for media in media_rows:
+            # Skip media already marked not to download. Pinchflat's native
+            # Prevent Automatic Deletion flag stays in the inventory so the
+            # preview can count it as protected rather than silently hiding it.
+            if bool(media.get("prevent_download")):
+                continue
+            source = {}
+            try:
+                if media.get("source_id") not in (None, ""):
+                    source = source_map.get(int(media["source_id"]), {})
+            except Exception:
+                source = {}
+            channel_id = str(source.get("collection_id") or "").strip()
+            if not channel_id:
+                continue
+            if requested_channel_id and channel_id != requested_channel_id:
+                continue
+            paths = _retention_media_paths(media)
+            if not any(path.exists() for path in paths):
+                continue
+            uploaded = _retention_datetime(
+                pinchflat_row_value(media, "uploaded_at", "upload_date")
+            )
+            downloaded = _retention_datetime(
+                pinchflat_row_value(media, "media_downloaded_at", "downloaded_at", "updated_at", "inserted_at")
+            )
+            video_id = pinchflat_extract_youtube_id(media)
+            result.append({
+                "media_item_id": int(media.get("id") or 0),
+                "media_uuid": str(media.get("uuid") or ""),
+                "video_id": video_id,
+                "title": str(media.get("title") or "YouTube video"),
+                "channel_id": channel_id,
+                "channel_title": str(source.get("custom_name") or source.get("collection_name") or channel_id),
+                "source_id": str(media.get("source_id") or ""),
+                "prevent_culling": bool(media.get("prevent_culling")),
+                "uploaded_at": uploaded,
+                "downloaded_at": downloaded,
+                "size_bytes": _retention_media_size(media),
+                "thumbnail_url": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else "",
+                "video_url": f"https://www.youtube.com/watch?v={video_id}" if video_id else str(media.get("original_url") or ""),
+            })
+        return result
+    finally:
+        conn.close()
+
+
+def retention_protected_video_ids():
+    with db() as conn:
+        rows = conn.execute("SELECT video_id FROM retention_protected_videos").fetchall()
+    return {str(row["video_id"]) for row in rows if row["video_id"]}
+
+
+def retention_preview(channel_id="", limit=250):
+    settings = retention_settings()
+    now = datetime.now(timezone.utc)
+    grace_before = now - timedelta(days=int(settings["grace_days"] or 0))
+    favourite_channels = all_favourite_channel_ids()
+    favourite_videos = all_favourite_video_ids() if settings["protect_favourite_videos"] else set()
+    protected_videos = retention_protected_video_ids()
+    inventory = pinchflat_retention_inventory(channel_id=channel_id)
+
+    grouped = {}
+    for item in inventory:
+        grouped.setdefault(item["channel_id"], []).append(item)
+
+    candidates = []
+    protected_count = 0
+    protected_bytes = 0
+    unknown_date_count = 0
+    minimum_kept_count = 0
+    keep_forever_count = 0
+    channel_summaries = []
+
+    for cid, items in grouped.items():
+        favourite = cid in favourite_channels
+        policy = retention_policy_for_channel(cid, favourite=favourite)
+        sorted_items = sorted(
+            items,
+            key=lambda item: item.get("uploaded_at") or item.get("downloaded_at") or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        minimum_ids = {
+            item.get("media_item_id")
+            for item in sorted_items[: int(policy["minimum_videos"] or 0)]
+        }
+        cutoff = now - timedelta(days=policy["days"]) if policy["days"] > 0 else None
+        channel_candidates = []
+        for item in sorted_items:
+            # Preview remains useful while automatic retention is disabled.
+            # The actual cleanup endpoint still refuses to delete until the
+            # master retention switch is enabled.
+            if policy["days"] <= 0:
+                keep_forever_count += 1
+                continue
+            if item.get("prevent_culling"):
+                protected_count += 1
+                protected_bytes += int(item.get("size_bytes") or 0)
+                continue
+            if item.get("video_id") and item["video_id"] in protected_videos:
+                protected_count += 1
+                protected_bytes += int(item.get("size_bytes") or 0)
+                continue
+            if item.get("video_id") and item["video_id"] in favourite_videos:
+                protected_count += 1
+                protected_bytes += int(item.get("size_bytes") or 0)
+                continue
+            if item.get("media_item_id") in minimum_ids:
+                minimum_kept_count += 1
+                continue
+            if not item.get("uploaded_at"):
+                unknown_date_count += 1
+                continue
+            if item["uploaded_at"] >= cutoff:
+                continue
+            if item.get("downloaded_at") and item["downloaded_at"] > grace_before:
+                continue
+            age_days = max(0, (now - item["uploaded_at"]).days)
+            item = dict(item)
+            item.update({
+                "age_days": age_days,
+                "policy_days": policy["days"],
+                "minimum_videos": policy["minimum_videos"],
+                "policy_source": policy["source"],
+                "policy_label": retention_days_label(policy["days"]),
+                "reason": f"Published {age_days} days ago; policy keeps {retention_days_label(policy['days'])}",
+                "uploaded_at_text": item["uploaded_at"].date().isoformat(),
+                "downloaded_at_text": item["downloaded_at"].date().isoformat() if item.get("downloaded_at") else "",
+                "size_text": format_bytes(item.get("size_bytes") or 0),
+            })
+            candidates.append(item)
+            channel_candidates.append(item)
+        if sorted_items:
+            channel_summaries.append({
+                "channel_id": cid,
+                "channel_title": sorted_items[0].get("channel_title") or cid,
+                "favourite": favourite,
+                "policy_days": policy["days"],
+                "policy_label": retention_days_label(policy["days"]),
+                "minimum_videos": policy["minimum_videos"],
+                "policy_source": policy["source"],
+                "stored": len(sorted_items),
+                "eligible": len(channel_candidates),
+                "reclaimable_bytes": sum(int(item.get("size_bytes") or 0) for item in channel_candidates),
+            })
+
+    candidates.sort(key=lambda item: item.get("uploaded_at") or datetime.min.replace(tzinfo=timezone.utc))
+    total_bytes = sum(int(item.get("size_bytes") or 0) for item in candidates)
+    result_candidates = candidates if limit is None or limit < 0 else candidates[: max(0, int(limit))]
+    return {
+        "enabled": bool(settings["enabled"]),
+        "candidate_count": len(candidates),
+        "candidate_bytes": total_bytes,
+        "candidate_size": format_bytes(total_bytes),
+        "protected_count": protected_count,
+        "protected_bytes": protected_bytes,
+        "protected_size": format_bytes(protected_bytes),
+        "unknown_date_count": unknown_date_count,
+        "minimum_kept_count": minimum_kept_count,
+        "keep_forever_count": keep_forever_count,
+        "channels_affected": sum(1 for row in channel_summaries if row["eligible"] > 0),
+        "inventory_count": len(inventory),
+        "candidates": result_candidates,
+        "channels": sorted(channel_summaries, key=lambda row: (-row["eligible"], row["channel_title"].casefold())),
+    }
+
+
+def _retention_delete_media_batch(media_ids):
+    media_ids = [int(value) for value in media_ids if int(value or 0) > 0]
+    if not media_ids:
+        return {"deleted": [], "errors": {}}
+    ids_literal = "[" + ",".join(str(value) for value in media_ids) + "]"
+    expression = (
+        f"ids = {ids_literal}\n"
+        "Enum.each(ids, fn id ->\n"
+        "  try do\n"
+        "    item = Pinchflat.Media.get_media_item!(id)\n"
+        "    case Pinchflat.Media.delete_media_files(item, %{prevent_download: true}) do\n"
+        "      {:ok, _} -> IO.puts(\"RETENTION_DELETED=\" <> Integer.to_string(id))\n"
+        "      other -> IO.puts(\"RETENTION_ERROR=\" <> Integer.to_string(id) <> \"|\" <> inspect(other))\n"
+        "    end\n"
+        "  rescue\n"
+        "    error -> IO.puts(\"RETENTION_ERROR=\" <> Integer.to_string(id) <> \"|\" <> Exception.message(error))\n"
+        "  end\n"
+        "end)\n"
+    )
+    output = docker_exec_in_pinchflat(["bin/pinchflat", "rpc", expression], timeout=300)
+    deleted = [int(value) for value in re.findall(r"RETENTION_DELETED=(\d+)", output)]
+    errors = {}
+    for match in re.finditer(r"RETENTION_ERROR=(\d+)\|([^\r\n]+)", output):
+        errors[int(match.group(1))] = match.group(2)[:500]
+    return {"deleted": deleted, "errors": errors, "output": output}
+
+
+def run_retention_cleanup(trigger="manual"):
+    if not retention_cleanup_lock.acquire(blocking=False):
+        return {"ok": False, "message": "A video retention cleanup is already running."}
+    run_id = None
+    try:
+        settings = retention_settings()
+        if not settings["enabled"]:
+            return {"ok": False, "message": "Video retention is disabled."}
+        preview = retention_preview(limit=-1)
+        with db() as conn:
+            cursor = conn.execute(
+                "INSERT INTO retention_runs (started_at, status, candidate_count, message) VALUES (?, 'running', ?, ?)",
+                (now_iso(), int(preview["candidate_count"]), f"Started by {trigger}."),
+            )
+            run_id = cursor.lastrowid
+        candidates = preview["candidates"]
+        deleted_ids = set()
+        error_map = {}
+        for offset in range(0, len(candidates), 25):
+            batch = candidates[offset: offset + 25]
+            result = _retention_delete_media_batch([item["media_item_id"] for item in batch])
+            deleted_ids.update(result["deleted"])
+            error_map.update(result["errors"])
+            if offset + 25 < len(candidates):
+                time.sleep(1)
+        deleted_items = [item for item in candidates if item["media_item_id"] in deleted_ids]
+        reclaimed = sum(int(item.get("size_bytes") or 0) for item in deleted_items)
+        with db() as conn:
+            for item in deleted_items:
+                conn.execute(
+                    """
+                    INSERT INTO retention_deletions (
+                        deleted_at, video_id, media_item_id, channel_id, channel_title,
+                        title, size_bytes, reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        now_iso(), item.get("video_id") or "", item.get("media_item_id"),
+                        item.get("channel_id") or "", item.get("channel_title") or "",
+                        item.get("title") or "", int(item.get("size_bytes") or 0), item.get("reason") or "",
+                    ),
+                )
+            status = "completed_with_errors" if error_map else "completed"
+            message = (
+                f"Removed {len(deleted_items)} video(s) and reclaimed {format_bytes(reclaimed)}."
+                + (f" {len(error_map)} item(s) could not be removed." if error_map else "")
+            )
+            conn.execute(
+                """
+                UPDATE retention_runs
+                SET finished_at = ?, status = ?, deleted_count = ?, reclaimed_bytes = ?, errors = ?, message = ?
+                WHERE id = ?
+                """,
+                (now_iso(), status, len(deleted_items), reclaimed, len(error_map), message, run_id),
+            )
+        set_setting("retention_last_run_at", now_iso())
+        with storage_cache_lock:
+            storage_cache["updated_at"] = 0.0
+        if deleted_items and emby_configured():
+            try:
+                emby_refresh_library()
+            except Exception as exc:
+                log_activity("retention", "Emby refresh after retention failed", str(exc), "error")
+        log_activity(
+            "retention",
+            "Video retention cleanup",
+            message,
+            "warning" if error_map else "success",
+        )
+        return {
+            "ok": not bool(error_map),
+            "message": message,
+            "deleted_count": len(deleted_items),
+            "reclaimed_bytes": reclaimed,
+            "reclaimed_size": format_bytes(reclaimed),
+            "errors": len(error_map),
+        }
+    except Exception as exc:
+        if run_id:
+            with db() as conn:
+                conn.execute(
+                    "UPDATE retention_runs SET finished_at = ?, status = 'failed', errors = 1, message = ? WHERE id = ?",
+                    (now_iso(), str(exc)[:1000], run_id),
+                )
+        log_activity("retention", "Video retention cleanup failed", str(exc), "error")
+        return {"ok": False, "message": f"Video retention cleanup failed: {exc}"}
+    finally:
+        retention_cleanup_lock.release()
+
+
+def retention_cleanup_due():
+    settings = retention_settings()
+    if not settings["enabled"]:
+        return False
+    last_run = _retention_datetime(settings.get("last_run_at"))
+    if last_run is None:
+        return True
+    due_at = last_run + timedelta(hours=int(settings["cleanup_interval_hours"] or 24))
+    return datetime.now(timezone.utc) >= due_at
+
+
+def scheduled_retention_cleanup():
+    if not retention_cleanup_due() or retention_cleanup_lock.locked():
+        return
+    run_retention_cleanup(trigger="scheduled")
+
+
+def retention_channel_summary(channel_id):
+    policy = retention_policy_for_channel(channel_id)
+    preview = retention_preview(channel_id=channel_id, limit=0)
+    return {
+        **policy,
+        "label": retention_days_label(policy["days"]),
+        "stored": int(preview.get("inventory_count") or 0),
+        "eligible": int(preview.get("candidate_count") or 0),
+        "reclaimable_bytes": int(preview.get("candidate_bytes") or 0),
+        "reclaimable_size": preview.get("candidate_size") or "0 B",
+    }
 
 
 def current_sync_interval():
@@ -12740,6 +13545,10 @@ def index():
             "page_channel_control_delete",
             True,
         ),
+        "channel_control_retention": setting_bool(
+            "page_channel_control_retention",
+            True,
+        ),
     }
 
     page_section_order = setting_order(
@@ -13054,6 +13863,9 @@ def index():
         lockout_attempts=lockout_attempt_limit(),
         lockout_minutes=lockout_minutes(),
         password_min=PASSWORD_MIN_LENGTH,
+        retention=retention_settings(),
+        retention_day_options=RETENTION_DAY_OPTIONS,
+        retention_cleanup_interval_options=RETENTION_CLEANUP_INTERVAL_OPTIONS,
 
         page_view=page_view,
         page_section_order=page_section_order,
@@ -13708,6 +14520,7 @@ def save_page_view_settings():
         "page_channel_control_downloads",
         "page_channel_control_scan",
         "page_channel_control_delete",
+        "page_channel_control_retention",
     }
 
     for key in boolean_settings:
@@ -13799,12 +14612,12 @@ def save_page_view_settings():
 
     log_activity(
         "settings",
-        "Page View settings updated",
+        "Dashboard settings updated",
         "Dashboard sections, header buttons and page order were updated.",
     )
 
     flash(
-        "Page View settings saved.",
+        "Dashboard settings saved.",
         "success",
     )
 
@@ -13858,6 +14671,15 @@ def save_automation_settings():
         else "0",
     )
     set_setting("emby_download_playlist_name", "Emby Download")
+    try:
+        emby_folder = safe_relative_download_folder(
+            request.form.get("emby_download_folder", get_setting("emby_download_folder", "Emby Download")),
+            "Emby Download",
+        )
+        set_setting("emby_download_folder", emby_folder)
+    except Exception as exc:
+        flash(f"Automation settings could not save the Emby Download folder: {exc}", "error")
+        return redirect(url_for("index") + "#automation")
 
     if setting_bool("emby_download_enabled", True) and google_write_scope_ready():
         try:
@@ -13997,6 +14819,223 @@ def pinchflat_power():
         flash(f"Pinchflat power control failed: {exc}", "error")
 
     return redirect(url_for("index") + "#top")
+
+
+@app.post("/settings/video-retention")
+def save_video_retention_settings():
+    previous_settings = retention_settings()
+
+    def parse_int(name, default, minimum, maximum):
+        try:
+            value = int(str(request.form.get(name, default) or default).strip())
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
+
+    favourite_days = parse_int("retention_favourite_days", 365, 0, 3650)
+    favourite_min = parse_int("retention_favourite_min_videos", 20, 0, 10000)
+    nonfavourite_days = parse_int("retention_nonfavourite_days", 90, 0, 3650)
+    nonfavourite_min = parse_int("retention_nonfavourite_min_videos", 5, 0, 10000)
+    grace_days = parse_int("retention_grace_days", 7, 0, 365)
+    interval_hours = parse_int("retention_cleanup_interval_hours", 24, 1, 744)
+    allowed_intervals = {value for value, _label in RETENTION_CLEANUP_INTERVAL_OPTIONS}
+    if interval_hours not in allowed_intervals:
+        interval_hours = 24
+
+    retention_enabled = request.form.get("retention_enabled") == "1"
+    set_setting("retention_enabled", "1" if retention_enabled else "0")
+    # Give a newly enabled policy one full configured interval before the first
+    # automatic cleanup. The user can still use Preview and Run cleanup now
+    # immediately, but enabling the switch itself never starts deletion.
+    if retention_enabled and not previous_settings.get("enabled") and not previous_settings.get("last_run_at"):
+        set_setting("retention_last_run_at", now_iso())
+    set_setting("retention_favourite_days", str(favourite_days))
+    set_setting("retention_favourite_min_videos", str(favourite_min))
+    set_setting("retention_nonfavourite_days", str(nonfavourite_days))
+    set_setting("retention_nonfavourite_min_videos", str(nonfavourite_min))
+    set_setting("retention_grace_days", str(grace_days))
+    set_setting("retention_cleanup_interval_hours", str(interval_hours))
+    set_setting(
+        "retention_protect_favourite_videos",
+        "1" if request.form.get("retention_protect_favourite_videos") == "1" else "0",
+    )
+
+    log_activity(
+        "settings",
+        "Video retention settings updated",
+        (
+            f"Favourite channels: {retention_days_label(favourite_days)}, keep at least {favourite_min}. "
+            f"Other channels: {retention_days_label(nonfavourite_days)}, keep at least {nonfavourite_min}."
+        ),
+        "success",
+    )
+    flash("Video retention settings saved.", "success")
+    return redirect(url_for("index") + "#retention")
+
+
+@app.get("/api/retention/channels")
+def retention_channels_api():
+    query = str(request.args.get("q") or "").strip()
+    like = f"%{query}%"
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.channel_id, s.title, s.thumbnail_url, s.active, s.download_enabled,
+                   s.pinchflat_source_id,
+                   CASE WHEN f.channel_id IS NULL THEN 0 ELSE 1 END AS favourite,
+                   o.retention_days AS override_days,
+                   o.minimum_videos AS override_minimum
+            FROM subscriptions s
+            LEFT JOIN (SELECT DISTINCT channel_id FROM favourite_channels) f
+                ON f.channel_id = s.channel_id
+            LEFT JOIN video_retention_overrides o
+                ON o.channel_id = s.channel_id
+            WHERE s.active = 1
+              AND (? = '' OR s.title LIKE ? OR s.channel_id LIKE ?)
+            ORDER BY favourite DESC, LOWER(s.title) ASC
+            LIMIT 80
+            """,
+            (query, like, like),
+        ).fetchall()
+
+    result = []
+    for row in rows:
+        item = dict(row)
+        policy = retention_policy_for_channel(item["channel_id"], favourite=bool(item["favourite"]))
+        result.append({
+            "channel_id": item["channel_id"],
+            "title": item["title"],
+            "thumbnail_url": item.get("thumbnail_url") or "",
+            "favourite": bool(item["favourite"]),
+            "download_enabled": bool(item["download_enabled"]),
+            "source_id": str(item.get("pinchflat_source_id") or ""),
+            "override": item.get("override_days") is not None,
+            "override_days": item.get("override_days"),
+            "override_minimum": item.get("override_minimum"),
+            "effective_days": policy["days"],
+            "effective_label": retention_days_label(policy["days"]),
+            "effective_minimum": policy["minimum_videos"],
+            "policy_source": policy["source"],
+        })
+    return jsonify({"ok": True, "channels": result})
+
+
+@app.post("/api/retention/channels/<channel_id>")
+def save_retention_channel_override_api(channel_id):
+    mode = str(request.form.get("mode") or "override").strip().lower()
+    if mode == "inherit":
+        with db() as conn:
+            conn.execute("DELETE FROM video_retention_overrides WHERE channel_id = ?", (channel_id,))
+        policy = retention_policy_for_channel(channel_id)
+        return jsonify({
+            "ok": True,
+            "message": "Channel retention now follows its group policy.",
+            "policy": {**policy, "label": retention_days_label(policy["days"])},
+        })
+
+    try:
+        days = int(request.form.get("retention_days", "0") or 0)
+        minimum = int(request.form.get("minimum_videos", "0") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Retention values must be whole numbers."}), 400
+    days = max(0, min(3650, days))
+    minimum = max(0, min(10000, minimum))
+    with db() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM subscriptions WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+        if not exists:
+            return jsonify({"ok": False, "error": "Channel was not found."}), 404
+        conn.execute(
+            """
+            INSERT INTO video_retention_overrides (channel_id, retention_days, minimum_videos, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                retention_days = excluded.retention_days,
+                minimum_videos = excluded.minimum_videos,
+                updated_at = excluded.updated_at
+            """,
+            (channel_id, days, minimum, now_iso()),
+        )
+    policy = retention_policy_for_channel(channel_id)
+    return jsonify({
+        "ok": True,
+        "message": f"Channel retention set to {retention_days_label(days)} with at least {minimum} newest videos kept.",
+        "policy": {**policy, "label": retention_days_label(policy["days"])},
+    })
+
+
+@app.get("/api/retention/preview")
+def retention_preview_api():
+    try:
+        preview = retention_preview(limit=250)
+        return jsonify({"ok": True, **preview})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/retention/run")
+def retention_run_api():
+    if retention_cleanup_lock.locked():
+        return jsonify({"ok": False, "error": "A video retention cleanup is already running."}), 409
+    if not retention_settings()["enabled"]:
+        return jsonify({"ok": False, "error": "Enable Video Retention before running cleanup."}), 400
+
+    def worker():
+        run_retention_cleanup(trigger="manual")
+
+    threading.Thread(target=worker, name="video-retention-cleanup", daemon=True).start()
+    return jsonify({"ok": True, "message": "Video retention cleanup started."})
+
+
+@app.get("/api/retention/status")
+def retention_status_api():
+    with db() as conn:
+        row = conn.execute("SELECT * FROM retention_runs ORDER BY id DESC LIMIT 1").fetchone()
+    run = dict(row) if row else None
+    if run:
+        run["reclaimed_size"] = format_bytes(run.get("reclaimed_bytes") or 0)
+    return jsonify({
+        "ok": True,
+        "running": retention_cleanup_lock.locked(),
+        "last_run": run,
+        "settings": retention_settings(),
+    })
+
+
+@app.route("/api/retention/protection/<video_id>", methods=["GET", "POST"])
+def retention_video_protection_api(video_id):
+    video_id = str(video_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id):
+        return jsonify({"ok": False, "error": "Invalid YouTube video ID."}), 400
+
+    if request.method == "GET":
+        return jsonify({"ok": True, "protected": video_id in retention_protected_video_ids()})
+
+    payload = request.get_json(silent=True) or {}
+    protected = bool(payload.get("protected", True))
+    channel_id = str(payload.get("channel_id") or "").strip()
+    title = str(payload.get("title") or "").strip()
+    with db() as conn:
+        if protected:
+            conn.execute(
+                """
+                INSERT INTO retention_protected_videos (video_id, channel_id, title, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(video_id) DO UPDATE SET
+                    channel_id = excluded.channel_id,
+                    title = excluded.title
+                """,
+                (video_id, channel_id, title, now_iso()),
+            )
+        else:
+            conn.execute("DELETE FROM retention_protected_videos WHERE video_id = ?", (video_id,))
+    return jsonify({
+        "ok": True,
+        "protected": protected,
+        "message": "Video protected from retention cleanup." if protected else "Video will follow its channel retention policy.",
+    })
 
 
 @app.post("/settings/pinchflat")
@@ -14750,6 +15789,7 @@ def channel_details_api(channel_id):
         "subscribed": youtube_subscribed,
         "favourite": channel_id in favourite_channel_ids(),
         "youtube": youtube,
+        "retention": retention_channel_summary(channel_id),
     })
 
 
@@ -15961,7 +17001,7 @@ def save_api_settings():
         "info",
     )
     flash("Emby API settings saved.", "success")
-    return redirect(url_for("index") + "#api")
+    return redirect(url_for("index") + "#emby")
 
 
 @app.get("/api/emby/test")
@@ -15970,10 +17010,27 @@ def emby_test_api():
         info = emby_test_connection()
         library = info.get("youtube_library") or {}
         library_note = (
-            f" · YouTube library: {library.get('name')}"
+            f" · Pinchflat library: {library.get('name')}"
             if library.get("name")
             else ""
         )
+        single_library = {}
+        single_error = ""
+        playlist_library = {}
+        playlist_error = ""
+        try:
+            single_library = emby_detect_download_library(
+                get_setting("single_download_folder", "Single Downloads")
+            )
+        except Exception as exc:
+            single_error = str(exc)
+        try:
+            playlist_library = emby_detect_download_library(
+                get_setting("emby_download_folder", "Emby Download")
+            )
+        except Exception as exc:
+            playlist_error = str(exc)
+
         return jsonify(
             {
                 "ok": True,
@@ -15985,6 +17042,10 @@ def emby_test_api():
                 "server": info,
                 "youtube_library": library,
                 "youtube_library_error": info.get("youtube_library_error") or "",
+                "single_download_library": single_library,
+                "single_download_library_error": single_error,
+                "emby_download_library": playlist_library,
+                "emby_download_library_error": playlist_error,
             }
         )
     except Exception as exc:
@@ -16001,17 +17062,29 @@ def emby_refresh_api():
     payload = request.get_json(silent=True) or {}
     channel_id = str(payload.get("channel_id") or "").strip()
     channel_title = str(payload.get("channel_title") or "").strip()
+    target = str(payload.get("target") or "pinchflat").strip().lower()
 
     try:
-        result = emby_refresh_library(
-            channel_id=channel_id,
-            channel_title=channel_title,
-        )
+        if target == "single":
+            result = emby_refresh_download_library(
+                get_setting("single_download_folder", "Single Downloads"),
+                "One-time Download",
+            )
+        elif target == "emby_download":
+            result = emby_refresh_download_library(
+                get_setting("emby_download_folder", "Emby Download"),
+                "Emby Download",
+            )
+        else:
+            result = emby_refresh_library(
+                channel_id=channel_id,
+                channel_title=channel_title,
+            )
         if result.get("scope") == "channel":
             message = f"Emby scan started for {result.get('channel') or 'the channel'}. Metadata refresh will follow."
         else:
             library = result.get("library") or {}
-            message = f"Emby scan started for {library.get('name') or 'the YouTube library'}. Metadata refresh will follow."
+            message = f"Emby scan started for {library.get('name') or 'the selected YouTube library'}. Metadata refresh will follow."
         return jsonify(
             {
                 "ok": True,
@@ -16237,6 +17310,14 @@ scheduler.add_job(
     "interval",
     minutes=1,
     id="pinchflat-scheduled-force-index",
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    scheduled_retention_cleanup,
+    "interval",
+    hours=1,
+    id="video-retention-cleanup",
     max_instances=1,
     coalesce=True,
 )

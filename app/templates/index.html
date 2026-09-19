@@ -229,29 +229,144 @@
       align-self:center;
     }
 
-    #settings-dialog > .modal-body > .tabs {
+    #settings-dialog { width:min(1380px,96vw); }
+    #settings-dialog .modal-body { padding:0; overflow:hidden; }
+    .settings-layout {
       display:grid;
-      grid-template-columns:repeat(8,minmax(92px,1fr));
-      gap:7px;
+      grid-template-columns:250px minmax(0,1fr);
+      height:100%;
+      min-height:0;
     }
-
-    #settings-dialog > .modal-body > .tabs .tab-btn {
+    .settings-nav {
+      border-right:1px solid var(--line);
+      background:#0b1524;
+      padding:18px 12px;
       min-width:0;
+    }
+    .settings-nav-group { margin-bottom:18px; }
+    .settings-nav-group:last-child { margin-bottom:0; }
+    .settings-nav-title {
+      display:block;
+      padding:0 10px 7px;
+      color:#7187a7;
+      font-size:11px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .settings-nav .tab-btn {
       width:100%;
-      margin:0;
-      white-space:nowrap;
+      min-width:0;
+      height:auto;
+      min-height:58px;
+      margin:0 0 5px;
+      padding:10px 12px;
+      display:flex;
+      flex-direction:column;
+      align-items:flex-start;
+      justify-content:center;
+      gap:2px;
+      text-align:left;
+      white-space:normal;
+      border-radius:10px;
+    }
+    .settings-nav .tab-btn strong { font-size:14px; }
+    .settings-nav .tab-btn small {
+      color:var(--muted);
+      font-size:11px;
+      font-weight:500;
+      line-height:1.25;
+    }
+    .settings-nav .tab-btn.active small { color:#dbe8ff; }
+    .settings-panels {
+      min-width:0;
+      overflow-y:auto;
+      overflow-x:hidden;
+      padding:20px 22px 34px;
+      scrollbar-gutter:stable;
+    }
+    .settings-panel-intro {
+      display:flex;
+      justify-content:space-between;
+      gap:18px;
+      align-items:flex-start;
+      margin:0 0 16px;
+      padding:0 2px;
+    }
+    .settings-panel-intro h3 { margin:0 0 4px; font-size:19px; }
+    .settings-panel-intro p { margin:0; color:var(--muted); font-size:13px; }
+    .settings-section-label {
+      margin:18px 0 9px;
+      color:#b8c8df;
+      font-size:12px;
+      font-weight:800;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+    }
+    .settings-order-card {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto auto;
+      gap:12px;
+      align-items:center;
+      padding:12px 13px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#0b1626;
+      margin-bottom:8px;
+    }
+    .settings-order-card strong { display:block; }
+    .settings-order-card small { display:block; margin-top:2px; color:var(--muted); }
+    .settings-order-card label { margin:0 !important; min-height:auto !important; white-space:nowrap; }
+    .settings-path-card {
+      border:1px solid var(--line);
+      background:#0b1626;
+      border-radius:10px;
+      padding:12px 14px;
+      margin-top:10px;
+    }
+    .settings-path-card code { display:block; margin-top:5px; overflow-wrap:anywhere; }
+    .settings-status-list { display:grid; gap:8px; margin-top:12px; }
+    .settings-status-row {
+      display:grid;
+      grid-template-columns:150px minmax(0,1fr);
+      gap:10px;
+      padding:10px 12px;
+      border:1px solid var(--line);
+      border-radius:9px;
+      background:#0b1626;
+    }
+    .settings-status-row strong { font-size:13px; }
+    .settings-status-row span { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+    .settings-details { border:1px solid var(--line); border-radius:10px; background:#0b1626; margin:12px 0; }
+    .settings-details summary { cursor:pointer; padding:12px 14px; font-weight:750; }
+    .settings-details > div { padding:0 14px 14px; }
+    .settings-note {
+      border-left:3px solid #3b82f6;
+      background:#0c1b31;
+      border-radius:0 9px 9px 0;
+      padding:10px 12px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.45;
+      margin:10px 0;
     }
 
-    @media (max-width:980px) {
-      #settings-dialog > .modal-body > .tabs {
-        grid-template-columns:repeat(4,minmax(92px,1fr));
+    @media (max-width:900px) {
+      .settings-layout { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
+      .settings-nav {
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:5px 7px;
+        border-right:0;
+        border-bottom:1px solid var(--line);
+        padding:10px 12px;
       }
-    }
-
-    @media (max-width:620px) {
-      #settings-dialog > .modal-body > .tabs {
-        grid-template-columns:repeat(2,minmax(92px,1fr));
-      }
+      .settings-nav-group { display:contents; }
+      .settings-nav-title { grid-column:1/-1; padding:6px 4px 2px; }
+      .settings-nav .tab-btn { min-height:48px; margin:0; padding:8px 10px; }
+      .settings-panels { padding:16px 14px 28px; }
+      .settings-order-card { grid-template-columns:1fr; }
+      .settings-status-row { grid-template-columns:1fr; }
     }
     .inline-control { min-width:170px; }
     .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
@@ -1012,7 +1127,7 @@
     .modal-head { display:flex; justify-content:space-between; align-items:center; padding:18px 20px; border-bottom:1px solid var(--line); }
     .modal-body { padding:18px 20px 24px; overflow:auto; max-height:calc(90vh - 72px); }
     #settings-dialog { height:min(900px,90vh); }
-    #settings-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; overflow-x:hidden; }
+    #settings-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow:hidden; }
     #discover-dialog { width:min(1220px,96vw); height:min(840px,92vh); }
     #discover-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
 
@@ -1230,6 +1345,8 @@
     .discover-action-favourite { top:8px; right:8px; }
     .discover-action-primary { top:8px; left:8px; }
     .discover-action-subscribe { right:8px; bottom:8px; }
+    .discover-action-protect { left:8px; bottom:8px; }
+    .discover-action-protect.active { color:#d8b4fe; border-color:#8b5cf6; background:rgba(55,22,105,.94); }
     .discover-action-favourite.active { color:#ff5a84; border-color:#ff5a84; background:rgba(44,8,23,.94); }
     .discover-action-subscribe.active { color:#6ee7a8; border-color:#329a68; background:rgba(8,50,33,.94); }
     .discover-action-emby { color:#68c8ff; }
@@ -2800,6 +2917,13 @@
     .channel-image-control.channel-control-enabled.active { background:#15803d; color:#fff; }
     .channel-image-control.channel-control-scan { bottom:-3px; left:-5px; background:#31527f; }
     .channel-image-control.channel-control-delete { bottom:-3px; right:-5px; background:#7f1d1d; color:#fff; }
+    .channel-image-control.channel-control-retention {
+      bottom:-7px; left:50%; margin-left:-15px; background:#6d28d9; color:#fff;
+    }
+    .channel-image-control.channel-control-retention svg {
+      width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2;
+      stroke-linecap:round; stroke-linejoin:round; pointer-events:none;
+    }
     .channel-image-control.channel-control-delete svg {
       width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:2;
       stroke-linecap:round; stroke-linejoin:round; pointer-events:none;
@@ -2811,14 +2935,16 @@
     .channel-image-control-wrap.compact .channel-image-control.channel-control-enabled { top:-6px; left:-7px; }
     .channel-image-control-wrap.compact .channel-image-control.channel-control-scan { bottom:-6px; left:-7px; }
     .channel-image-control-wrap.compact .channel-image-control.channel-control-delete { bottom:-6px; right:-7px; }
+    .channel-image-control-wrap.compact .channel-image-control.channel-control-retention { bottom:-9px; margin-left:-11px; }
     .channel-image-control-wrap.compact .channel-image-control.channel-control-delete svg { width:11px; height:11px; }
 
-    /* Global Page View control for the shared channel-image actions. */
+    /* Global Dashboard control for the shared channel-image actions. */
     body.hide-channel-controls .channel-image-control { display:none !important; }
     body.hide-channel-favourite .channel-control-favourite { display:none !important; }
     body.hide-channel-downloads .channel-control-enabled { display:none !important; }
     body.hide-channel-scan .channel-control-scan { display:none !important; }
     body.hide-channel-delete .channel-control-delete { display:none !important; }
+    body.hide-channel-retention .channel-control-retention { display:none !important; }
 
     .channel-video-card {
       position:relative;
@@ -2840,6 +2966,13 @@
     .channel-video-download-action svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
     .channel-video-download-action:hover:not(:disabled) { transform:scale(1.06); background:#2563eb; }
     .channel-video-download-action:disabled { opacity:.42; cursor:not-allowed; transform:none; background:rgba(7,17,29,.88); }
+    .channel-video-protect-action {
+      position:absolute; left:9px; bottom:9px; z-index:3; width:34px; height:34px; border-radius:50%;
+      border:1px solid rgba(255,255,255,.22); background:rgba(7,17,29,.88); color:#fff; display:grid; place-items:center;
+      box-shadow:0 4px 14px rgba(0,0,0,.36); cursor:pointer; backdrop-filter:blur(4px);
+    }
+    .channel-video-protect-action svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+    .channel-video-protect-action:hover:not(:disabled), .channel-video-protect-action.active { background:#6d28d9; }
     .subscription-channel-description a { color:#7db6ff; text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
     .subscription-channel-description a:hover { color:#b5d6ff; }
 
@@ -3084,9 +3217,64 @@
       .channel-chart-controls { margin-top:10px; }
       .latest-popup-channel-stat-grid { grid-template-columns:1fr 1fr; }
     }
+
+    .retention-hero {
+      display:grid; grid-template-columns:minmax(0,1.3fr) minmax(260px,.7fr); gap:14px;
+      padding:18px; border:1px solid var(--border); border-radius:16px;
+      background:linear-gradient(135deg,rgba(109,40,217,.16),rgba(15,23,42,.35));
+      margin-bottom:14px;
+    }
+    .retention-hero h3 { margin:0 0 6px; }
+    .retention-master-toggle { display:flex; align-items:center; gap:10px; justify-content:flex-end; }
+    .retention-policy-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .retention-policy-card {
+      border:1px solid var(--border); border-radius:14px; padding:16px; background:rgba(9,18,32,.42);
+    }
+    .retention-policy-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+    .retention-policy-icon {
+      width:42px; height:42px; display:grid; place-items:center; border-radius:13px;
+      background:#172d4f; font-size:20px; flex:0 0 auto;
+    }
+    .retention-policy-card.favourite .retention-policy-icon { background:#5f1822; }
+    .retention-stat-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:12px 0; }
+    .retention-stat { border:1px solid var(--border); border-radius:12px; padding:12px; background:rgba(9,18,32,.55); }
+    .retention-stat span { display:block; color:var(--muted); font-size:12px; margin-bottom:5px; }
+    .retention-stat strong { font-size:22px; }
+    .retention-preview-list { display:grid; gap:8px; margin-top:12px; max-height:420px; overflow:auto; padding-right:4px; }
+    .retention-preview-row {
+      display:grid; grid-template-columns:72px minmax(0,1fr) auto; gap:12px; align-items:center;
+      border:1px solid var(--border); border-radius:12px; padding:9px; background:rgba(9,18,32,.45);
+    }
+    .retention-preview-row img { width:72px; aspect-ratio:16/9; object-fit:cover; border-radius:8px; }
+    .retention-preview-title { font-weight:800; line-height:1.25; }
+    .retention-preview-meta { color:var(--muted); font-size:12px; margin-top:4px; }
+    .retention-preview-size { font-weight:800; white-space:nowrap; }
+    .retention-channel-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:10px 0 12px; }
+    .retention-channel-toolbar input { flex:1; min-width:220px; }
+    .retention-channel-grid { display:grid; gap:10px; }
+    .retention-channel-card {
+      display:grid; grid-template-columns:58px minmax(160px,1fr) minmax(150px,.65fr) minmax(130px,.45fr) auto;
+      gap:10px; align-items:center; border:1px solid var(--border); border-radius:12px; padding:10px;
+      background:rgba(9,18,32,.45);
+    }
+    .retention-channel-card img { width:52px; height:52px; border-radius:50%; object-fit:cover; }
+    .retention-channel-title { font-weight:800; }
+    .retention-channel-source { color:var(--muted); font-size:12px; margin-top:3px; }
+    .retention-pill {
+      display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); border-radius:999px;
+      padding:4px 8px; color:var(--muted); font-size:11px; margin-top:5px;
+    }
+    .retention-protect-action.active { background:#5b21b6; border-color:#7c3aed; color:#fff; }
+    .media-player-action.retention-protect-action svg { fill:none; }
+    @media (max-width:900px) {
+      .retention-hero,.retention-policy-grid { grid-template-columns:1fr; }
+      .retention-stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .retention-channel-card { grid-template-columns:52px 1fr; }
+      .retention-channel-card > label,.retention-channel-card > .retention-channel-actions { grid-column:2; }
+    }
 </style>
 </head>
-<body class="{% if not page_view.channel_controls %}hide-channel-controls{% endif %} {% if not page_view.channel_control_favourite %}hide-channel-favourite{% endif %} {% if not page_view.channel_control_downloads %}hide-channel-downloads{% endif %} {% if not page_view.channel_control_scan %}hide-channel-scan{% endif %} {% if not page_view.channel_control_delete %}hide-channel-delete{% endif %}">
+<body class="{% if not page_view.channel_controls %}hide-channel-controls{% endif %} {% if not page_view.channel_control_favourite %}hide-channel-favourite{% endif %} {% if not page_view.channel_control_downloads %}hide-channel-downloads{% endif %} {% if not page_view.channel_control_scan %}hide-channel-scan{% endif %} {% if not page_view.channel_control_delete %}hide-channel-delete{% endif %} {% if not page_view.channel_control_retention %}hide-channel-retention{% endif %}">
 <div class="wrap">
   <div class="header">
     <div>
@@ -3554,6 +3742,15 @@
                   >↻</button>
                   <button
                     type="button"
+                    class="channel-image-control channel-control-retention"
+                    aria-label="Edit video retention for {{ sub['title'] }}"
+                    title="Edit video retention for this channel"
+                    data-channel-retention-control="1"
+                    data-channel-id="{{ sub['channel_id'] }}"
+                    onclick="openRetentionSettingsForChannel('{{ sub['channel_id']|e }}', {{ sub['title']|tojson }})"
+                  ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
+                  <button
+                    type="button"
                     class="channel-image-control channel-control-delete"
                     aria-label="Delete or remove {{ sub['title'] }}"
                     title="Delete or remove channel"
@@ -3800,18 +3997,22 @@
         <h3>Emby, automation &amp; Pinchflat settings</h3>
         <div class="debug-function-list">
           <div class="debug-function-row" data-debug-search="test emby connection api"><div class="debug-function-name">Test Emby connection</div><div class="debug-service-badge">Emby API</div><div class="debug-function-description">Checks the configured Emby server URL and API key and reports whether the server responds.</div></div>
-          <div class="debug-function-row" data-debug-search="emby scan library files youtube library"><div class="debug-function-name">Emby Scan Library Files</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Scans only the automatically detected Emby YouTube library, then runs a delayed Replace all metadata refresh without replacing images or preview thumbnails. It does not request a full-server media scan.</div></div>
+          <div class="debug-function-row" data-debug-search="emby scan library files youtube single downloads playlist"><div class="debug-function-name">Emby targeted scans</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Detects the Emby library associated with Pinchflat media, One-time Downloads or the Emby Download playlist, scans only that target, then runs the delayed Replace all metadata refresh.</div></div>
           <div class="debug-function-row" data-debug-search="auto refresh emby downloads"><div class="debug-function-name">Automatic Emby refresh</div><div class="debug-service-badge">Pinchflat + Emby</div><div class="debug-function-description">Detects a newly completed Pinchflat download, scans its channel in Emby and follows with a delayed metadata refresh automatically.</div></div>
           <div class="debug-function-row" data-debug-search="subscription sync schedule automation youtube"><div class="debug-function-name">YouTube subscription sync</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Controls the scheduled refresh of YouTube subscriptions.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat sync schedule automation"><div class="debug-function-name">Pinchflat sync schedule</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Controls scheduled reconciliation between local subscription settings and Pinchflat sources.</div></div>
           <div class="debug-function-row" data-debug-search="scheduled force index favourites non favourites source scan"><div class="debug-function-name">Scheduled Force Index</div><div class="debug-service-badge">Pinchflat + YouTube</div><div class="debug-function-description">Force Indexes enabled Pinchflat sources automatically. Favourite and non-favourite channels have separate intervals, and scans are staggered source by source across each interval to avoid one large request burst.</div></div>
+          <div class="debug-function-row" data-debug-search="video retention cleanup delete old media age storage"><div class="debug-function-name">Video Retention</div><div class="debug-service-badge">Pinchflat + Local app</div><div class="debug-function-description">Removes old Pinchflat-downloaded media by YouTube upload age using favourite, non-favourite and per-channel policies. It keeps the configured newest videos and uses Pinchflat's own deletion logic to stop removed media being immediately downloaded again.</div></div>
+          <div class="debug-function-row" data-debug-search="retention shield channel policy override"><div class="debug-function-name">Retention shield</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Opens Video Retention settings for the selected channel so its inherited policy can be viewed or overridden.</div></div>
+          <div class="debug-function-row" data-debug-search="protect video retention shield keep permanently"><div class="debug-function-name">Protect video from retention</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Marks an individual YouTube video as protected so Video Retention will keep it regardless of the channel age policy.</div></div>
+          <div class="debug-function-row" data-debug-search="retention preview cleanup reclaim storage"><div class="debug-function-name">Retention cleanup preview</div><div class="debug-service-badge">Pinchflat + Local storage</div><div class="debug-function-description">Calculates which downloaded videos would be removed and how much storage would be reclaimed without deleting anything.</div></div>
           <div class="debug-function-row" data-debug-search="emby download playlist automation"><div class="debug-function-name">Emby Download playlist</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Checks the private Emby Download playlist and sends requested videos through the automatic download workflow.</div></div>
           <div class="debug-function-row" data-debug-search="concurrent downloads workers yt-dlp docker"><div class="debug-function-name">Concurrent downloads</div><div class="debug-service-badge">Pinchflat + Docker</div><div class="debug-function-description">Changes Pinchflat's yt-dlp worker concurrency and recreates the container while preserving its configuration.</div></div>
           <div class="debug-function-row" data-debug-search="media profiles pinchflat settings"><div class="debug-function-name">Media Profiles</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Creates, edits and deletes Pinchflat media profiles including path, quality, metadata, artwork and SponsorBlock options.</div></div>
-          <div class="debug-function-row" data-debug-search="page view settings show hide load minimise"><div class="debug-function-name">Page View</div><div class="debug-service-badge">Local app / Browser</div><div class="debug-function-description">Controls which dashboard sections load, their default minimised state, status tiles, header buttons, ordering and the shared channel-image controls.</div></div>
-          <div class="debug-function-row" data-debug-search="channel image controls icons heart tick scan delete global"><div class="debug-function-name">Channel image controls</div><div class="debug-service-badge">Local app + YouTube + Pinchflat</div><div class="debug-function-description">Global Page View switches control whether Favourite, download enable, Force Scan and remove icons appear around channel artwork throughout the web app.</div></div>
+          <div class="debug-function-row" data-debug-search="dashboard page view settings show hide load minimise"><div class="debug-function-name">Dashboard settings</div><div class="debug-service-badge">Local app / Browser</div><div class="debug-function-description">Controls dashboard order, section visibility, minimised state, status tiles, header buttons and the shared channel-image controls.</div></div>
+          <div class="debug-function-row" data-debug-search="channel image controls icons heart tick scan delete global"><div class="debug-function-name">Channel image controls</div><div class="debug-service-badge">Local app + YouTube + Pinchflat</div><div class="debug-function-description">Global Dashboard switches control whether Favourite, download enable, Force Scan, retention and remove icons appear around channel artwork throughout the web app.</div></div>
           <div class="debug-function-row" data-debug-search="429 too many requests bot yt-dlp rate limit concurrency"><div class="debug-function-name">YouTube HTTP 429</div><div class="debug-service-badge">YouTube / yt-dlp / Pinchflat</div><div class="debug-function-description">YouTube is rate-limiting the downloader. Reduce Pinchflat concurrent downloads to 1 first. Cookies or a current yt-dlp PO Token provider may also be required when YouTube asks for bot confirmation.</div></div>
-          <div class="debug-function-row" data-debug-search="logs activity sync pinchflat direct downloads"><div class="debug-function-name">Logs</div><div class="debug-service-badge">Local app + Pinchflat</div><div class="debug-function-description">Shows application activity, direct downloads, sync runs and Pinchflat logs for troubleshooting.</div></div>
+          <div class="debug-function-row" data-debug-search="diagnostics logs activity sync pinchflat direct downloads"><div class="debug-function-name">Diagnostics</div><div class="debug-service-badge">Local app + Pinchflat</div><div class="debug-function-description">Combines application health, activity, direct-download history, sync runs and Pinchflat logs in one troubleshooting view.</div></div>
         </div>
       </section>
 
@@ -3821,7 +4022,7 @@
           <div class="debug-function-row" data-debug-search="remember login signed in cookie security"><div class="debug-function-name">Keep me signed in</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Controls how long the persistent authentication cookie remains valid after the browser closes.</div></div>
           <div class="debug-function-row" data-debug-search="inactivity timeout security"><div class="debug-function-name">Inactivity timeout</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Ends a logged-in session after the configured period without activity.</div></div>
           <div class="debug-function-row" data-debug-search="two factor 2fa security"><div class="debug-function-name">Two-factor authentication</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Adds a time-based second authentication factor and recovery codes for supported users.</div></div>
-          <div class="debug-function-row" data-debug-search="minimise sections browser"><div class="debug-function-name">Minimise section</div><div class="debug-service-badge">Browser / Local app</div><div class="debug-function-description">Collapses a dashboard section without changing whether the section is enabled in Page View.</div></div>
+          <div class="debug-function-row" data-debug-search="minimise sections browser"><div class="debug-function-name">Minimise section</div><div class="debug-service-badge">Browser / Local app</div><div class="debug-function-description">Collapses a dashboard section without changing whether the section is enabled in Dashboard settings.</div></div>
           <div class="debug-function-row" data-debug-search="github repository source code"><div class="debug-function-name">GitHub footer link</div><div class="debug-service-badge">GitHub</div><div class="debug-function-description">Opens the source repository used for your GitHub Desktop publishing workflow.</div></div>
         </div>
       </section>
@@ -3974,6 +4175,7 @@
             <button id="subscription-channel-enabled-badge" class="channel-image-control channel-control-enabled" type="button" title="Enable downloads" aria-label="Toggle downloads">✓</button>
             {% if is_admin %}
             <button id="subscription-channel-force-scan" class="channel-image-control channel-control-scan" type="button" onclick="forceScanFromChannelPopup()" title="Force Pinchflat to scan this channel" aria-label="Force Pinchflat scan">↻</button>
+            <button id="subscription-channel-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(currentSubscriptionChannelId)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
             <button id="subscription-channel-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
             {% endif %}
           </div>
@@ -4082,6 +4284,23 @@
             <div class="channel-detail-card"><span>Pinchflat source</span><strong id="subscription-channel-source">—</strong></div>
           </div>
         </div>
+
+        <div id="subscription-channel-retention-stats" class="channel-stats-section">
+          <div class="channel-stats-heading">
+            <div>
+              <h3>Video retention</h3>
+              <span id="subscription-channel-retention-source">—</span>
+            </div>
+            {% if is_admin %}<button class="btn ghost smallbtn" type="button" onclick="openRetentionSettingsForChannel(currentSubscriptionChannelId)">Edit policy</button>{% endif %}
+          </div>
+          <div class="channel-detail-grid">
+            <div class="channel-detail-card"><span>Keep videos for</span><strong id="subscription-channel-retention-policy">—</strong></div>
+            <div class="channel-detail-card"><span>Minimum kept</span><strong id="subscription-channel-retention-minimum">—</strong></div>
+            <div class="channel-detail-card"><span>Stored by Pinchflat</span><strong id="subscription-channel-retention-stored">—</strong></div>
+            <div class="channel-detail-card"><span>Eligible for cleanup</span><strong id="subscription-channel-retention-eligible">—</strong></div>
+            <div class="channel-detail-card"><span>Space reclaimable</span><strong id="subscription-channel-retention-space">—</strong></div>
+          </div>
+        </div>
       </div>
 
       <div class="channel-insight-panel">
@@ -4128,7 +4347,7 @@
   </div>
   <div class="subscription-actions-menu-section">
     <div class="subscription-actions-menu-label">Emby</div>
-    <button id="subscription-actions-emby-refresh" type="button" onclick="refreshEmbyForCurrentChannel()" {% if not emby_api_configured %}disabled title="Configure Emby in Settings → API first"{% endif %}>Refresh Emby</button>
+    <button id="subscription-actions-emby-refresh" type="button" onclick="refreshEmbyForCurrentChannel()" {% if not emby_api_configured %}disabled title="Configure Emby in Settings → Emby first"{% endif %}>Refresh Emby</button>
   </div>
   <div class="subscription-actions-menu-section">
     <div class="subscription-actions-menu-label">YouTube</div>
@@ -4205,6 +4424,11 @@
           <button id="latest-popup-video-heart" class="media-player-action video-favourite" type="button" onclick="toggleLatestPopupVideoFavourite()" title="Add video to favourites" aria-label="Add video to favourites" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"></path></svg>
           </button>
+          {% if is_admin %}
+          <button id="latest-popup-retention-protect" class="media-player-action retention-protect-action" type="button" onclick="toggleLatestPopupRetentionProtection()" title="Protect video from retention cleanup" aria-label="Protect video from retention cleanup" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg>
+          </button>
+          {% endif %}
           <button id="latest-popup-youtube-subscribe" class="media-player-action" type="button" onclick="subscribeLatestPopupChannel()" title="Subscribe to channel on YouTube" aria-label="Subscribe to channel on YouTube" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 19a6 6 0 0 0-12 0"></path><circle cx="9" cy="7" r="4"></circle><path d="M19 8v6"></path><path d="M16 11h6"></path></svg>
           </button>
@@ -4267,6 +4491,7 @@
               {% if is_admin %}
               <button id="latest-popup-channel-avatar-enabled" class="channel-image-control channel-control-enabled" type="button" data-channel-enabled-control="1" title="Toggle downloads">✓</button>
               <button id="latest-popup-channel-avatar-scan" class="channel-image-control channel-control-scan" type="button" data-channel-scan-control="1" title="Force Pinchflat scan">↻</button>
+              <button id="latest-popup-channel-avatar-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(latestPopupVideo?.channel_id || '')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
               <button id="latest-popup-channel-avatar-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
               {% endif %}
             </div>
@@ -4347,7 +4572,7 @@
 
 <dialog id="single-download-dialog">
   <div class="modal-head">
-    <div><h2 style="margin:0">Single Download</h2><div class="muted small">Download one YouTube video directly into the Emby YouTube library.</div></div>
+    <div><h2 style="margin:0">Single Download</h2><div class="muted small">Download one YouTube video using your saved One-time Download settings.</div></div>
     <button class="modal-close" onclick="closeSingleDownload()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
@@ -4355,6 +4580,10 @@
       <label>YouTube URL
         <input id="single-download-url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
       </label>
+      <div class="settings-path-card" style="margin:8px 0 12px">
+        <span class="muted small">Current settings</span>
+        <div><strong>{{ single_download_format|upper }}</strong>{% if single_download_format == 'audio' %} · {{ single_download_audio_format|upper }}{% endif %} · <code>/downloads/{{ single_download_folder }}</code></div>
+      </div>
       <button class="btn" id="single-download-start">Start download</button>
     </form>
     <div id="single-download-status" class="progress-wrap hidden">
@@ -4407,6 +4636,7 @@
             </button>
             <button id="shorts-sound-btn" class="media-player-action" type="button" onclick="toggleShortsSound()" title="Turn sound on" aria-label="Turn sound on"></button>
             <button id="shorts-video-heart" class="media-player-action video-favourite" type="button" onclick="toggleCurrentShortVideoFavourite()" title="Add video to favourites" aria-label="Add video to favourites" aria-pressed="false"></button>
+            {% if is_admin %}<button id="shorts-retention-protect" class="media-player-action retention-protect-action" type="button" onclick="toggleCurrentShortRetentionProtection()" title="Protect video from retention cleanup" aria-label="Protect video from retention cleanup" aria-pressed="false"></button>{% endif %}
             <button id="shorts-youtube-subscribe" class="media-player-action" type="button" onclick="subscribeCurrentShortChannel()" title="Subscribe to channel on YouTube" aria-label="Subscribe to channel on YouTube" aria-pressed="false"></button>
             <button id="shorts-youtube-like" class="media-player-action" type="button" onclick="likeCurrentShortOnYouTube()" title="Like video on YouTube" aria-label="Like video on YouTube" aria-pressed="false"></button>
             <button id="shorts-download" class="media-player-action" type="button" onclick="downloadCurrentShort()" title="Prepare one-time download" aria-label="Prepare one-time download"></button>
@@ -4582,456 +4812,317 @@
 
 <dialog id="settings-dialog">
   <div class="modal-head">
-    <div><h2 style="margin:0">Settings</h2><div class="muted small">Application configuration and automation.</div></div>
+    <div><h2 style="margin:0">Settings</h2><div class="muted small">Application configuration, connections, media and automation.</div></div>
     <button class="modal-close" onclick="closeSettings()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
-    <div class="tabs">
-      {% if is_admin %}
-      <button type="button" class="tab-btn active" data-tab="general" onclick="showTab('general')">General</button>
-      <button type="button" class="tab-btn" data-tab="pageview" onclick="showTab('pageview')">Page View</button>
-      <button type="button" class="tab-btn" data-tab="youtube" onclick="showTab('youtube')">YouTube</button>
-      <button type="button" class="tab-btn" data-tab="api" onclick="showTab('api')">API</button>
-      <button type="button" class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')">Pinchflat</button>
-      <button type="button" class="tab-btn" data-tab="downloads" onclick="showTab('downloads')">Downloads</button>
-      <button type="button" class="tab-btn" data-tab="favourites" onclick="showTab('favourites')">Favourites</button>
-      <button type="button" class="tab-btn" data-tab="automation" onclick="showTab('automation')">Automation</button>
-      <button type="button" class="tab-btn" data-tab="logs" onclick="showTab('logs')">Logs</button>
-      <button type="button" class="tab-btn" data-tab="advanced" onclick="showTab('advanced')">Advanced</button>
-      {% endif %}
-      <button type="button" class="tab-btn {% if not is_admin %}active{% endif %}" data-tab="security" onclick="showTab('security')">Security</button>
-    </div>
+    <div class="settings-layout">
+      <aside class="settings-nav" aria-label="Settings sections">
+        {% if is_admin %}
+        <div class="settings-nav-group">
+          <span class="settings-nav-title">Application</span>
+          <button type="button" class="tab-btn active" data-tab="general" onclick="showTab('general')"><strong>General</strong><small>Subscriptions and app behaviour</small></button>
+          <button type="button" class="tab-btn" data-tab="pageview" onclick="showTab('pageview')"><strong>Dashboard</strong><small>Layout, visibility and controls</small></button>
+        </div>
+        <div class="settings-nav-group">
+          <span class="settings-nav-title">Connections</span>
+          <button type="button" class="tab-btn" data-tab="youtube" onclick="showTab('youtube')"><strong>YouTube</strong><small>Google account and API quota</small></button>
+          <button type="button" class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')"><strong>Pinchflat</strong><small>Profiles, scans and workers</small></button>
+          <button type="button" class="tab-btn" data-tab="emby" onclick="showTab('emby')"><strong>Emby</strong><small>Server, libraries and refresh</small></button>
+        </div>
+        <div class="settings-nav-group">
+          <span class="settings-nav-title">Media</span>
+          <button type="button" class="tab-btn" data-tab="downloads" onclick="showTab('downloads')"><strong>Downloads</strong><small>One-time downloads, range and storage</small></button>
+          <button type="button" class="tab-btn" data-tab="retention" onclick="showTab('retention')"><strong>Video Retention</strong><small>Age-based cleanup and overrides</small></button>
+          <button type="button" class="tab-btn" data-tab="favourites" onclick="showTab('favourites')"><strong>Favourites</strong><small>Favourite channels and video lists</small></button>
+        </div>
+        <div class="settings-nav-group">
+          <span class="settings-nav-title">Operations</span>
+          <button type="button" class="tab-btn" data-tab="automation" onclick="showTab('automation')"><strong>Automation</strong><small>Sync schedules and playlist jobs</small></button>
+        </div>
+        {% endif %}
+        <div class="settings-nav-group">
+          <span class="settings-nav-title">Account & system</span>
+          <button type="button" class="tab-btn {% if not is_admin %}active{% endif %}" data-tab="security" onclick="showTab('security')"><strong>Security</strong><small>Users, sessions and sign-in</small></button>
+          {% if is_admin %}<button type="button" class="tab-btn" data-tab="diagnostics" onclick="showTab('diagnostics')"><strong>Diagnostics</strong><small>Logs, activity and application health</small></button>{% endif %}
+        </div>
+      </aside>
+      <div class="settings-panels">
 
     {% if is_admin %}
     <section class="tab-panel active" data-panel="general">
+      <div class="settings-panel-intro">
+        <div><h3>General</h3><p>Core application behaviour. These options control what happens when YouTube subscriptions appear or disappear.</p></div>
+      </div>
       <div class="settings-grid">
         <div class="setting-box">
           <h3>Subscription behaviour</h3>
           <form method="post" action="/settings/general"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>When a new YouTube subscription appears
               <select name="new_subscription_policy">
-                <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable and download</option>
-                <option value="disabled" {% if new_subscription_policy == "disabled" %}selected{% endif %}>Add to dashboard, disabled</option>
+                <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable Pinchflat downloads</option>
+                <option value="disabled" {% if new_subscription_policy == "disabled" %}selected{% endif %}>Add to Subscriptions, downloads disabled</option>
               </select>
             </label>
+            <div class="settings-note">This only sets the starting state for newly discovered subscriptions. You can enable or disable any channel later from the dashboard.</div>
             <label>When you unsubscribe on YouTube
               <select name="unsubscribe_policy">
                 <option value="keep" {% if unsubscribe_policy == "keep" %}selected{% endif %}>Keep Pinchflat source</option>
-                <option value="disable" {% if unsubscribe_policy == "disable" %}selected{% endif %}>Disable downloads in Pinchflat</option>
-                <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove Pinchflat source, keep downloaded files</option>
-                <option value="remove_delete" {% if unsubscribe_policy == "remove_delete" %}selected{% endif %}>Remove Pinchflat source and delete downloaded files</option>
+                <option value="disable" {% if unsubscribe_policy == "disable" %}selected{% endif %}>Disable Pinchflat downloads</option>
+                <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove Pinchflat source, keep media</option>
+                <option value="remove_delete" {% if unsubscribe_policy == "remove_delete" %}selected{% endif %}>Remove Pinchflat source and media</option>
               </select>
             </label>
-            <label><input type="checkbox" name="show_removed" value="1" {% if show_removed %}checked{% endif %}> Include removed subscriptions by default</label>
-            <label><input type="checkbox" name="pin_favourites_to_top" value="1" {% if pin_favourites_to_top %}checked{% endif %}> Pin favourite channels to the top of the subscription list</label>
+            <label><input type="checkbox" name="show_removed" value="1" {% if show_removed %}checked{% endif %}> Show removed subscriptions in the main list by default</label>
+            <label><input type="checkbox" name="pin_favourites_to_top" value="1" {% if pin_favourites_to_top %}checked{% endif %}> Keep favourite channels at the top while preserving the selected sort order</label>
             <button class="btn">Save General</button>
           </form>
         </div>
+
         <div class="setting-box">
-          <h3>Current behaviour</h3>
-          <p>New subscriptions: <strong>{{ new_subscription_policy }}</strong></p>
-          <p>Unsubscribed channels: <strong>{{ unsubscribe_policy }}</strong></p>
-          <p class="muted small">YouTube is checked every {{ youtube_sync_interval }} minutes. Pinchflat is reconciled every {{ pinchflat_sync_interval }} minutes.</p>
+          <h3>Current application state</h3>
+          <div class="settings-status-list">
+            <div class="settings-status-row"><strong>Version</strong><span>{{ version }}</span></div>
+            <div class="settings-status-row"><strong>New subscriptions</strong><span>{{ 'Downloads enabled automatically' if new_subscription_policy == 'auto_enable' else 'Added with downloads disabled' }}</span></div>
+            <div class="settings-status-row"><strong>YouTube sync</strong><span>Every {{ youtube_sync_interval }} minutes</span></div>
+            <div class="settings-status-row"><strong>Pinchflat sync</strong><span>Every {{ pinchflat_sync_interval }} minutes</span></div>
+            <div class="settings-status-row"><strong>Download storage</strong><span>{{ storage_total }} used</span></div>
+            <div class="settings-status-row"><strong>Dry run</strong><span>{{ 'Enabled' if dry_run else 'Disabled' }}</span></div>
+          </div>
+          <div class="actions" style="margin-top:12px">
+            <a class="btn ghost" href="/health" target="_blank" rel="noopener">Health</a>
+            <a class="btn ghost" href="https://github.com/AshCooperUK/youtube-pinchflat-sync" target="_blank" rel="noopener">GitHub</a>
+          </div>
         </div>
       </div>
     </section>
 
     <section class="tab-panel" data-panel="pageview">
-      <form
-        id="page-view-settings-form"
-        method="post"
-        action="/settings/page-view"
-      >
+      <div class="settings-panel-intro">
+        <div><h3>Dashboard</h3><p>Arrange the main page in the same top-to-bottom order you want to see it, then choose which sections and controls load.</p></div>
+      </div>
+      <form id="page-view-settings-form" method="post" action="/settings/page-view">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-        <input
-          type="hidden"
-          id="page-section-order-input"
-          name="page_section_order"
-          value="{{ page_section_order|join(',') }}"
-        >
-        <input
-          type="hidden"
-          id="page-summary-order-input"
-          name="page_summary_order"
-          value="{{ page_summary_order|join(',') }}"
-        >
+        <input type="hidden" id="page-section-order-input" name="page_section_order" value="{{ page_section_order|join(',') }}">
+        <input type="hidden" id="page-summary-order-input" name="page_summary_order" value="{{ page_summary_order|join(',') }}">
 
         <div class="setting-box">
-          <h3>Dashboard sections</h3>
-          <p class="muted small">
-            Turn off a section to stop it being rendered or loaded on the main page.
-            Latest YouTube videos and Pinchflat download polling do not make their background requests when disabled.
-          </p>
-
-          <div class="page-view-grid">
-            <label class="page-view-option">
-              <input type="checkbox" name="page_load_summary" value="1" {% if page_view.load_summary %}checked{% endif %}>
+          <h3>1. Main page order</h3>
+          <p class="muted small">Drag these rows into the physical top-to-bottom order used on the dashboard. Disabled sections keep their position so they return to the same place if enabled later.</p>
+          <div class="page-order-list" id="page-section-order-list">
+            {% for item in page_section_order %}
+            <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
+              <span class="page-order-handle" aria-hidden="true">☰</span>
               <span>
-                <strong>Status tiles</strong>
-                <span class="muted small">Google, Pinchflat, subscriptions, downloads and errors.</span>
+                <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Pinchflat downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+                <small>{% if item == "summary" %}Connection, subscription, storage and latest-download cards.{% elif item == "pinchflat" %}Current Pinchflat downloads and queue state.{% elif item == "latest" %}Newest videos and Shorts from your subscriptions.{% elif item == "subscriptions" %}Channel management table.{% endif %}</small>
               </span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_load_pinchflat_downloads" value="1" {% if page_view.load_pinchflat_downloads %}checked{% endif %}>
-              <span>
-                <strong>Pinchflat downloads</strong>
-                <span class="muted small">Active downloads, last download and queue count.</span>
-              </span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_load_latest_videos" value="1" {% if page_view.load_latest_videos %}checked{% endif %}>
-              <span>
-                <strong>Latest from subscriptions</strong>
-                <span class="muted small">Loads the newest YouTube videos and Shorts in the background.</span>
-              </span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_load_subscriptions" value="1" {% if page_view.load_subscriptions %}checked{% endif %}>
-              <span>
-                <strong>Subscriptions</strong>
-                <span class="muted small">Loads the full channel management table.</span>
-              </span>
-            </label>
-          </div>
-        </div>
-
-        <div class="settings-grid" style="margin-top:14px">
-          <div class="setting-box">
-            <h3>Start minimised</h3>
-            <p class="muted small">Choose how the larger sections look after a fresh page load.</p>
-
-            <label>
-              <input type="checkbox" name="page_min_pinchflat_downloads" value="1" {% if page_view.min_pinchflat_downloads %}checked{% endif %}>
-              Pinchflat downloads
-            </label>
-
-            <label>
-              <input type="checkbox" name="page_min_latest_videos" value="1" {% if page_view.min_latest_videos %}checked{% endif %}>
-              Latest from subscriptions
-            </label>
-
-            <label>
-              <input type="checkbox" name="page_min_subscriptions" value="1" {% if page_view.min_subscriptions %}checked{% endif %}>
-              Subscriptions
-            </label>
-          </div>
-
-          <div class="setting-box">
-            <h3>Status tiles</h3>
-            <p class="muted small">Choose which small status tiles appear when Status tiles is enabled.</p>
-
-            <label><input type="checkbox" name="page_show_summary_google" value="1" {% if page_view.show_summary_google %}checked{% endif %}> Google</label>
-            <label><input type="checkbox" name="page_show_summary_pinchflat" value="1" {% if page_view.show_summary_pinchflat %}checked{% endif %}> Pinchflat</label>
-            <label><input type="checkbox" name="page_show_summary_latest_download" value="1" {% if page_view.show_summary_latest_download %}checked{% endif %}> Latest download</label>
-            <label><input type="checkbox" name="page_show_summary_subscriptions" value="1" {% if page_view.show_summary_subscriptions %}checked{% endif %}> Subscriptions</label>
-            <label><input type="checkbox" name="page_show_summary_downloads" value="1" {% if page_view.show_summary_downloads %}checked{% endif %}> Downloads</label>
-            <label><input type="checkbox" name="page_show_summary_errors" value="1" {% if page_view.show_summary_errors %}checked{% endif %}> Errors</label>
-          </div>
-        </div>
-
-        <div class="setting-box" style="margin-top:14px">
-          <h3>Channel image controls</h3>
-          <p class="muted small">These settings apply globally anywhere Pinchflat Sync shows a channel image, including Subscriptions, Discover, Favourites, Channel details and the media player.</p>
-
-          <div class="page-view-grid">
-            <label class="page-view-option">
-              <input type="checkbox" name="page_channel_controls" value="1" {% if page_view.channel_controls %}checked{% endif %}>
-              <span><strong>Show channel image controls</strong><span class="muted small">Master switch for the action icons around channel artwork.</span></span>
-            </label>
-            <label class="page-view-option">
-              <input type="checkbox" name="page_channel_control_favourite" value="1" {% if page_view.channel_control_favourite %}checked{% endif %}>
-              <span><strong>Favourite heart</strong><span class="muted small">Add or remove a channel from Favourites.</span></span>
-            </label>
-            <label class="page-view-option">
-              <input type="checkbox" name="page_channel_control_downloads" value="1" {% if page_view.channel_control_downloads %}checked{% endif %}>
-              <span><strong>Downloads tick</strong><span class="muted small">Enable or disable the channel in Pinchflat.</span></span>
-            </label>
-            <label class="page-view-option">
-              <input type="checkbox" name="page_channel_control_scan" value="1" {% if page_view.channel_control_scan %}checked{% endif %}>
-              <span><strong>Force Scan</strong><span class="muted small">Ask Pinchflat to scan the channel immediately.</span></span>
-            </label>
-            <label class="page-view-option">
-              <input type="checkbox" name="page_channel_control_delete" value="1" {% if page_view.channel_control_delete %}checked{% endif %}>
-              <span><strong>Remove / delete</strong><span class="muted small">Open the channel removal menu.</span></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="setting-box" style="margin-top:14px">
-          <h3>Top buttons</h3>
-          <p class="muted small">Settings always remains visible. Choose the other controls you want in the page header.</p>
-
-          <div class="page-view-grid">
-            <label class="page-view-option">
-              <input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}>
-              <span><strong>Pinchflat Sync</strong></span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_button_refresh_youtube" value="1" {% if page_view.button_refresh_youtube %}checked{% endif %}>
-              <span><strong>Refresh YouTube</strong></span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_button_single_download" value="1" {% if page_view.button_single_download %}checked{% endif %}>
-              <span><strong>Single Download</strong></span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_button_discover" value="1" {% if page_view.button_discover %}checked{% endif %}>
-              <span><strong>Discover</strong></span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_button_favourites" value="1" {% if page_view.button_favourites %}checked{% endif %}>
-              <span><strong>Favourites</strong></span>
-            </label>
-
-            <label class="page-view-option">
-              <input type="checkbox" name="page_button_logout" value="1" {% if page_view.button_logout %}checked{% endif %}>
-              <span><strong>Log out</strong></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="settings-grid" style="margin-top:14px">
-          <div class="setting-box">
-            <h3>Main page order</h3>
-            <p class="muted small">Drag the rows into the order you want on the dashboard.</p>
-
-            <div class="page-order-list" id="page-section-order-list">
-              {% for item in page_section_order %}
-              <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
-                <span class="page-order-handle" aria-hidden="true">☰</span>
-                <span>
-                  <strong>
-                    {% if item == "summary" %}Status tiles
-                    {% elif item == "pinchflat" %}Pinchflat downloads
-                    {% elif item == "latest" %}Latest from subscriptions
-                    {% elif item == "subscriptions" %}Subscriptions
-                    {% endif %}
-                  </strong>
-                  <small>
-                    {% if item == "summary" %}Small dashboard status cards.
-                    {% elif item == "pinchflat" %}Current and completed Pinchflat downloads.
-                    {% elif item == "latest" %}Newest YouTube videos and Shorts.
-                    {% elif item == "subscriptions" %}Channel management list.
-                    {% endif %}
-                  </small>
-                </span>
-              </div>
-              {% endfor %}
             </div>
+            {% endfor %}
           </div>
+        </div>
 
+        <div class="setting-box" style="margin-top:14px">
+          <h3>2. Section visibility and startup state</h3>
+          <p class="muted small">The rows below follow the same order as the dashboard. Turning a section off stops its expensive background work where possible.</p>
+          {% for item in page_section_order %}
+          <div class="settings-order-card">
+            <div>
+              <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Pinchflat downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+              <small>{% if item == "summary" %}Small dashboard cards loaded first.{% elif item == "pinchflat" %}Poll Pinchflat for active and queued jobs.{% elif item == "latest" %}Use YouTube to load recent subscription videos.{% elif item == "subscriptions" %}Render and manage the full subscription list.{% endif %}</small>
+            </div>
+            {% if item == "summary" %}
+              <label><input type="checkbox" name="page_load_summary" value="1" {% if page_view.load_summary %}checked{% endif %}> Show</label>
+              <span class="muted small">Always expanded</span>
+            {% elif item == "pinchflat" %}
+              <label><input type="checkbox" name="page_load_pinchflat_downloads" value="1" {% if page_view.load_pinchflat_downloads %}checked{% endif %}> Show</label>
+              <label><input type="checkbox" name="page_min_pinchflat_downloads" value="1" {% if page_view.min_pinchflat_downloads %}checked{% endif %}> Start minimised</label>
+            {% elif item == "latest" %}
+              <label><input type="checkbox" name="page_load_latest_videos" value="1" {% if page_view.load_latest_videos %}checked{% endif %}> Show</label>
+              <label><input type="checkbox" name="page_min_latest_videos" value="1" {% if page_view.min_latest_videos %}checked{% endif %}> Start minimised</label>
+            {% elif item == "subscriptions" %}
+              <label><input type="checkbox" name="page_load_subscriptions" value="1" {% if page_view.load_subscriptions %}checked{% endif %}> Show</label>
+              <label><input type="checkbox" name="page_min_subscriptions" value="1" {% if page_view.min_subscriptions %}checked{% endif %}> Start minimised</label>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="settings-grid" style="margin-top:14px">
           <div class="setting-box">
-            <h3>Status tile order</h3>
-            <p class="muted small">Drag the small status tiles into your preferred order.</p>
-
+            <h3>3. Status tile order</h3>
+            <p class="muted small">Drag the tiles into their left-to-right order. The checkbox controls whether each tile is shown.</p>
             <div class="page-order-list" id="page-summary-order-list">
               {% for item in page_summary_order %}
               <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
                 <span class="page-order-handle" aria-hidden="true">☰</span>
-                <span>
-                  <strong>
-                    {% if item == "google" %}Google
-                    {% elif item == "pinchflat" %}Pinchflat
-                    {% elif item == "latest_download" %}Latest download
-                    {% elif item == "subscriptions" %}Subscriptions
-                    {% elif item == "downloads" %}Downloads
-                    {% elif item == "errors" %}Errors
-                    {% endif %}
-                  </strong>
-                </span>
+                <span style="flex:1"><strong>{% if item == "google" %}Google{% elif item == "pinchflat" %}Pinchflat{% elif item == "latest_download" %}Latest download{% elif item == "subscriptions" %}Subscriptions{% elif item == "downloads" %}Downloads{% elif item == "errors" %}Errors{% endif %}</strong></span>
+                {% if item == "google" %}<label><input type="checkbox" name="page_show_summary_google" value="1" {% if page_view.show_summary_google %}checked{% endif %}> Show</label>
+                {% elif item == "pinchflat" %}<label><input type="checkbox" name="page_show_summary_pinchflat" value="1" {% if page_view.show_summary_pinchflat %}checked{% endif %}> Show</label>
+                {% elif item == "latest_download" %}<label><input type="checkbox" name="page_show_summary_latest_download" value="1" {% if page_view.show_summary_latest_download %}checked{% endif %}> Show</label>
+                {% elif item == "subscriptions" %}<label><input type="checkbox" name="page_show_summary_subscriptions" value="1" {% if page_view.show_summary_subscriptions %}checked{% endif %}> Show</label>
+                {% elif item == "downloads" %}<label><input type="checkbox" name="page_show_summary_downloads" value="1" {% if page_view.show_summary_downloads %}checked{% endif %}> Show</label>
+                {% elif item == "errors" %}<label><input type="checkbox" name="page_show_summary_errors" value="1" {% if page_view.show_summary_errors %}checked{% endif %}> Show</label>{% endif %}
               </div>
               {% endfor %}
             </div>
           </div>
+
+          <div class="setting-box">
+            <h3>4. Header buttons</h3>
+            <p class="muted small">Settings always stays visible so the interface remains recoverable.</p>
+            <label><input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}> Pinchflat Sync</label>
+            <label><input type="checkbox" name="page_button_refresh_youtube" value="1" {% if page_view.button_refresh_youtube %}checked{% endif %}> Refresh YouTube</label>
+            <label><input type="checkbox" name="page_button_single_download" value="1" {% if page_view.button_single_download %}checked{% endif %}> Single Download</label>
+            <label><input type="checkbox" name="page_button_discover" value="1" {% if page_view.button_discover %}checked{% endif %}> Discover</label>
+            <label><input type="checkbox" name="page_button_favourites" value="1" {% if page_view.button_favourites %}checked{% endif %}> Favourites</label>
+            <label><input type="checkbox" name="page_button_logout" value="1" {% if page_view.button_logout %}checked{% endif %}> Log out</label>
+          </div>
         </div>
 
-        <div class="actions" style="margin-top:16px">
-          <button class="btn">Save Page View</button>
+        <div class="setting-box" style="margin-top:14px">
+          <h3>5. Channel image controls</h3>
+          <p class="muted small">One global set of controls for every shared channel image used by Subscriptions, Discover, Favourites, Channel details and the media player.</p>
+          <div class="page-view-grid">
+            <label class="page-view-option"><input type="checkbox" name="page_channel_controls" value="1" {% if page_view.channel_controls %}checked{% endif %}><span><strong>Show controls</strong><span class="muted small">Master switch for the controls around channel images.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_favourite" value="1" {% if page_view.channel_control_favourite %}checked{% endif %}><span><strong>Favourite heart</strong><span class="muted small">Favourite or unfavourite a channel.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_downloads" value="1" {% if page_view.channel_control_downloads %}checked{% endif %}><span><strong>Downloads tick</strong><span class="muted small">Enable or disable Pinchflat downloads.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_scan" value="1" {% if page_view.channel_control_scan %}checked{% endif %}><span><strong>Force Scan</strong><span class="muted small">Ask Pinchflat to scan the channel now.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_delete" value="1" {% if page_view.channel_control_delete %}checked{% endif %}><span><strong>Remove / Delete</strong><span class="muted small">Open channel removal options.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_retention" value="1" {% if page_view.channel_control_retention %}checked{% endif %}><span><strong>Retention shield</strong><span class="muted small">Open the channel's Video Retention settings.</span></span></label>
+          </div>
         </div>
+
+        <div class="actions" style="margin-top:16px"><button class="btn">Save Dashboard</button></div>
       </form>
     </section>
 
     <section class="tab-panel" data-panel="youtube">
+      <div class="settings-panel-intro">
+        <div><h3>YouTube</h3><p>Google sign-in, YouTube API quota and account information used by subscriptions, favourites and Discover.</p></div>
+      </div>
       <div class="settings-grid">
         <div class="setting-box">
-          <h3>Google OAuth</h3>
+          <h3>Google connection</h3>
           {% if google_connected %}
-            <p class="{% if google_write_ready %}ok{% else %}warn{% endif %}">
-              {% if google_write_ready %}Google is connected with read + write access.{% else %}Google is connected with read-only access.{% endif %}
-            </p>
-            {% if not google_write_ready %}
-              <p><a class="btn" href="/oauth/google/login">Reconnect Google</a></p>
-            {% endif %}
-            <form method="post" action="/oauth/google/disconnect"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-              <button class="btn danger">Disconnect Google</button>
-            </form>
+            <p class="{% if google_write_ready %}ok{% else %}warn{% endif %}">{% if google_write_ready %}Connected with read + write access.{% else %}Connected with read-only access.{% endif %}</p>
+            <p class="muted small">Write access is required for subscribe, unsubscribe, Like and playlist actions.</p>
+            <div class="actions">
+              {% if not google_write_ready %}<a class="btn" href="/oauth/google/login">Reconnect Google</a>{% endif %}
+              <form method="post" action="/oauth/google/disconnect"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn danger">Disconnect Google</button></form>
+            </div>
           {% else %}
             <form method="post" action="/settings/configuration"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
               <label>Public dashboard URL
-                <input
-                  type="url"
-                  name="app_url"
-                  value="{{ app_url }}"
-                  placeholder="https://youtube.example.com"
-                  {% if app_url_from_yaml %}readonly{% endif %}
-                >
+                <input type="url" name="app_url" value="{{ app_url }}" placeholder="https://youtube.example.com" {% if app_url_from_yaml %}readonly{% endif %}>
               </label>
-              {% if app_url_from_yaml %}
-                <p class="muted small">
-                  Managed by <code>APP_URL</code> in the Docker/ZimaOS YAML.
-                  {% if canonical_redirect %}Local ZimaOS launches redirect here automatically.{% endif %}
-                </p>
-              {% endif %}
-              <label>Google OAuth Client ID
-                <input type="text" name="google_client_id" placeholder="xxxxxxxx.apps.googleusercontent.com">
-              </label>
-              <label>Google OAuth Client Secret
-                <input type="password" name="google_client_secret" placeholder="Leave blank to keep saved secret">
-              </label>
+              {% if app_url_from_yaml %}<p class="muted small">Managed by <code>APP_URL</code> in the Docker/ZimaOS YAML.{% if canonical_redirect %} Local ZimaOS launches redirect here automatically.{% endif %}</p>{% endif %}
+              <label>Google OAuth Client ID<input type="text" name="google_client_id" placeholder="xxxxxxxx.apps.googleusercontent.com"></label>
+              <label>Google OAuth Client Secret<input type="password" name="google_client_secret" placeholder="Leave blank to keep saved secret"></label>
               <input type="hidden" name="pinchflat_media_profile_id" value="{{ media_profile_id }}">
-              <button class="btn">Save OAuth settings</button>
+              <div class="actions"><button class="btn">Save OAuth settings</button>{% if google_configured %}<a class="btn secondary" href="/oauth/google/login">Connect Google</a>{% endif %}</div>
             </form>
-            {% if google_configured %}<p><a class="btn secondary" href="/oauth/google/login">Connect Google</a></p>{% endif %}
           {% endif %}
-          <p class="muted small">Callback: <code>{{ callback_uri if callback_uri else "Set the public URL first" }}</code></p>
+          <div class="settings-path-card"><span class="muted small">OAuth callback</span><code>{{ callback_uri if callback_uri else "Set the public URL first" }}</code></div>
         </div>
 
         <div class="setting-box">
-          <h3>YouTube API</h3>
+          <h3>YouTube API quota</h3>
           <form method="post" action="/settings/youtube"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <label>Daily API quota used for the dashboard estimate
+            <label>Configured daily quota
               <input type="number" min="100" name="youtube_daily_quota" value="{{ youtube_daily_quota }}">
             </label>
-            <button class="btn">Save YouTube</button>
+            <p class="muted small">Used only for this app's quota estimate. Google Cloud Console remains the source for the project's actual quota.</p>
+            <button class="btn">Save YouTube quota</button>
           </form>
+          <div style="margin-top:18px">
+            <div class="metric">{{ api_stats.used }} / {{ api_stats.quota }}</div>
+            <div class="quota-bar"><div class="quota-fill" style="width:{{ api_stats.percent }}%"></div></div>
+            <p class="muted small">{{ api_stats.remaining }} estimated units remaining today · {{ api_stats.calls }} calls · {{ api_stats.failures }} failed calls</p>
+            <p class="muted small">Discovery searches: {{ api_stats.search_calls }} / {{ api_stats.search_limit }} today · {{ api_stats.search_remaining }} remaining</p>
+          </div>
         </div>
 
-        <div class="setting-box" style="grid-column:1 / -1">
-          <h3>YouTube account statistics</h3>
-          <p class="muted small">
-            Account and library information used by Pinchflat Sync. Creator statistics for your own YouTube channel are intentionally not shown.
-          </p>
-
+        <div class="setting-box" style="grid-column:1/-1">
+          <h3>Account information</h3>
+          <p class="muted small">Useful account and library information used by Pinchflat Sync. Creator statistics for your own uploaded channel are not shown.</p>
           {% if youtube_account_stats.available %}
             <div class="youtube-stat-grid">
-              <div class="youtube-stat-tile">
-                <div class="muted small">Subscriptions</div>
-                <div class="youtube-stat-value">{{ youtube_account_stats.subscription_count_text }}</div>
-                <div class="youtube-stat-note">Channels your YouTube account currently subscribes to.</div>
-              </div>
-
-              <div class="youtube-stat-tile">
-                <div class="muted small">Liked videos</div>
-                <div class="youtube-stat-value">{{ youtube_account_stats.liked_video_count_text }}</div>
-                <div class="youtube-stat-note">Videos currently marked Like on your YouTube account.</div>
-              </div>
-
-              <div class="youtube-stat-tile">
-                <div class="muted small">Playlists</div>
-                <div class="youtube-stat-value">{{ youtube_account_stats.playlist_count_text }}</div>
-                <div class="youtube-stat-note">User-created playlists owned by your YouTube account.</div>
-              </div>
-
-              <div class="youtube-stat-tile">
-                <div class="muted small">API quota today</div>
-                <div class="youtube-stat-value">{{ api_stats.used }} / {{ api_stats.quota }}</div>
-                <div class="youtube-stat-note">{{ "%.1f"|format(api_stats.percent) }}% of the configured daily estimate.</div>
-              </div>
-
-              <div class="youtube-stat-tile">
-                <div class="muted small">Discovery searches left</div>
-                <div class="youtube-stat-value">{{ api_stats.search_remaining }}</div>
-                <div class="youtube-stat-note">{{ api_stats.search_calls }} used from the configured {{ api_stats.search_limit }} daily search allowance.</div>
-              </div>
+              <div class="youtube-stat-tile"><div class="muted small">Subscriptions</div><div class="youtube-stat-value">{{ youtube_account_stats.subscription_count_text }}</div><div class="youtube-stat-note">Channels your account currently subscribes to.</div></div>
+              <div class="youtube-stat-tile"><div class="muted small">Liked videos</div><div class="youtube-stat-value">{{ youtube_account_stats.liked_video_count_text }}</div><div class="youtube-stat-note">Videos currently marked Like.</div></div>
+              <div class="youtube-stat-tile"><div class="muted small">Playlists</div><div class="youtube-stat-value">{{ youtube_account_stats.playlist_count_text }}</div><div class="youtube-stat-note">User-created playlists owned by your account.</div></div>
+              <div class="youtube-stat-tile"><div class="muted small">API quota today</div><div class="youtube-stat-value">{{ api_stats.used }} / {{ api_stats.quota }}</div><div class="youtube-stat-note">{{ "%.1f"|format(api_stats.percent) }}% of the configured estimate.</div></div>
+              <div class="youtube-stat-tile"><div class="muted small">Discovery searches left</div><div class="youtube-stat-value">{{ api_stats.search_remaining }}</div><div class="youtube-stat-note">{{ api_stats.search_calls }} search calls used today.</div></div>
             </div>
-          {% elif youtube_account_stats.error %}
-            <div class="flash error">{{ youtube_account_stats.error }}</div>
-          {% else %}
-            <p class="muted">Connect Google to load YouTube account statistics.</p>
-          {% endif %}
+          {% elif youtube_account_stats.error %}<div class="flash error">{{ youtube_account_stats.error }}</div>
+          {% else %}<p class="muted">Connect Google to load YouTube account information.</p>{% endif %}
         </div>
+
+        {% if api_stats.methods %}
+        <div class="setting-box" style="grid-column:1/-1">
+          <h3>API usage by method</h3>
+          <div class="table-wrap"><table class="compact-table"><thead><tr><th>Method</th><th>Calls</th><th>Estimated units</th></tr></thead><tbody>{% for method in api_stats.methods %}<tr><td>{{ method.method }}</td><td>{{ method.calls }}</td><td>{{ method.units }}</td></tr>{% endfor %}</tbody></table></div>
+        </div>
+        {% endif %}
       </div>
     </section>
 
-    <section class="tab-panel" data-panel="api">
+    <section class="tab-panel" data-panel="emby">
+      <div class="settings-panel-intro">
+        <div><h3>Emby</h3><p>Connect the app to Emby and automatically target the correct library for Pinchflat, One-time Downloads and the Emby Download playlist.</p></div>
+      </div>
       <div class="settings-grid">
         <div class="setting-box">
-          <h3>Emby</h3>
-          <p class="muted small">Connect Pinchflat Sync directly to your Emby Server. The API key stays in the local application database.</p>
-
+          <h3>Server connection</h3>
           <form method="post" action="/settings/apis">
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-
             <label>Emby Server URL
-              <input
-                type="url"
-                name="emby_server_url"
-                value="{{ emby_server_url }}"
-                placeholder="http://butane.grovefarm:8096"
-                autocomplete="off"
-              >
+              <input type="url" name="emby_server_url" value="{{ emby_server_url }}" placeholder="http://butane.grovefarm:8096" autocomplete="off">
             </label>
-
             <label>Emby API key
-              <input
-                type="password"
-                name="emby_api_key"
-                value=""
-                placeholder="{{ 'Saved. Leave blank to keep current key' if emby_api_key_saved else 'Paste an Emby API key' }}"
-                autocomplete="new-password"
-              >
+              <input type="password" name="emby_api_key" value="" placeholder="{{ 'Saved. Leave blank to keep current key' if emby_api_key_saved else 'Paste an Emby API key' }}" autocomplete="new-password">
             </label>
-
-            {% if emby_api_key_saved %}
-            <label>
-              <input type="checkbox" name="emby_clear_api_key" value="1">
-              Clear the saved Emby API key
-            </label>
-            {% endif %}
-
-            <div class="setting-box" style="margin:12px 0">
-              <strong>Detected YouTube library</strong>
-              <div id="emby-library-status" class="muted small" style="margin-top:6px">
-                Pinchflat Sync matches the Docker <code>/downloads</code> bind mount to the corresponding Emby library automatically. Press Test connection to show the detected library.
-              </div>
-            </div>
-
-            <label>
-              <input type="checkbox" name="emby_auto_refresh_after_download" value="1" {% if emby_auto_refresh_after_download %}checked{% endif %}>
-              Refresh Emby automatically when Pinchflat finishes new content
-            </label>
-
-            <div class="actions">
-              <button class="btn" type="submit">Save Emby</button>
-              <button class="btn secondary" type="button" onclick="testEmbyConnection()">Test connection</button>
-              <button class="btn secondary" type="button" onclick="refreshEmbyLibrary()">Emby Scan Library Files</button>
-            </div>
+            {% if emby_api_key_saved %}<label><input type="checkbox" name="emby_clear_api_key" value="1"> Clear the saved Emby API key</label>{% endif %}
+            <label><input type="checkbox" name="emby_auto_refresh_after_download" value="1" {% if emby_auto_refresh_after_download %}checked{% endif %}> Refresh the matching Emby channel after new Pinchflat content completes</label>
+            <div class="actions"><button class="btn" type="submit">Save Emby</button><button class="btn secondary" type="button" onclick="testEmbyConnection()">Test & detect libraries</button></div>
           </form>
-
-          <div id="emby-api-status" class="muted small" style="margin-top:10px">
-            {% if emby_api_configured %}Emby API is configured.{% else %}Enter the Emby Server URL and API key to enable refresh actions.{% endif %}
-          </div>
+          <div id="emby-api-status" class="muted small" style="margin-top:10px">{% if emby_api_configured %}Emby API is configured.{% else %}Enter the Emby Server URL and API key to enable refresh actions.{% endif %}</div>
         </div>
 
         <div class="setting-box">
-          <h3>What the Emby connection does</h3>
-          <div class="api-feature-list">
-            <div><strong>Automatic refresh</strong><span>Refreshes the matching channel in the detected YouTube library when a new Pinchflat download is detected.</span></div>
-            <div><strong>Channel actions</strong><span>Refreshes the matching channel folder inside the automatically detected YouTube library.</span></div>
-            <div><strong>Bulk actions</strong><span>Refreshes selected channel folders. If a folder is new, the detected YouTube library is refreshed. Other Emby libraries are left alone.</span></div>
+          <h3>Automatic library matching</h3>
+          <p class="muted small">The app reads its Docker <code>/downloads</code> bind and compares the same host folders with Emby's configured libraries. No manual library ID is required.</p>
+          <div class="settings-status-list">
+            <div class="settings-status-row"><strong>Pinchflat media</strong><span id="emby-library-status">Press Test & detect libraries to resolve <code>/downloads</code>.</span></div>
+            <div class="settings-status-row"><strong>One-time Downloads</strong><span id="emby-single-library-status">Press Test & detect libraries to resolve <code>/downloads/{{ single_download_folder }}</code>.</span></div>
+            <div class="settings-status-row"><strong>Emby Download playlist</strong><span id="emby-playlist-library-status">Press Test & detect libraries to resolve <code>/downloads/{{ emby_download_folder }}</code>.</span></div>
           </div>
+        </div>
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <h3>Manual library scans</h3>
+        <p class="muted small">Each button scans only the detected library or folder shown above, then runs the delayed Replace all metadata pass. These actions never request a whole-server Emby scan.</p>
+        <div class="actions">
+          <button class="btn secondary" type="button" onclick="refreshEmbyLibrary('pinchflat')">Scan Pinchflat media</button>
+          <button class="btn secondary" type="button" onclick="refreshEmbyLibrary('single')">Scan One-time Downloads</button>
+          <button class="btn secondary" type="button" onclick="refreshEmbyLibrary('emby_download')">Scan Emby Download playlist</button>
+        </div>
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <h3>What each refresh targets</h3>
+        <div class="api-feature-list">
+          <div><strong>Pinchflat channel refresh</strong><span>Finds the matching channel folder in the main Pinchflat YouTube library and refreshes that channel recursively.</span></div>
+          <div><strong>One-time Download</strong><span>Uses the folder configured in Downloads. If that folder is a separate Emby library, only that library is scanned.</span></div>
+          <div><strong>Emby Download playlist</strong><span>Uses the folder configured in Automation and targets its matching Emby library or subfolder.</span></div>
+          <div><strong>Metadata pass</strong><span>After the filesystem scan, the app waits briefly and runs Replace all metadata without replacing existing images or preview thumbnails.</span></div>
         </div>
       </div>
     </section>
 
     <section class="tab-panel" data-panel="pinchflat">
+      <div class="settings-panel-intro"><div><h3>Pinchflat</h3><p>Source scanning, media profiles, yt-dlp worker concurrency and Pinchflat-specific behaviour.</p></div></div>
       <div class="setting-box">
         <div class="profile-editor-heading">
           <div>
@@ -5491,40 +5582,63 @@
     </section>
 
     <section class="tab-panel" data-panel="downloads">
-      <div class="setting-box" style="margin-bottom:14px">
-        <h3>One-time download</h3>
-        <p class="muted small">Defaults used by the Single Download button. yt-dlp output paths stay inside the shared <code>/downloads</code> mount.</p>
+      <div class="settings-panel-intro">
+        <div><h3>Downloads</h3><p>Control One-time Download behaviour, the default Pinchflat history window and storage. File locations owned by other features are shown here as read-only references.</p></div>
+      </div>
+
+      <div class="setting-box">
+        <h3>One-time Download</h3>
+        <p class="muted small">Every Single Download button across the app uses these settings. The download popup only asks for the YouTube URL.</p>
         <form method="post" action="/settings/single-download">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <div class="profile-settings-grid">
-            <label>Download type
+            <label>Video / download type
               <select name="single_download_format">
                 {% for value,label in [('best','Best available'),('2160p','2160p / 4K'),('1440p','1440p'),('1080p','1080p'),('720p','720p'),('480p','480p'),('360p','360p'),('audio','Audio only')] %}
                 <option value="{{ value }}" {% if single_download_format == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
+              <span class="muted small">Sets the maximum video resolution, or switches the job to audio-only mode.</span>
             </label>
-            <label>Audio type
+            <label>Audio-only format
               <select name="single_download_audio_format">
                 {% for value in ['m4a','mp3','opus','flac','wav'] %}<option value="{{ value }}" {% if single_download_audio_format == value %}selected{% endif %}>{{ value|upper }}</option>{% endfor %}
               </select>
+              <span class="muted small">Used only when Video / download type is set to Audio only.</span>
             </label>
             <label>Download folder
               <input type="text" name="single_download_folder" value="{{ single_download_folder }}" placeholder="Single Downloads">
+              <span class="muted small">Relative to the shared <code>/downloads</code> mount.</span>
             </label>
-            <label>yt-dlp output template
-              <input type="text" name="single_download_output_template" value="{{ single_download_output_template }}" autocomplete="off">
+            <label><span>Media-centre metadata</span>
+              <span class="muted small" style="display:block;margin:4px 0 7px">Creates channel artwork and optional <code>tvshow.nfo</code> beside direct downloads for Emby/Jellyfin-style libraries.</span>
+              <span style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="single_download_write_nfo" value="1" {% if single_download_write_nfo %}checked{% endif %}> Include <code>tvshow.nfo</code></span>
             </label>
           </div>
-          <label><input type="checkbox" name="single_download_write_nfo" value="1" {% if single_download_write_nfo %}checked{% endif %}> Include Emby <code>tvshow.nfo</code> metadata</label>
-          <div class="actions">
-            <button class="btn">Save One-time Download Settings</button>
+
+          <details class="settings-details">
+            <summary>Advanced filename template</summary>
+            <div>
+              <label>yt-dlp output template
+                <input type="text" name="single_download_output_template" value="{{ single_download_output_template }}" autocomplete="off">
+              </label>
+              <p class="muted small">The template stays inside <code>/downloads/{{ single_download_folder }}</code>. The default includes the YouTube video ID so duplicate detection remains reliable.</p>
+            </div>
+          </details>
+
+          <div class="settings-path-card">
+            <span class="muted small">Effective One-time Download path</span>
+            <code>/downloads/{{ single_download_folder }}/{{ single_download_output_template }}</code>
           </div>
+          <div class="settings-note">After a successful One-time Download, the app now detects the Emby library associated with <code>/downloads/{{ single_download_folder }}</code>, scans only that target and then runs the delayed metadata refresh.</div>
+          <div class="actions"><button class="btn">Save One-time Download settings</button><button class="btn ghost" type="button" onclick="showTab('emby')">View Emby matching</button></div>
         </form>
       </div>
-      <div class="settings-grid">
+
+      <div class="settings-grid" style="margin-top:14px">
         <div class="setting-box">
-          <h3>Default download history</h3>
+          <h3>Default Pinchflat download range</h3>
+          <p class="muted small">Starting history range used when a channel is enabled unless that channel has its own range.</p>
           <form method="post" action="/settings/history"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Default range
               <select name="history_mode" id="default-history-mode" onchange="toggleDefaultHistory()">
@@ -5538,49 +5652,182 @@
                 <option value="subscription_date" {% if default_history_mode == "subscription_date" %}selected{% endif %}>Subscription date</option>
               </select>
             </label>
-            <div id="default-years">
-              <label>Years back
-                <select name="history_years">
-                  {% for y in range(1, 11) %}<option value="{{ y }}" {% if default_history_years == y %}selected{% endif %}>{{ y }} year{% if y != 1 %}s{% endif %}</option>{% endfor %}
-                </select>
-              </label>
-            </div>
-            <div id="default-custom">
-              <label>Start date<input type="date" name="history_custom_date" value="{{ default_history_custom_date }}"></label>
-            </div>
-            <button class="btn">Save Download Range</button>
+            <div id="default-years"><label>Years back<select name="history_years">{% for y in range(1, 11) %}<option value="{{ y }}" {% if default_history_years == y %}selected{% endif %}>{{ y }} year{% if y != 1 %}s{% endif %}</option>{% endfor %}</select></label></div>
+            <div id="default-custom"><label>Start date<input type="date" name="history_custom_date" value="{{ default_history_custom_date }}"></label></div>
+            <button class="btn">Save default range</button>
           </form>
         </div>
 
         <div class="setting-box">
           <h3>Storage</h3>
-          <div class="storage-capacity-line">
-            <strong>{{ storage_total }}</strong><span>/ {{ storage_capacity }}</span>
-          </div>
-          <div class="storage-capacity-bar" title="{{ '%.2f'|format(storage_content_percent) }}% of the mounted filesystem used by YouTube downloads">
-            <span style="width:{{ storage_content_percent }}%"></span>
-          </div>
-          <p class="muted small">Shared YouTube storage mounted inside the app as <code>/downloads</code>. {{ storage_free }} filesystem space remains available.</p>
+          <div class="storage-capacity-line"><strong>{{ storage_total }}</strong><span>/ {{ storage_capacity }}</span></div>
+          <div class="storage-capacity-bar" title="{{ '%.2f'|format(storage_content_percent) }}% of the mounted filesystem used by YouTube downloads"><span style="width:{{ storage_content_percent }}%"></span></div>
+          <p class="muted small">Shared storage is mounted inside the app as <code>/downloads</code>. {{ storage_free }} filesystem space remains available.</p>
           <p>{{ download_counts.running }} active direct download(s) · {{ download_counts.queued }} queued · {{ download_counts.failed }} failed</p>
+          <div class="actions"><button class="btn ghost" type="button" onclick="showTab('retention')">Video Retention</button><button class="btn ghost" type="button" onclick="showTab('diagnostics')">Download logs</button></div>
+        </div>
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <h3>Where each download type is configured</h3>
+        <p class="muted small">Older releases duplicated path settings here. Each path now lives with the feature which owns it, so there is one source of truth.</p>
+        <div class="settings-status-list">
+          <div class="settings-status-row"><strong>Pinchflat subscriptions</strong><span>Media Profile <strong>{{ media_profile_settings.name or ('#' ~ media_profile_id) }}</strong> · <code>{{ subscription_download_template }}</code> · edit in Pinchflat</span></div>
+          <div class="settings-status-row"><strong>One-time Downloads</strong><span><code>/downloads/{{ single_download_folder }}</code> · edit above</span></div>
+          <div class="settings-status-row"><strong>Emby Download playlist</strong><span><code>/downloads/{{ emby_download_folder }}</code> · edit in Automation</span></div>
+        </div>
+        <div class="actions" style="margin-top:12px"><button class="btn ghost" type="button" onclick="showTab('pinchflat')">Open Pinchflat profile</button><button class="btn ghost" type="button" onclick="showTab('automation')">Open Automation</button></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="retention">
+      <div class="retention-hero">
+        <div>
+          <div class="retention-policy-head" style="margin-bottom:6px">
+            <div class="retention-policy-icon" aria-hidden="true">🛡</div>
+            <div>
+              <h3>Video Retention</h3>
+              <div class="muted small">Control how long Pinchflat downloads stay on disk without changing how far back each channel is allowed to download.</div>
+            </div>
+          </div>
+          <p class="muted small" style="margin:10px 0 0">
+            Retention uses the original YouTube upload date. Favourite videos, manually protected videos and the newest minimum number of videos are kept. One-time Downloads are never removed by this cleanup.
+          </p>
+        </div>
+        <div class="retention-master-toggle">
+          <span id="retention-master-state" class="retention-pill">{{ 'Automatic cleanup enabled' if retention.enabled else 'Automatic cleanup off' }}</span>
+          <label class="source-toggle" title="Enable automatic video retention cleanup">
+            <input id="retention-enabled-toggle" type="checkbox" name="retention_enabled" value="1" form="video-retention-settings-form" {% if retention.enabled %}checked{% endif %}>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <form id="video-retention-settings-form" method="post" action="/settings/video-retention">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+        <div class="retention-policy-grid">
+          <div class="retention-policy-card favourite">
+            <div class="retention-policy-head">
+              <div class="retention-policy-icon" aria-hidden="true">♥</div>
+              <div>
+                <h3 style="margin:0">Favourite channels</h3>
+                <div class="muted small">Default policy for channels marked as favourites.</div>
+              </div>
+            </div>
+            <div class="settings-grid" style="grid-template-columns:1fr 1fr">
+              <label>Keep videos for
+                <select name="retention_favourite_days">
+                  {% for value,label in retention_day_options %}
+                    <option value="{{ value }}" {% if retention.favourite_days|int == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>Always keep newest
+                <input type="number" min="0" max="10000" step="1" name="retention_favourite_min_videos" value="{{ retention.favourite_min_videos }}">
+                <span class="muted small">videos per channel</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="retention-policy-card">
+            <div class="retention-policy-head">
+              <div class="retention-policy-icon" aria-hidden="true">▶</div>
+              <div>
+                <h3 style="margin:0">Non-favourite channels</h3>
+                <div class="muted small">Default policy for all other enabled Pinchflat channels.</div>
+              </div>
+            </div>
+            <div class="settings-grid" style="grid-template-columns:1fr 1fr">
+              <label>Keep videos for
+                <select name="retention_nonfavourite_days">
+                  {% for value,label in retention_day_options %}
+                    <option value="{{ value }}" {% if retention.nonfavourite_days|int == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>Always keep newest
+                <input type="number" min="0" max="10000" step="1" name="retention_nonfavourite_min_videos" value="{{ retention.nonfavourite_min_videos }}">
+                <span class="muted small">videos per channel</span>
+              </label>
+            </div>
+          </div>
         </div>
 
-        <div class="setting-box" style="grid-column:1/-1">
-          <h3>Download paths</h3>
-          <p class="muted small">All paths are relative to the shared <code>/downloads</code> directory. The subscription template is also written to the selected Pinchflat Media Profile.</p>
-          <form method="post" action="/settings/download-paths"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <label>YouTube subscription auto-download path template
-              <input type="text" name="subscription_download_template" value="{{ subscription_download_template }}" autocomplete="off">
+        <div class="setting-box" style="margin-top:14px">
+          <h3>Cleanup safeguards</h3>
+          <div class="settings-grid">
+            <label>Grace period after download
+              <input type="number" min="0" max="365" step="1" name="retention_grace_days" value="{{ retention.grace_days }}">
+              <span class="muted small">days before a newly downloaded historical video becomes eligible</span>
             </label>
-            <label>Emby Download folder
-              <input type="text" name="emby_download_folder" value="{{ emby_download_folder }}" placeholder="Emby Download">
+            <label>Automatic cleanup schedule
+              <select name="retention_cleanup_interval_hours">
+                {% for value,label in retention_cleanup_interval_options %}
+                  <option value="{{ value }}" {% if retention.cleanup_interval_hours|int == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
             </label>
-            <button class="btn">Save Download Paths</button>
-          </form>
+          </div>
+          <div class="page-view-grid" style="margin-top:10px">
+            <label class="page-view-option">
+              <input type="checkbox" name="retention_protect_favourite_videos" value="1" {% if retention.protect_favourite_videos %}checked{% endif %}>
+              <span><strong>Protect favourite videos</strong><small>Individual favourite videos are never removed by retention cleanup.</small></span>
+            </label>
+            <div class="page-view-option" aria-label="One-time Downloads are protected">
+              <span style="display:grid;place-items:center;width:20px;height:20px;color:#a78bfa">🛡</span>
+              <span><strong>One-time Downloads</strong><small>Always kept. Retention only manages Pinchflat-downloaded media.</small></span>
+            </div>
+          </div>
+          <div class="profile-control-help" style="margin-top:12px">
+            Cleanup uses Pinchflat's own media deletion logic and marks removed items so a later Force Scan does not immediately download them again. Pinchflat's native Prevent Automatic Deletion flag is also respected.
+          </div>
+          <div class="actions" style="margin-top:14px">
+            <button class="btn" type="submit">Save Video Retention</button>
+          </div>
         </div>
+      </form>
+
+      <div class="setting-box" style="margin-top:14px">
+        <div class="profile-editor-heading">
+          <div>
+            <h3>Cleanup preview</h3>
+            <div class="muted small">See what the current rules would remove before anything is deleted.</div>
+          </div>
+          <div class="actions" style="margin:0">
+            <button id="retention-preview-button" class="btn secondary" type="button" onclick="loadRetentionPreview(true)">Preview cleanup</button>
+            <button id="retention-run-button" class="btn danger" type="button" onclick="runRetentionCleanup()">Run cleanup now</button>
+          </div>
+        </div>
+        <div class="retention-stat-grid">
+          <div class="retention-stat"><span>Eligible videos</span><strong id="retention-preview-count">—</strong></div>
+          <div class="retention-stat"><span>Space reclaimable</span><strong id="retention-preview-size">—</strong></div>
+          <div class="retention-stat"><span>Channels affected</span><strong id="retention-preview-channels">—</strong></div>
+          <div class="retention-stat"><span>Protected videos</span><strong id="retention-preview-protected">—</strong></div>
+        </div>
+        <div id="retention-run-status" class="muted small"></div>
+        <div id="retention-preview-empty" class="empty hidden">No downloaded videos match the current cleanup rules.</div>
+        <div id="retention-preview-list" class="retention-preview-list"></div>
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <div class="profile-editor-heading">
+          <div>
+            <h3>Channel overrides</h3>
+            <div class="muted small">Override the favourite or non-favourite policy for individual channels. Use group policy restores inheritance.</div>
+          </div>
+        </div>
+        <div class="retention-channel-toolbar">
+          <input id="retention-channel-search" type="search" placeholder="Search channels…" autocomplete="off" aria-label="Search channel retention settings">
+          <button class="btn secondary" type="button" onclick="loadRetentionChannels(true)">Refresh</button>
+        </div>
+        <div id="retention-channel-grid" class="retention-channel-grid"></div>
+        <div id="retention-channel-empty" class="empty hidden">No channels found.</div>
       </div>
     </section>
 
     <section class="tab-panel" data-panel="favourites">
+      <div class="settings-panel-intro"><div><h3>Favourites</h3><p>Review favourite channels and organise saved videos into reusable lists.</p></div></div>
       <div class="setting-box" style="margin-bottom:14px">
         <h3>Favourites overview</h3>
         <div id="settings-favourites-overview-stats" class="favourites-overview-stats">
@@ -5614,6 +5861,7 @@
     </section>
 
     <section class="tab-panel" data-panel="automation">
+      <div class="settings-panel-intro"><div><h3>Automation</h3><p>Schedules which run without opening the dashboard. Each job has one clear purpose and uses the settings shown here.</p></div></div>
       <form method="post" action="/settings/automation"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         {% set schedule_options = [(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
         {% set emby_schedule_options = [(1,'Every minute'),(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
@@ -5655,6 +5903,10 @@
               </select>
             </label>
             <label><input type="checkbox" name="emby_download_enabled" value="1" {% if emby_download_enabled %}checked{% endif %}> Monitor the private “Emby Download” playlist</label>
+            <label>Download folder
+              <input type="text" name="emby_download_folder" value="{{ emby_download_folder }}" placeholder="Emby Download">
+              <span class="muted small">Relative to <code>/downloads</code>. Emby library detection uses this exact folder after each successful playlist download.</span>
+            </label>
             <label><input type="checkbox" name="emby_download_remove_after_success" value="1" {% if emby_download_remove_after_success %}checked{% endif %}> Remove playlist items after a successful download</label>
             <p class="muted small">Next check: {{ next_emby_sync or "not available" }}</p>
           </div>
@@ -5675,110 +5927,55 @@
       </div>
     </section>
 
-    <section class="tab-panel" data-panel="logs">
-      <div class="setting-box">
+    <section class="tab-panel" data-panel="diagnostics">
+      <div class="settings-panel-intro"><div><h3>Diagnostics</h3><p>Application health, recent activity, direct download history and Pinchflat container output in one place.</p></div></div>
+
+      <div class="settings-grid">
+        <div class="setting-box">
+          <h3>Application</h3>
+          <div class="settings-status-list">
+            <div class="settings-status-row"><strong>Version</strong><span>{{ version }}</span></div>
+            <div class="settings-status-row"><strong>Dry run</strong><span>{{ "Enabled" if dry_run else "Disabled" }}</span></div>
+            <div class="settings-status-row"><strong>Download storage</strong><span>{{ storage_total }} / {{ storage_capacity }}</span></div>
+            <div class="settings-status-row"><strong>Google</strong><span>{{ 'Connected' if google_connected else 'Not connected' }}</span></div>
+            <div class="settings-status-row"><strong>Emby</strong><span>{{ 'Configured' if emby_api_configured else 'Not configured' }}</span></div>
+          </div>
+          <div class="actions" style="margin-top:12px"><a class="btn ghost" href="/health" target="_blank" rel="noopener">Health endpoint</a><a class="btn ghost" href="https://github.com/AshCooperUK/youtube-pinchflat-sync" target="_blank" rel="noopener">GitHub</a></div>
+        </div>
+
+        <div class="setting-box">
+          <h3>Recent sync runs</h3>
+          {% for run in recent_runs %}
+            <div class="activity-item"><strong>{{ run["status"] }}</strong><div>{{ run["message"] }}</div><div class="activity-time">{{ run["started_at"] }}</div></div>
+          {% else %}<div class="muted small">No sync runs recorded yet.</div>{% endfor %}
+        </div>
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
         <h3>Activity</h3>
-        <p class="muted small">Recent automation, source, download and settings events.</p>
-        {% if activity_rows %}
-          {% for item in activity_rows %}
-            <div class="activity-item">
-              <strong class="{% if item['severity'] == 'warning' %}warn{% elif item['severity'] == 'success' %}ok{% elif item['severity'] == 'error' %}bad{% endif %}">{{ item["title"] }}</strong>
-              <div>{{ item["message"] }}</div>
-              <div class="activity-time">{{ item["created_at"] }} · {{ item["event_type"] }}</div>
-            </div>
-          {% endfor %}
-        {% else %}<div class="empty">No activity has been recorded yet.</div>{% endif %}
+        <p class="muted small">Recent automation, source, download, retention and settings events.</p>
+        {% if activity_rows %}{% for item in activity_rows %}<div class="activity-item"><strong class="{% if item['severity'] == 'warning' %}warn{% elif item['severity'] == 'success' %}ok{% elif item['severity'] == 'error' %}bad{% endif %}">{{ item["title"] }}</strong><div>{{ item["message"] }}</div><div class="activity-time">{{ item["created_at"] }} · {{ item["event_type"] }}</div></div>{% endfor %}{% else %}<div class="empty">No activity has been recorded yet.</div>{% endif %}
       </div>
 
       <div class="setting-box" style="margin-top:14px">
         <div class="log-tile-head">
-          <div>
-            <h3>Pinchflat logs</h3>
-            <div class="muted small">Recent stdout and stderr from the Pinchflat Docker container.</div>
-          </div>
-
-          <div class="container-log-toolbar">
-            <select id="pinchflat-log-tail" aria-label="Pinchflat log line count">
-              <option value="100">100 lines</option>
-              <option value="250" selected>250 lines</option>
-              <option value="500">500 lines</option>
-              <option value="1000">1,000 lines</option>
-            </select>
-
-            <button
-              class="btn secondary"
-              type="button"
-              id="pinchflat-log-refresh"
-              onclick="loadPinchflatLogs(true)"
-            >Refresh logs</button>
-          </div>
+          <div><h3>Pinchflat logs</h3><div class="muted small">Recent stdout and stderr from the Pinchflat Docker container.</div></div>
+          <div class="container-log-toolbar"><select id="pinchflat-log-tail" aria-label="Pinchflat log line count"><option value="100">100 lines</option><option value="250" selected>250 lines</option><option value="500">500 lines</option><option value="1000">1,000 lines</option></select><button class="btn secondary" type="button" id="pinchflat-log-refresh" onclick="loadPinchflatLogs(true)">Refresh logs</button></div>
         </div>
-
-        <pre id="pinchflat-log-output" class="container-log-output">Open Logs to load the Pinchflat container log.</pre>
+        <pre id="pinchflat-log-output" class="container-log-output">Open Diagnostics to load the Pinchflat container log.</pre>
         <div id="pinchflat-log-status" class="container-log-status muted small"></div>
       </div>
 
-      <div class="settings-grid" style="margin-top:14px">
-        <div class="setting-box">
-          <h3>Recent direct downloads</h3>
-          {% if recent_downloads %}
-            {% for item in recent_downloads %}
-              <div class="activity-item">
-                <strong class="{% if item['status'] == 'completed' %}ok{% elif item['status'] == 'failed' %}bad{% elif item['status'] in ['downloading','processing'] %}warn{% endif %}">{{ item["title"] or item["youtube_url"] }}</strong>
-                <div>{{ item["source_type"] }} · {{ item["status"] }} · {{ "%.0f"|format(item["progress"] or 0) }}%</div>
-                {% if item["error"] %}<div class="bad small">{{ item["error"] }}</div>{% endif %}
-                <div class="activity-time">{{ item["created_at"] }}</div>
-              </div>
-            {% endfor %}
-          {% else %}<div class="muted small">No direct downloads yet.</div>{% endif %}
-        </div>
-        <div class="setting-box">
-          <h3>Recent sync runs</h3>
-          {% for run in recent_runs %}
-            <div class="activity-item">
-              <strong>{{ run["status"] }}</strong>
-              <div>{{ run["message"] }}</div>
-              <div class="activity-time">{{ run["started_at"] }}</div>
-            </div>
-          {% else %}<div class="muted small">No sync runs recorded yet.</div>{% endfor %}
-        </div>
-      </div>
-    </section>
-
-    <section class="tab-panel" data-panel="advanced">
-      <div class="settings-grid">
-        <div class="setting-box">
-          <h3>YouTube API usage</h3>
-          <div class="metric">{{ api_stats.used }} / {{ api_stats.quota }}</div>
-          <div class="quota-bar"><div class="quota-fill" style="width:{{ api_stats.percent }}%"></div></div>
-          <p class="muted small">{{ api_stats.remaining }} estimated units remaining today · {{ api_stats.calls }} calls · {{ api_stats.failures }} failed calls</p>
-          <p class="muted small">Discovery searches: {{ api_stats.search_calls }} / {{ api_stats.search_limit }} today · {{ api_stats.search_remaining }} remaining</p>
-          {% if api_stats.methods %}
-          <table class="compact-table">
-            <thead><tr><th>Method</th><th>Calls</th><th>Units</th></tr></thead>
-            <tbody>
-              {% for method in api_stats.methods %}
-                <tr><td>{{ method.method }}</td><td>{{ method.calls }}</td><td>{{ method.units }}</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          {% endif %}
-          <p class="muted small">These figures track calls made by this app. Google Cloud Console remains the source for the project’s actual quota.</p>
-        </div>
-
-        <div class="setting-box">
-          <h3>Application</h3>
-          <p>Version <strong>{{ version }}</strong></p>
-          <p>Dry run: <strong>{{ "Enabled" if dry_run else "Disabled" }}</strong></p>
-          <p>Download storage: <strong>{{ storage_total }}</strong></p>
-          <p><a href="/health" target="_blank">Health endpoint</a></p>
-          <p><a href="https://github.com/AshCooperUK/youtube-pinchflat-sync" target="_blank">GitHub repository</a></p>
-        </div>
+      <div class="setting-box" style="margin-top:14px">
+        <h3>Recent direct downloads</h3>
+        <p class="muted small">One-time Downloads and Emby Download playlist jobs. The effective One-time settings live in Downloads.</p>
+        {% if recent_downloads %}{% for item in recent_downloads %}<div class="activity-item"><strong class="{% if item['status'] == 'completed' %}ok{% elif item['status'] == 'failed' %}bad{% elif item['status'] in ['downloading','processing'] %}warn{% endif %}">{{ item["title"] or item["youtube_url"] }}</strong><div>{{ item["source_type"] }} · {{ item["status"] }} · {{ "%.0f"|format(item["progress"] or 0) }}%</div>{% if item["error"] %}<div class="bad small">{{ item["error"] }}</div>{% endif %}<div class="activity-time">{{ item["created_at"] }}</div></div>{% endfor %}{% else %}<div class="muted small">No direct downloads yet.</div>{% endif %}
       </div>
     </section>
     {% endif %}
 
     <section class="tab-panel {% if not is_admin %}active{% endif %}" data-panel="security" id="security">
+      <div class="settings-panel-intro"><div><h3>Security</h3><p>Account protection, persistent sign-in, user access and login activity.</p></div></div>
       <div class="settings-grid">
         <div class="setting-box">
           <h3>Your account</h3>
@@ -5882,6 +6079,8 @@
         </div>
       </div>
     </section>
+      </div>
+    </div>
   </div>
   <div id="settings-ajax-toast" class="ajax-toast" role="status" aria-live="polite"></div>
 </dialog>
@@ -6856,13 +7055,14 @@ function settingsActionNeedsPageRefresh(path) {
     "/settings/pinchflat/profile",
     "/settings/single-download",
     "/settings/history",
-    "/settings/download-paths",
+    "/settings/video-retention",
     "/settings/automation"
   ]).has(path);
 }
 
 function settingsActionNeedsDialogRefresh(path) {
   return new Set([
+    "/settings/pinchflat",
     "/settings/pinchflat/profile/create",
     "/settings/pinchflat/profile/delete"
   ]).has(path);
@@ -6886,6 +7086,23 @@ function settingsResponseNotice(documentNode) {
 }
 
 function bindSettingsDynamicListeners() {
+  const retentionSearch = document.getElementById("retention-channel-search");
+  if (retentionSearch && retentionSearch.dataset.listenerBound !== "1") {
+    retentionSearch.dataset.listenerBound = "1";
+    retentionSearch.addEventListener("input", () => {
+      clearTimeout(retentionSearchTimer);
+      retentionSearchTimer = setTimeout(() => loadRetentionChannels(true), 350);
+    });
+  }
+  const retentionToggle = document.getElementById("retention-enabled-toggle");
+  if (retentionToggle && retentionToggle.dataset.listenerBound !== "1") {
+    retentionToggle.dataset.listenerBound = "1";
+    retentionToggle.addEventListener("change", event => {
+      const label = document.getElementById("retention-master-state");
+      if (label) label.textContent = event.target.checked ? "Automatic cleanup enabled" : "Automatic cleanup off";
+    });
+  }
+
   const logTail = document.getElementById("pinchflat-log-tail");
   if (logTail && logTail.dataset.listenerBound !== "1") {
     logTail.dataset.listenerBound = "1";
@@ -6916,8 +7133,8 @@ async function submitSettingsFormWithoutReload(event) {
   }
 
   const activeTab = settingsDialog.querySelector(".tab-btn.active")?.dataset.tab || "general";
-  const modalBody = settingsDialog.querySelector(".modal-body");
-  const modalScrollTop = modalBody?.scrollTop || 0;
+  const settingsPanels = settingsDialog.querySelector(".settings-panels");
+  const modalScrollTop = settingsPanels?.scrollTop || 0;
 
   try {
     const body = new FormData(form);
@@ -6947,8 +7164,10 @@ async function submitSettingsFormWithoutReload(event) {
       const refreshedDialog = responseDocument.getElementById("settings-dialog");
       if (refreshedDialog) {
         settingsDialog.innerHTML = refreshedDialog.innerHTML;
+        retentionPreviewLoaded = false;
+        retentionChannelsLoaded = false;
         showTab(activeTab);
-        const refreshedBody = settingsDialog.querySelector(".modal-body");
+        const refreshedBody = settingsDialog.querySelector(".settings-panels");
         if (refreshedBody) refreshedBody.scrollTop = modalScrollTop;
         initialisePageViewSettings();
         toggleDefaultHistory();
@@ -6959,6 +7178,13 @@ async function submitSettingsFormWithoutReload(event) {
 
     if (settingsActionNeedsPageRefresh(path) && notice?.type !== "error") {
       settingsPageRefreshNeeded = true;
+    }
+    if (path === "/settings/video-retention" && notice?.type !== "error") {
+      retentionPreviewLoaded = false;
+      retentionChannelsLoaded = false;
+      loadRetentionPreview(true);
+      loadRetentionChannels(true);
+      loadRetentionRunStatus();
     }
     showAjaxToast(notice?.message || "Settings saved.", notice?.type || "success");
   } catch (error) {
@@ -7430,6 +7656,21 @@ function makeChannelAvatarWidget(item, options={}) {
     });
     wrap.appendChild(scan);
 
+    const retention = document.createElement("button");
+    retention.type = "button";
+    retention.className = "channel-image-control channel-control-retention";
+    retention.dataset.channelRetentionControl = "1";
+    retention.dataset.channelId = channelId;
+    retention.title = "Edit video retention for this channel";
+    retention.setAttribute("aria-label", `Edit video retention for ${state.title}`);
+    retention.innerHTML = retentionShieldSvg();
+    retention.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openRetentionSettingsForChannel(channelId, state.title);
+    });
+    wrap.appendChild(retention);
+
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "channel-image-control channel-control-delete";
@@ -7534,6 +7775,9 @@ function discoverActionSvg(kind, active=false) {
   }
   if (kind === "download") {
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 11 4.5 4.5 4.5-4.5"></path><path d="M5 20h14"></path></svg>`;
+  }
+  if (kind === "protect") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg>`;
   }
   if (kind === "emby") {
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"></path><path d="M4 17v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.7-2.2L20 9"></path><path d="M17.9 15a7 7 0 0 1-11.7 2.2L4 15"></path><path d="m10 9 5 3-5 3Z"></path></svg>`;
@@ -7769,6 +8013,7 @@ function updateLatestPopupButtons() {
   if (!latestPopupVideo) return;
 
   const videoHeart = document.getElementById("latest-popup-video-heart");
+  const retentionProtect = document.getElementById("latest-popup-retention-protect");
   const youtubeSubscribe = document.getElementById("latest-popup-youtube-subscribe");
   const youtubeLike = document.getElementById("latest-popup-youtube-like");
   const download = document.getElementById("latest-popup-download");
@@ -7781,6 +8026,11 @@ function updateLatestPopupButtons() {
     videoHeart.setAttribute("aria-pressed", active ? "true" : "false");
     videoHeart.title = active ? "Remove video from favourites" : "Add video to favourites";
     videoHeart.setAttribute("aria-label", videoHeart.title);
+  }
+
+  if (retentionProtect) {
+    setRetentionProtectionButtonState(retentionProtect, !!latestPopupVideo.retention_protected);
+    retentionProtect.disabled = !latestPopupVideo.video_id;
   }
 
   if (youtubeSubscribe) {
@@ -7935,6 +8185,14 @@ function renderLatestVideoDetails(item) {
   }
 
   updateLatestPopupButtons();
+  if (item.video_id) {
+    const expectedVideoId = String(item.video_id);
+    getVideoRetentionProtection(expectedVideoId).then(protectedState => {
+      if (!latestPopupVideo || String(latestPopupVideo.video_id || "") !== expectedVideoId) return;
+      latestPopupVideo.retention_protected = protectedState;
+      setRetentionProtectionButtonState(document.getElementById("latest-popup-retention-protect"), protectedState);
+    });
+  }
 }
 
 async function loadLatestPopupChannelDetails(channelId, expectedVideoId) {
@@ -8089,6 +8347,18 @@ async function toggleLatestPopupVideoFavourite() {
     document.getElementById("latest-popup-video-heart"),
     latestPopupVideo
   );
+}
+
+async function toggleLatestPopupRetentionProtection() {
+  if (!latestPopupVideo?.video_id) return;
+  const button = document.getElementById("latest-popup-retention-protect");
+  await toggleVideoRetentionProtection(
+    latestPopupVideo.video_id,
+    latestPopupVideo.channel_id || "",
+    latestPopupVideo.title || "",
+    button
+  );
+  latestPopupVideo.retention_protected = !!button?.classList.contains("active");
 }
 
 
@@ -8647,6 +8917,25 @@ function savedVideoCard(item, options={}) {
     openSingleDownload(item.video_url || (item.video_id ? `https://www.youtube.com/watch?v=${item.video_id}` : ""));
   };
 
+  let protect = null;
+  if (userIsAdmin && item.video_id) {
+    protect = document.createElement("button");
+    protect.type = "button";
+    protect.className = "discover-action-icon retention-protect-action";
+    protect.innerHTML = discoverActionSvg("protect");
+    setRetentionProtectionButtonState(protect, !!item.retention_protected);
+    getVideoRetentionProtection(item.video_id).then(state => {
+      item.retention_protected = state;
+      setRetentionProtectionButtonState(protect, state);
+    });
+    protect.onclick = async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      await toggleVideoRetentionProtection(item.video_id, item.channel_id || "", item.title || "", protect);
+      item.retention_protected = protect.classList.contains("active");
+    };
+  }
+
   const list = document.createElement("button");
   list.type = "button";
   list.className = "discover-action-icon";
@@ -8658,7 +8947,9 @@ function savedVideoCard(item, options={}) {
     openListPicker(item);
   };
 
-  iconRow.append(download, list);
+  iconRow.append(download);
+  if (protect) iconRow.appendChild(protect);
+  iconRow.appendChild(list);
 
   if (options.listId) {
     const remove = document.createElement("button");
@@ -9309,13 +9600,35 @@ function makeDiscoverActionButton(kind, item) {
       const url = item.video_url || (item.video_id ? `https://www.youtube.com/watch?v=${item.video_id}` : "");
       if (url) queueOneTimeDownload(url);
     });
+  } else if (kind === "protect") {
+    button.classList.add("discover-action-protect");
+    button.innerHTML = discoverActionSvg("protect");
+    button.disabled = !item?.video_id;
+    setRetentionProtectionButtonState(button, !!item.retention_protected);
+    if (item?.video_id) {
+      getVideoRetentionProtection(item.video_id).then(state => {
+        item.retention_protected = state;
+        setRetentionProtectionButtonState(button, state);
+      });
+    }
+    button.addEventListener("click", async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      await toggleVideoRetentionProtection(
+        item.video_id || "",
+        item.channel_id || "",
+        item.title || "",
+        button
+      );
+      item.retention_protected = button.classList.contains("active");
+    });
   } else if (kind === "emby") {
     button.classList.add("discover-action-primary", "discover-action-emby");
     button.innerHTML = discoverActionSvg("emby");
     button.disabled = !embyApiConfigured || (!item?.channel_id && !(item?.channel_title || item?.channel));
     button.title = embyApiConfigured
       ? `Refresh ${item.channel_title || item.channel || "this channel"} in Emby`
-      : "Configure Emby in Settings → API first";
+      : "Configure Emby in Settings → Emby first";
     button.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -9391,6 +9704,7 @@ function renderDiscoverTiles(items) {
       item
     );
     const subscribe = makeDiscoverActionButton("subscribe", item);
+    const protect = userIsAdmin && item.video_id ? makeDiscoverActionButton("protect", item) : null;
 
     const overlay = document.createElement("div");
     overlay.className = "discover-video-overlay";
@@ -9410,7 +9724,9 @@ function renderDiscoverTiles(items) {
     meta.textContent = bits.join(" · ");
 
     overlay.append(title, channel, meta);
-    card.append(image, favourite, primary, subscribe, overlay);
+    card.append(image, favourite, primary, subscribe);
+    if (protect) card.appendChild(protect);
+    card.appendChild(overlay);
 
     if (item.duration) {
       const duration = document.createElement("span");
@@ -9576,6 +9892,20 @@ function renderShortsActions(item) {
     videoHeart.setAttribute("aria-pressed", item.is_favourite_video ? "true" : "false");
     videoHeart.title = item.is_favourite_video ? "Remove video from favourites" : "Add video to favourites";
     videoHeart.setAttribute("aria-label", videoHeart.title);
+  }
+
+  const retentionProtect = document.getElementById("shorts-retention-protect");
+  if (retentionProtect) {
+    retentionProtect.innerHTML = discoverActionSvg("protect");
+    retentionProtect.disabled = !item.video_id;
+    setRetentionProtectionButtonState(retentionProtect, !!item.retention_protected);
+    if (item.video_id && item.retention_protection_loaded !== true) {
+      item.retention_protection_loaded = true;
+      getVideoRetentionProtection(item.video_id).then(state => {
+        item.retention_protected = state;
+        setRetentionProtectionButtonState(retentionProtect, state);
+      });
+    }
   }
 
   const subscribe = document.getElementById("shorts-youtube-subscribe");
@@ -9793,6 +10123,14 @@ async function toggleCurrentShortVideoFavourite() {
   const favourite = await toggleVideoFavourite(document.getElementById("shorts-video-heart"), item);
   if (typeof favourite === "boolean") item.is_favourite_video = favourite;
   renderShortsActions(item);
+}
+async function toggleCurrentShortRetentionProtection() {
+  const item = currentShortItem();
+  if (!item?.video_id) return;
+  const button = document.getElementById("shorts-retention-protect");
+  await toggleVideoRetentionProtection(item.video_id, item.channel_id || "", item.title || "", button);
+  item.retention_protected = !!button?.classList.contains("active");
+  item.retention_protection_loaded = true;
 }
 async function subscribeCurrentShortChannel() {
   const item = currentShortItem();
@@ -10102,6 +10440,345 @@ function initialiseSortableOrderList(listId, inputId) {
   );
 }
 
+
+let retentionSearchTimer = null;
+let retentionPreviewLoaded = false;
+let retentionChannelsLoaded = false;
+let retentionStatusTimer = null;
+const retentionDayChoices = {{ retention_day_options|tojson }};
+
+function retentionShieldSvg() {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg>`;
+}
+
+function openRetentionSettingsForChannel(channelId, title="") {
+  channelId = String(channelId || "").trim();
+  if (!channelId) return;
+  openSettings("retention");
+  const input = document.getElementById("retention-channel-search");
+  if (input) input.value = channelId;
+  loadRetentionChannels(true, channelId).then(() => {
+    const card = document.querySelector(`[data-retention-channel-card="${CSS.escape(channelId)}"]`);
+    if (card) card.scrollIntoView({behavior:"smooth", block:"center"});
+  });
+}
+
+function renderRetentionPreview(data) {
+  const setText = (id, value) => {
+    const node = document.getElementById(id);
+    if (node) node.textContent = value;
+  };
+  setText("retention-preview-count", Number(data.candidate_count || 0).toLocaleString("en-GB"));
+  setText("retention-preview-size", data.candidate_size || "0 B");
+  setText("retention-preview-channels", Number(data.channels_affected || 0).toLocaleString("en-GB"));
+  setText("retention-preview-protected", Number(data.protected_count || 0).toLocaleString("en-GB"));
+
+  const list = document.getElementById("retention-preview-list");
+  const empty = document.getElementById("retention-preview-empty");
+  if (!list || !empty) return;
+  list.innerHTML = "";
+  const rows = Array.isArray(data.candidates) ? data.candidates : [];
+  empty.classList.toggle("hidden", rows.length > 0);
+
+  rows.slice(0, 80).forEach(item => {
+    const row = document.createElement("div");
+    row.className = "retention-preview-row";
+
+    const image = document.createElement("img");
+    image.src = item.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    image.alt = "";
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+
+    const info = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "retention-preview-title";
+    title.textContent = item.title || "YouTube video";
+    const meta = document.createElement("div");
+    meta.className = "retention-preview-meta";
+    meta.textContent = [
+      item.channel_title || "YouTube channel",
+      item.uploaded_at_text ? `Published ${item.uploaded_at_text}` : "",
+      item.policy_label ? `${item.policy_label} policy` : ""
+    ].filter(Boolean).join(" · ");
+    const reason = document.createElement("div");
+    reason.className = "retention-preview-meta";
+    reason.textContent = item.reason || "Eligible for retention cleanup";
+    info.append(title, meta, reason);
+
+    const size = document.createElement("div");
+    size.className = "retention-preview-size";
+    size.textContent = item.size_text || "—";
+    row.append(image, info, size);
+    list.appendChild(row);
+  });
+
+  if (Number(data.candidate_count || 0) > rows.slice(0, 80).length) {
+    const more = document.createElement("div");
+    more.className = "muted small";
+    more.style.padding = "8px 2px";
+    more.textContent = `${Number(data.candidate_count) - rows.slice(0,80).length} more eligible videos are not shown in this preview.`;
+    list.appendChild(more);
+  }
+}
+
+async function loadRetentionPreview(force=false) {
+  if (retentionPreviewLoaded && !force) return;
+  const button = document.getElementById("retention-preview-button");
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch("/api/retention/preview", {headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Retention preview could not be loaded.");
+    retentionPreviewLoaded = true;
+    renderRetentionPreview(data);
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function retentionDaySelect(selected) {
+  const select = document.createElement("select");
+  select.className = "retention-channel-days";
+  retentionDayChoices.forEach(([value,label]) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = label;
+    option.selected = Number(selected || 0) === Number(value);
+    select.appendChild(option);
+  });
+  return select;
+}
+
+function renderRetentionChannels(channels) {
+  const grid = document.getElementById("retention-channel-grid");
+  const empty = document.getElementById("retention-channel-empty");
+  if (!grid || !empty) return;
+  grid.innerHTML = "";
+  channels = Array.isArray(channels) ? channels : [];
+  empty.classList.toggle("hidden", channels.length > 0);
+
+  channels.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "retention-channel-card";
+    card.dataset.retentionChannelCard = item.channel_id;
+
+    const avatar = makeChannelAvatarWidget({
+      channel_id:item.channel_id,
+      title:item.title,
+      thumbnail_url:item.thumbnail_url,
+      favourite:item.favourite,
+      is_favourite:item.favourite,
+      download_enabled:item.download_enabled,
+      subscribed:true,
+      is_subscribed:true,
+      pinchflat_source_id:item.source_id
+    }, {size:52, compact:true});
+
+    const identity = document.createElement("div");
+    const title = document.createElement("button");
+    title.type = "button";
+    title.className = "channel-popup-link retention-channel-title";
+    title.textContent = item.title || "YouTube channel";
+    title.onclick = () => openChannelDetails(item.channel_id);
+    const source = document.createElement("div");
+    source.className = "retention-channel-source";
+    source.textContent = item.override ? "Channel override" : item.policy_source;
+    const pill = document.createElement("span");
+    pill.className = "retention-pill";
+    pill.textContent = `${item.effective_label} · keep ${item.effective_minimum} newest`;
+    identity.append(title, source, pill);
+
+    const daysLabel = document.createElement("label");
+    daysLabel.textContent = "Keep for";
+    const days = retentionDaySelect(item.override ? item.override_days : item.effective_days);
+    daysLabel.appendChild(days);
+
+    const minLabel = document.createElement("label");
+    minLabel.textContent = "Keep newest";
+    const minimum = document.createElement("input");
+    minimum.type = "number";
+    minimum.min = "0";
+    minimum.max = "10000";
+    minimum.step = "1";
+    minimum.value = String(item.override ? item.override_minimum : item.effective_minimum);
+    minLabel.appendChild(minimum);
+
+    const actions = document.createElement("div");
+    actions.className = "retention-channel-actions actions";
+    actions.style.margin = "0";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn smallbtn";
+    save.textContent = "Save override";
+    save.onclick = () => saveRetentionChannelOverride(item.channel_id, days.value, minimum.value, save);
+    const inherit = document.createElement("button");
+    inherit.type = "button";
+    inherit.className = "btn ghost smallbtn";
+    inherit.textContent = "Use group policy";
+    inherit.disabled = !item.override;
+    inherit.onclick = () => clearRetentionChannelOverride(item.channel_id, inherit);
+    actions.append(save, inherit);
+
+    card.append(avatar, identity, daysLabel, minLabel, actions);
+    grid.appendChild(card);
+  });
+}
+
+async function loadRetentionChannels(force=false, explicitQuery="") {
+  if (retentionChannelsLoaded && !force && !explicitQuery) return;
+  const input = document.getElementById("retention-channel-search");
+  const query = String(explicitQuery || input?.value || "").trim();
+  try {
+    const response = await fetch(`/api/retention/channels?q=${encodeURIComponent(query)}`, {headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Channel retention settings could not be loaded.");
+    retentionChannelsLoaded = true;
+    renderRetentionChannels(data.channels || []);
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  }
+}
+
+async function saveRetentionChannelOverride(channelId, days, minimum, button) {
+  if (button) button.disabled = true;
+  try {
+    const body = new FormData();
+    body.append("_csrf", document.querySelector('meta[name="csrf-token"]').content);
+    body.append("mode", "override");
+    body.append("retention_days", String(days));
+    body.append("minimum_videos", String(minimum));
+    const response = await fetch(`/api/retention/channels/${encodeURIComponent(channelId)}`, {method:"POST", body, headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Retention override could not be saved.");
+    showAjaxToast(data.message || "Channel retention override saved.", "success");
+    retentionPreviewLoaded = false;
+    await loadRetentionChannels(true);
+    await loadRetentionPreview(true);
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    if (button && document.body.contains(button)) button.disabled = false;
+  }
+}
+
+async function clearRetentionChannelOverride(channelId, button) {
+  if (button) button.disabled = true;
+  try {
+    const body = new FormData();
+    body.append("_csrf", document.querySelector('meta[name="csrf-token"]').content);
+    body.append("mode", "inherit");
+    const response = await fetch(`/api/retention/channels/${encodeURIComponent(channelId)}`, {method:"POST", body, headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Retention override could not be removed.");
+    showAjaxToast(data.message || "Channel now follows its group policy.", "success");
+    retentionPreviewLoaded = false;
+    await loadRetentionChannels(true);
+    await loadRetentionPreview(true);
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    if (button && document.body.contains(button)) button.disabled = false;
+  }
+}
+
+async function loadRetentionRunStatus() {
+  try {
+    const response = await fetch("/api/retention/status", {headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    if (!response.ok || !data.ok) return;
+    const status = document.getElementById("retention-run-status");
+    const runButton = document.getElementById("retention-run-button");
+    if (runButton) runButton.disabled = !!data.running;
+    if (status) {
+      if (data.running) {
+        status.textContent = "Cleanup is running. Pinchflat media is being removed safely and Emby will be refreshed afterwards.";
+      } else if (data.last_run) {
+        const deleted = Number(data.last_run.deleted_count || 0).toLocaleString("en-GB");
+        status.textContent = `Last cleanup: ${deleted} videos removed · ${data.last_run.reclaimed_size || "0 B"} reclaimed · ${data.last_run.status || "finished"}.`;
+      } else {
+        status.textContent = "No retention cleanup has run yet.";
+      }
+    }
+    if (data.running) {
+      clearTimeout(retentionStatusTimer);
+      retentionStatusTimer = setTimeout(loadRetentionRunStatus, 2000);
+    } else {
+      clearTimeout(retentionStatusTimer);
+      retentionStatusTimer = null;
+      retentionPreviewLoaded = false;
+      if (settingsDialog.open && document.querySelector('#settings-dialog .tab-btn[data-tab="retention"]')?.classList.contains("active")) {
+        loadRetentionPreview(true);
+      }
+    }
+  } catch (_) {}
+}
+
+async function runRetentionCleanup() {
+  const enabled = document.getElementById("retention-enabled-toggle")?.checked;
+  if (!enabled) {
+    showAjaxToast("Enable Video Retention and save the settings before running cleanup.", "error");
+    return;
+  }
+  if (!confirm("Run video retention cleanup now? Eligible Pinchflat media files will be deleted according to the preview.")) return;
+  const button = document.getElementById("retention-run-button");
+  if (button) button.disabled = true;
+  try {
+    const data = await apiPost("/api/retention/run", {});
+    showAjaxToast(data.message || "Video retention cleanup started.", "success");
+    loadRetentionRunStatus();
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+    if (button) button.disabled = false;
+  }
+}
+
+async function getVideoRetentionProtection(videoId) {
+  videoId = String(videoId || "").trim();
+  if (!videoId) return false;
+  try {
+    const response = await fetch(`/api/retention/protection/${encodeURIComponent(videoId)}`, {headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    return !!(response.ok && data.ok && data.protected);
+  } catch (_) {
+    return false;
+  }
+}
+
+function setRetentionProtectionButtonState(button, protectedState) {
+  if (!button) return;
+  button.classList.toggle("active", !!protectedState);
+  button.setAttribute("aria-pressed", protectedState ? "true" : "false");
+  button.title = protectedState ? "Remove retention protection" : "Protect video from retention cleanup";
+  button.setAttribute("aria-label", button.title);
+}
+
+async function toggleVideoRetentionProtection(videoId, channelId="", title="", button=null) {
+  videoId = String(videoId || "").trim();
+  if (!videoId) return;
+  const current = button?.classList.contains("active") || false;
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(`/api/retention/protection/${encodeURIComponent(videoId)}`, {
+      method:"POST",
+      credentials:"same-origin",
+      headers:{...csrfHeaders(), "Accept":"application/json"},
+      body:JSON.stringify({protected:!current, channel_id:channelId || "", title:title || ""})
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Video protection could not be changed.");
+    setRetentionProtectionButtonState(button, !!data.protected);
+    showAjaxToast(data.message || "Video protection updated.", "success");
+    retentionPreviewLoaded = false;
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function initialisePageViewSettings() {
   initialiseSortableOrderList(
     "page-section-order-list",
@@ -10133,6 +10810,9 @@ function initialisePageViewSettings() {
 
 
 function showTab(name) {
+  const aliases = {api:"emby", logs:"diagnostics", advanced:"diagnostics", dashboard:"pageview"};
+  name = aliases[name] || name;
+
   document.querySelectorAll("#settings-dialog .tab-btn").forEach(
     b => b.classList.toggle("active", b.dataset.tab === name)
   );
@@ -10141,8 +10821,16 @@ function showTab(name) {
     p => p.classList.toggle("active", p.dataset.panel === name)
   );
 
+  const panels = settingsDialog.querySelector(".settings-panels");
+  if (panels) panels.scrollTop = 0;
+
   if (name === "favourites") loadFavourites();
-  if (name === "logs") loadPinchflatLogs();
+  if (name === "retention") {
+    loadRetentionPreview(false);
+    loadRetentionChannels(false);
+    loadRetentionRunStatus();
+  }
+  if (name === "diagnostics") loadPinchflatLogs();
 }
 
 bindSettingsDynamicListeners();
@@ -10832,6 +11520,26 @@ function renderChannelVideos() {
 
       thumbWrap.append(openButton, downloadButton);
 
+      if (userIsAdmin && video.video_id) {
+        const protectButton = document.createElement("button");
+        protectButton.type = "button";
+        protectButton.className = "channel-video-protect-action";
+        protectButton.innerHTML = retentionShieldSvg();
+        setRetentionProtectionButtonState(protectButton, false);
+        protectButton.onclick = async event => {
+          event.preventDefault();
+          event.stopPropagation();
+          await toggleVideoRetentionProtection(
+            video.video_id,
+            yt.channel_id || currentSubscriptionChannelId || "",
+            video.title || "",
+            protectButton
+          );
+        };
+        thumbWrap.appendChild(protectButton);
+        getVideoRetentionProtection(video.video_id).then(state => setRetentionProtectionButtonState(protectButton, state));
+      }
+
       const title = document.createElement("strong");
       title.textContent = video.title || "YouTube video";
       title.title = "Play video";
@@ -10980,6 +11688,14 @@ async function openChannelDetails(channelId) {
     document.getElementById("subscription-channel-storage").textContent = sub?.disk_usage || "—";
     document.getElementById("subscription-channel-source").textContent = sub?.pinchflat_source_id ? `#${sub.pinchflat_source_id}` : "Not in Pinchflat";
 
+    const retentionInfo = data.retention || {};
+    document.getElementById("subscription-channel-retention-policy").textContent = retentionInfo.label || "—";
+    document.getElementById("subscription-channel-retention-minimum").textContent = `${Number(retentionInfo.minimum_videos || 0).toLocaleString("en-GB")} newest`;
+    document.getElementById("subscription-channel-retention-stored").textContent = Number(retentionInfo.stored || 0).toLocaleString("en-GB");
+    document.getElementById("subscription-channel-retention-eligible").textContent = Number(retentionInfo.eligible || 0).toLocaleString("en-GB");
+    document.getElementById("subscription-channel-retention-space").textContent = retentionInfo.reclaimable_size || "0 B";
+    document.getElementById("subscription-channel-retention-source").textContent = `${retentionInfo.source || "Retention policy"}${retentionInfo.enabled ? "" : " · automatic cleanup off"}`;
+
     const favouriteBadge = document.getElementById("subscription-channel-favourite-badge");
     if (favouriteBadge) {
       favouriteBadge.dataset.channelFavouriteControl = "1";
@@ -11104,25 +11820,50 @@ async function forceScanFromChannelPopup() {
 
 async function testEmbyConnection() {
   const status = document.getElementById("emby-api-status");
-  if (status) status.textContent = "Testing Emby connection…";
+  if (status) status.textContent = "Testing Emby and detecting media libraries…";
+
+  const renderLibrary = (elementId, library, error, fallback) => {
+    const node = document.getElementById(elementId);
+    if (!node) return;
+    if (library?.name) {
+      const path = library.location || library.app_path || "path unavailable";
+      node.textContent = `${library.name} · ${path} · ${library.match_reason || "auto-detected"}`;
+      node.classList.remove("bad");
+      node.classList.add("ok");
+    } else {
+      node.textContent = error || fallback;
+      node.classList.remove("ok");
+      node.classList.add("bad");
+    }
+  };
 
   try {
-    const response = await fetch("/api/emby/test", {headers:{"Accept":"application/json"}});
+    const response = await fetch("/api/emby/test", {headers:{"Accept":"application/json"}, cache:"no-store"});
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.error || "Emby connection failed.");
 
-    const serverName = data.server_name || data.server?.ServerName || data.server?.server_name || "Emby";
-    const version = data.version || data.server?.Version || data.server?.version || "";
-    const library = data.youtube_library || {};
-    const message = data.message || `Connected to ${serverName}${version ? ` · ${version}` : ""}`;
-    const libraryStatus = document.getElementById("emby-library-status");
-    if (libraryStatus) {
-      libraryStatus.textContent = library.name
-        ? `${library.name} · ${library.location || "path unavailable"} · ${library.match_reason || "auto-detected"}`
-        : (data.youtube_library_error || "Connected, but the YouTube library has not been matched yet.");
-    }
+    renderLibrary(
+      "emby-library-status",
+      data.youtube_library || {},
+      data.youtube_library_error || "",
+      "Connected, but the Pinchflat media library has not been matched."
+    );
+    renderLibrary(
+      "emby-single-library-status",
+      data.single_download_library || {},
+      data.single_download_library_error || "",
+      "Connected, but the One-time Download library has not been matched."
+    );
+    renderLibrary(
+      "emby-playlist-library-status",
+      data.emby_download_library || {},
+      data.emby_download_library_error || "",
+      "Connected, but the Emby Download playlist library has not been matched."
+    );
+
+    const message = data.message || "Connected to Emby.";
     if (status) status.textContent = message;
-    showAjaxToast(message, library.name ? "success" : "error");
+    showAjaxToast(message, "success");
   } catch (error) {
     const message = error.message || String(error);
     if (status) status.textContent = message;
@@ -11130,13 +11871,19 @@ async function testEmbyConnection() {
   }
 }
 
-async function refreshEmbyLibrary() {
+async function refreshEmbyLibrary(target="pinchflat") {
   const status = document.getElementById("emby-api-status");
-  if (status) status.textContent = "Scanning the detected Emby YouTube library…";
+  const labels = {
+    pinchflat:"Pinchflat media",
+    single:"One-time Downloads",
+    emby_download:"Emby Download playlist"
+  };
+  const label = labels[target] || "selected Emby library";
+  if (status) status.textContent = `Scanning ${label}…`;
 
   try {
-    const data = await apiPost("/api/emby/refresh", {});
-    const message = data.message || "Emby YouTube library scan started.";
+    const data = await apiPost("/api/emby/refresh", {target});
+    const message = data.message || `${label} scan started.`;
     if (status) status.textContent = message;
     showAjaxToast(message, "success");
   } catch (error) {
@@ -12299,7 +13046,7 @@ if (typeof requestAnimationFrame === "function") {
 } else {
   setTimeout(startDeferredDashboardWork, 0);
 }
-const settingsHashTabs = new Set(["security", "pinchflat", "general", "pageview", "youtube", "downloads", "favourites", "automation", "logs", "advanced"]);
+const settingsHashTabs = new Set(["security", "pinchflat", "general", "pageview", "dashboard", "youtube", "emby", "api", "downloads", "retention", "favourites", "automation", "diagnostics", "logs", "advanced"]);
 const requestedSettingsTab = window.location.hash.replace("#", "");
 if (settingsHashTabs.has(requestedSettingsTab)) {
   openSettings(requestedSettingsTab);
