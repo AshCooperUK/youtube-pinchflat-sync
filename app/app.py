@@ -37,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.15.0.4"
+VERSION = "2.15.0.5"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -307,6 +307,7 @@ download_worker_started = False
 storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
 storage_cache_lock = threading.Lock()
 retention_cleanup_lock = threading.Lock()
+pinchflat_task_drain_lock = threading.Lock()
 
 # Rolling file-size samples used to estimate live Pinchflat download speed when
 # yt-dlp does not emit a progress line.  Pinchflat commonly runs yt-dlp with
@@ -6507,6 +6508,9 @@ def _scheduled_pinchflat_force_index_group(favourite=False):
 
 
 def scheduled_pinchflat_force_index():
+    if pinchflat_task_drain_enabled():
+        return
+
     if (
         current_pinchflat_force_index_interval(True) <= 0
         and current_pinchflat_force_index_interval(False) <= 0
@@ -8512,6 +8516,141 @@ def pinchflat_recreate_with_worker_concurrency(
 
         raise
 
+
+
+
+def pinchflat_task_drain_enabled():
+    """Return whether persistent Pinchflat task deletion mode is enabled."""
+    return setting_bool("pinchflat_delete_all_tasks", False)
+
+
+def _pinchflat_pause_and_cancel_all_tasks():
+    """
+    Pause all Pinchflat Oban queues and cancel every job which could still run.
+
+    Pausing first closes the small race where Pinchflat could start a newly
+    inserted job between the query and cancellation. Cancelled jobs are left
+    for Oban's normal pruner rather than deleting history directly from the
+    Pinchflat database.
+    """
+    expression = (
+        'pause_result = Oban.pause_all_queues()\n'
+        'query = Oban.Job.query(state: ~w(executing available scheduled retryable))\n'
+        'case Oban.cancel_all_jobs(query) do\n'
+        '  {:ok, count} -> IO.puts("TASKS_CANCELLED=" <> Integer.to_string(count))\n'
+        '  other -> IO.puts("TASKS_CANCEL_ERROR=" <> inspect(other))\n'
+        'end\n'
+        'IO.puts("QUEUES_PAUSED=" <> inspect(pause_result))\n'
+    )
+    output = docker_exec_in_pinchflat(
+        ["bin/pinchflat", "rpc", expression],
+        timeout=90,
+    )
+    if "TASKS_CANCEL_ERROR=" in output:
+        raise RuntimeError(
+            "Pinchflat could not cancel its queued tasks. "
+            + output.split("TASKS_CANCEL_ERROR=", 1)[1][:500]
+        )
+    match = re.search(r"TASKS_CANCELLED=(\d+)", output)
+    return int(match.group(1)) if match else 0
+
+
+def _pinchflat_resume_all_task_queues():
+    expression = (
+        'case Oban.resume_all_queues() do\n'
+        '  result -> IO.puts("QUEUES_RESUMED=" <> inspect(result))\n'
+        'end\n'
+    )
+    output = docker_exec_in_pinchflat(
+        ["bin/pinchflat", "rpc", expression],
+        timeout=60,
+    )
+    if "QUEUES_RESUMED=" not in output:
+        raise RuntimeError(
+            "Pinchflat did not confirm that its task queues were resumed."
+        )
+    return True
+
+
+def pinchflat_task_drain_once():
+    """Apply persistent task deletion mode once, if enabled."""
+    if not pinchflat_task_drain_enabled():
+        return {"enabled": False, "cancelled": 0}
+
+    if not pinchflat_task_drain_lock.acquire(blocking=False):
+        return {"enabled": True, "cancelled": 0, "busy": True}
+
+    try:
+        cancelled = _pinchflat_pause_and_cancel_all_tasks()
+        if cancelled:
+            log_activity(
+                "pinchflat",
+                "Pinchflat task deletion",
+                f"Cancelled {cancelled} Pinchflat task(s) while persistent task deletion was enabled.",
+                "warning",
+            )
+        return {"enabled": True, "cancelled": cancelled}
+    finally:
+        pinchflat_task_drain_lock.release()
+
+
+def pinchflat_task_drain_monitor():
+    """Keep the Pinchflat queue empty while persistent task deletion is on."""
+    if pinchflat_task_drain_enabled():
+        try:
+            pinchflat_task_drain_once()
+        except Exception:
+            # Pinchflat may simply be stopped. Keep the persistent setting and
+            # quietly try again on the next pass rather than filling the log.
+            pass
+        return
+
+    if setting_bool("pinchflat_task_drain_resume_pending", False):
+        try:
+            _pinchflat_resume_all_task_queues()
+            set_setting("pinchflat_task_drain_resume_pending", "0")
+        except Exception:
+            # Leave the pending marker set so a stopped/restarting Pinchflat
+            # instance is resumed as soon as it becomes reachable again.
+            pass
+
+
+def set_pinchflat_task_drain(enabled):
+    """Persist task deletion mode and immediately apply the requested state."""
+    enabled = bool(enabled)
+    set_setting("pinchflat_delete_all_tasks", "1" if enabled else "0")
+
+    if enabled:
+        set_setting("pinchflat_task_drain_resume_pending", "0")
+        try:
+            result = pinchflat_task_drain_once()
+            return {
+                "enabled": True,
+                "cancelled": int(result.get("cancelled") or 0),
+                "applied": True,
+            }
+        except Exception as exc:
+            # The mode is still persisted. This is useful when Pinchflat is
+            # currently stopped because the monitor will enforce it later.
+            return {
+                "enabled": True,
+                "cancelled": 0,
+                "applied": False,
+                "warning": str(exc),
+            }
+
+    try:
+        _pinchflat_resume_all_task_queues()
+        set_setting("pinchflat_task_drain_resume_pending", "0")
+        return {"enabled": False, "cancelled": 0, "applied": True}
+    except Exception as exc:
+        set_setting("pinchflat_task_drain_resume_pending", "1")
+        return {
+            "enabled": False,
+            "cancelled": 0,
+            "applied": False,
+            "warning": str(exc),
+        }
 
 
 def pinchflat_container_logs(tail=250):
@@ -14165,6 +14304,7 @@ def index():
         sponsorblock_common_categories=SPONSORBLOCK_COMMON_CATEGORIES,
         pinchflat_online=pinchflat_online,
         pinchflat_container=pinchflat_container,
+        pinchflat_delete_all_tasks=pinchflat_task_drain_enabled(),
         pinchflat_worker_concurrency=(
             pinchflat_container.get(
                 "worker_concurrency"
@@ -15192,6 +15332,52 @@ def save_single_download_settings():
     except Exception as exc:
         flash(f"One-time download settings could not be saved: {exc}", "error")
     return redirect(url_for("index") + "#downloads")
+
+
+
+@app.post("/api/pinchflat/task-drain")
+def pinchflat_task_drain_api():
+    payload = request.get_json(silent=True) or {}
+    enabled = bool(payload.get("enabled"))
+
+    try:
+        result = set_pinchflat_task_drain(enabled)
+        if enabled:
+            if result.get("applied"):
+                message = (
+                    "Delete all tasks is enabled. "
+                    f"Cancelled {int(result.get('cancelled') or 0)} current Pinchflat task(s). "
+                    "New tasks will be cancelled while this remains enabled."
+                )
+            else:
+                message = (
+                    "Delete all tasks is enabled and saved. Pinchflat is not currently reachable, "
+                    "so the app will enforce it as soon as Pinchflat is available."
+                )
+        else:
+            if result.get("applied"):
+                message = "Delete all tasks is disabled. Pinchflat task queues have been resumed."
+            else:
+                message = (
+                    "Delete all tasks is disabled and saved. The app will resume Pinchflat queues "
+                    "when Pinchflat becomes available."
+                )
+
+        log_activity(
+            "pinchflat",
+            "Delete all tasks toggled",
+            message,
+            "warning" if enabled else "success",
+        )
+        return jsonify({"ok": True, "message": message, **result})
+    except Exception as exc:
+        log_activity(
+            "pinchflat",
+            "Delete all tasks failed",
+            str(exc),
+            "error",
+        )
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.post("/pinchflat/power")
@@ -17724,6 +17910,14 @@ scheduler.add_job(
     "interval",
     minutes=1,
     id="pinchflat-scheduled-force-index",
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    pinchflat_task_drain_monitor,
+    "interval",
+    seconds=5,
+    id="pinchflat-task-drain-monitor",
     max_instances=1,
     coalesce=True,
 )

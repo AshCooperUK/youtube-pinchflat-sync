@@ -2,6 +2,12 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.15.0.5
+
+### v2.15.0.5
+
+- Added a persistent Delete all tasks toggle to the Pinchflat status tile. It pauses Pinchflat Oban queues, cancels current jobs and continues cancelling newly created jobs until disabled.
+
 ## Version 2.15.0.4
 
 ### v2.15.0.4

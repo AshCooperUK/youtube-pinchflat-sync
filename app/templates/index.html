@@ -3412,6 +3412,23 @@
             </label>
           </form>
         </div>
+        <div class="power-toggle-wrap" style="margin-top:8px">
+          <label class="source-toggle" title="Cancel all current Pinchflat background jobs and keep cancelling any new jobs while this switch remains enabled">
+            <input
+              type="checkbox"
+              id="pinchflat-delete-all-tasks-toggle"
+              {% if pinchflat_delete_all_tasks %}checked{% endif %}
+              onchange="togglePinchflatTaskDrain(this)"
+            >
+            <span class="toggle-track"></span>
+            <span class="source-toggle-text" id="pinchflat-delete-all-tasks-label">
+              Delete all tasks
+            </span>
+          </label>
+          <div class="muted small" id="pinchflat-delete-all-tasks-status" style="margin-top:4px">
+            {% if pinchflat_delete_all_tasks %}Persistent task deletion is ON{% else %}Persistent task deletion is off{% endif %}
+          </div>
+        </div>
       {% elif is_admin %}
         <div class="muted small">Docker power control unavailable</div>
       {% endif %}
@@ -3959,6 +3976,7 @@
           <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Opens the complete list of waiting Pinchflat jobs and refreshes the queue while the popup remains open.</div></div>
           <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Immediately reloads current Pinchflat workers, waiting count and recent completed download data.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background membership members only join this channel"><div class="debug-function-name">Pinchflat tasks tile</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Shows active and waiting Pinchflat background work other than media downloads, such as source indexing or metadata jobs. It also counts non-completed download jobs whose stored yt-dlp error contains “Join this channel”, shown as membership errors. Download jobs remain in the dedicated Pinchflat Downloads section.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat delete all tasks task drain cancel queue persistent oban"><div class="debug-function-name">Delete all tasks</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Persistent task-drain mode. Pauses Pinchflat's Oban queues, cancels current executing, waiting, scheduled and retryable jobs, then keeps cancelling newly created jobs until you switch the mode off. The setting survives app restarts.</div></div>
           <div class="debug-function-row" data-debug-search="download speed live transfer yt-dlp"><div class="debug-function-name">Pinchflat download speed</div><div class="debug-service-badge">Pinchflat / yt-dlp</div><div class="debug-function-description">Shows a best-effort live transfer rate for active Pinchflat downloads. The app uses yt-dlp progress output when available and otherwise estimates speed from the growing download file.</div></div>
         </div>
       </section>
@@ -7592,6 +7610,34 @@ async function apiPost(url, payload={}) {
   const data = await response.json().catch(() => ({ok:false, error:`HTTP ${response.status}`}));
   if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
   return data;
+}
+
+
+async function togglePinchflatTaskDrain(input) {
+  const enabled = Boolean(input?.checked);
+  const previous = !enabled;
+  const status = document.getElementById("pinchflat-delete-all-tasks-status");
+  input.disabled = true;
+  if (status) status.textContent = enabled ? "Enabling persistent task deletion…" : "Resuming Pinchflat task queues…";
+
+  try {
+    const data = await apiPost("/api/pinchflat/task-drain", {enabled});
+    if (status) {
+      status.textContent = enabled
+        ? "Persistent task deletion is ON"
+        : "Persistent task deletion is off";
+    }
+    showAjaxToast(data.message || (enabled ? "Delete all tasks enabled." : "Delete all tasks disabled."), enabled ? "warning" : "success");
+    if (typeof refreshPinchflatDownloads === "function") {
+      setTimeout(() => refreshPinchflatDownloads(true), 500);
+    }
+  } catch (error) {
+    input.checked = previous;
+    if (status) status.textContent = previous ? "Persistent task deletion is ON" : "Persistent task deletion is off";
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    input.disabled = false;
+  }
 }
 
 function getChannelControlState(channelId, fallback={}) {
