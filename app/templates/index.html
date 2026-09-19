@@ -1179,6 +1179,62 @@
       background:#173d78;
       border-color:#7aa7ef;
     }
+
+    /* v2.14 Discover actions use one consistent icon system. */
+    .discover-action-icon {
+      position:absolute;
+      z-index:5;
+      width:36px;
+      height:36px;
+      display:grid;
+      place-items:center;
+      padding:0;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.30);
+      background:rgba(4,10,18,.88);
+      color:#fff;
+      cursor:pointer;
+      opacity:0;
+      transition:opacity .16s ease, transform .16s ease, background .16s ease, border-color .16s ease;
+      box-shadow:0 3px 10px rgba(0,0,0,.28);
+    }
+    .discover-action-icon svg {
+      width:18px;
+      height:18px;
+      fill:none;
+      stroke:currentColor;
+      stroke-width:2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+      pointer-events:none;
+    }
+    .discover-video-tile:hover .discover-action-icon,
+    .discover-video-tile:focus-within .discover-action-icon,
+    .discover-tile:hover .discover-action-icon,
+    .discover-tile:focus-within .discover-action-icon,
+    .discover-action-icon.active { opacity:1; }
+    .discover-action-icon:hover { transform:scale(1.08); background:#173d78; border-color:#7aa7ef; }
+    .discover-action-icon:disabled { opacity:.42; cursor:default; transform:none; }
+    .discover-action-favourite { top:8px; right:8px; }
+    .discover-action-primary { top:8px; left:8px; }
+    .discover-action-subscribe { right:8px; bottom:8px; }
+    .discover-action-favourite.active { color:#ff5a84; border-color:#ff5a84; background:rgba(44,8,23,.94); }
+    .discover-action-subscribe.active { color:#6ee7a8; border-color:#329a68; background:rgba(8,50,33,.94); }
+    .discover-action-emby { color:#68c8ff; }
+    .discover-video-tile.has-subscribe-action .discover-video-duration { right:auto; left:8px; }
+    .discover-hover-channel.channel-popup-link {
+      width:max-content;
+      max-width:100%;
+      margin-top:5px;
+      color:#d2dcec;
+      font-size:12px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      text-decoration:none;
+      pointer-events:auto;
+    }
+    .discover-hover-channel.channel-popup-link:hover { color:#fff; text-decoration:underline; }
     @media (max-width:720px) {
       .discover-video-grid {
         grid-template-columns:repeat(2,minmax(0,1fr));
@@ -2255,7 +2311,15 @@
       .latest-video-stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
 
-    /* v2.13.0b visual corrections */
+    /* v2.14 visual corrections */
+    /* The subscription table can contain hundreds of rows. Let the browser
+       skip painting it until it approaches the viewport so the summary tiles
+       become visible first on a cold page load. */
+    #subscriptions {
+      content-visibility:auto;
+      contain-intrinsic-size:900px;
+    }
+
     .channel-image-control-wrap {
       position:relative;
       width:var(--channel-avatar-size,72px);
@@ -3350,7 +3414,7 @@
   <div class="modal-head latest-media-head">
     <div style="min-width:0">
       <h2 id="latest-popup-header-video" class="latest-popup-header-channel">YouTube video</h2>
-      <div id="latest-popup-header-channel" class="latest-popup-header-video">YouTube channel</div>
+      <button id="latest-popup-header-channel" class="latest-popup-header-video channel-popup-link" type="button">YouTube channel</button>
     </div>
     <button class="modal-close" onclick="closeLatestVideo()" aria-label="Close">×</button>
   </div>
@@ -3553,7 +3617,7 @@
           </div>
 
           <h3 id="shorts-title" style="margin-top:18px">Random Short</h3>
-          <p id="shorts-channel" class="muted"></p>
+          <button id="shorts-channel" class="muted channel-popup-link" type="button" style="display:block;margin:0 0 10px;padding:0"></button>
           <div id="shorts-description" class="shorts-description"></div>
 
           <label style="margin-top:16px"><input id="shorts-auto-next" type="checkbox" checked> Automatically play the next Short when the current video finishes</label>
@@ -4067,16 +4131,12 @@
             </label>
             {% endif %}
 
-            <label>Emby YouTube library path
-              <input
-                type="text"
-                name="emby_library_path"
-                value="{{ emby_library_path }}"
-                placeholder="/media/Storage/Media/YouTube"
-                autocomplete="off"
-              >
-              <span class="muted small">Use the path as Emby sees it. Channel actions try to refresh the matching channel folder first, then fall back to a full library scan if the folder is not indexed yet.</span>
-            </label>
+            <div class="setting-box" style="margin:12px 0">
+              <strong>Detected YouTube library</strong>
+              <div id="emby-library-status" class="muted small" style="margin-top:6px">
+                Pinchflat Sync matches the Docker <code>/downloads</code> bind mount to the corresponding Emby library automatically. Press Test connection to show the detected library.
+              </div>
+            </div>
 
             <label>
               <input type="checkbox" name="emby_auto_refresh_after_download" value="1" {% if emby_auto_refresh_after_download %}checked{% endif %}>
@@ -4098,9 +4158,9 @@
         <div class="setting-box">
           <h3>What the Emby connection does</h3>
           <div class="api-feature-list">
-            <div><strong>Automatic refresh</strong><span>Starts an Emby library scan when a new Pinchflat download is detected.</span></div>
-            <div><strong>Channel actions</strong><span>Refreshes the matching Emby channel folder when Emby already knows it.</span></div>
-            <div><strong>Bulk actions</strong><span>Refreshes selected channel folders. If a folder is new, one full Emby library scan discovers it.</span></div>
+            <div><strong>Automatic refresh</strong><span>Refreshes the matching channel in the detected YouTube library when a new Pinchflat download is detected.</span></div>
+            <div><strong>Channel actions</strong><span>Refreshes the matching channel folder inside the automatically detected YouTube library.</span></div>
+            <div><strong>Bulk actions</strong><span>Refreshes selected channel folders. If a folder is new, the detected YouTube library is refreshed. Other Emby libraries are left alone.</span></div>
           </div>
         </div>
       </div>
@@ -4926,6 +4986,8 @@ const favouritesDialog = document.getElementById("favourites-dialog");
 const listPickerDialog = document.getElementById("list-picker-dialog");
 const latestVideoDialog = document.getElementById("latest-video-dialog");
 const userIsAdmin = {{ 'true' if is_admin else 'false' }};
+const embyApiConfigured = {{ 'true' if emby_api_configured else 'false' }};
+const googleWriteReady = {{ 'true' if google_write_ready else 'false' }};
 
 let returnToPinchflatQueueAfterPlayer = false;
 let pinchflatQueueReturnScrollTop = 0;
@@ -5390,8 +5452,7 @@ function renderPinchflatLastDownload(data) {
   const meta = document.createElement("div");
   meta.className = "pinchflat-active-meta";
 
-  const channel = document.createElement("span");
-  channel.textContent = item.channel || "Pinchflat";
+  const channel = pinchflatChannelElement(item);
 
   const completed = document.createElement("span");
   completed.textContent = item.completed_at
@@ -5442,9 +5503,18 @@ function renderLatestDownloadSummary(item) {
   title.textContent = item.title || "YouTube video";
   title.title = item.title || "YouTube video";
   channel.textContent = item.channel || item.channel_title || "Pinchflat";
-  channel.title = channel.textContent;
+  channel.title = item.channel_id ? `View ${channel.textContent} channel details` : channel.textContent;
+  channel.style.cursor = item.channel_id ? "pointer" : "default";
+  channel.onclick = item.channel_id ? event => {
+    event.preventDefault();
+    event.stopPropagation();
+    openChannelDetails(item.channel_id);
+  } : null;
   button.disabled = !item.youtube_id;
-  button.onclick = item.youtube_id ? () => openPinchflatMedia(item) : null;
+  button.onclick = item.youtube_id ? event => {
+    if (event?.target === channel) return;
+    openPinchflatMedia(item);
+  } : null;
 }
 
 function renderPinchflatQueue(data) {
@@ -6255,10 +6325,34 @@ async function forceScanChannelFromControl(button) {
   }
 }
 
+function discoverActionSvg(kind, active=false) {
+  if (kind === "favourite") {
+    return active
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true" style="fill:currentColor"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"></path></svg>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"></path></svg>`;
+  }
+  if (kind === "download") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 11 4.5 4.5 4.5-4.5"></path><path d="M5 20h14"></path></svg>`;
+  }
+  if (kind === "emby") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"></path><path d="M4 17v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.7-2.2L20 9"></path><path d="M17.9 15a7 7 0 0 1-11.7 2.2L4 15"></path><path d="m10 9 5 3-5 3Z"></path></svg>`;
+  }
+  if (kind === "subscribe") {
+    return active
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 19a6 6 0 0 0-12 0"></path><circle cx="9" cy="7" r="4"></circle><path d="M19 8v6"></path><path d="M16 11h6"></path></svg>`;
+  }
+  return "";
+}
+
 function setHeartButton(button, active, label="") {
   if (!button) return;
   button.classList.toggle("active", !!active);
-  button.textContent = active ? "♥" : "♡";
+  if (button.classList.contains("discover-action-icon")) {
+    button.innerHTML = discoverActionSvg("favourite", !!active);
+  } else {
+    button.textContent = active ? "♥" : "♡";
+  }
   button.setAttribute("aria-pressed", active ? "true" : "false");
   button.title = active ? `Remove ${label || "channel"} from favourites` : `Add ${label || "channel"} to favourites`;
 }
@@ -6505,7 +6599,9 @@ function renderLatestVideoDetails(item) {
   headerVideo.textContent = item.title || "YouTube video";
   headerVideo.title = item.title || "";
   headerChannel.textContent = item.channel_title || "YouTube channel";
-  headerChannel.title = item.channel_title || "";
+  headerChannel.title = item.channel_id ? `View ${headerChannel.textContent} channel details` : (item.channel_title || "");
+  headerChannel.disabled = !item.channel_id;
+  headerChannel.onclick = item.channel_id ? () => openChannelDetails(item.channel_id) : null;
   channel.textContent = item.channel_title || "YouTube channel";
 
   channelAvatar.src = item.channel_thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
@@ -6865,14 +6961,22 @@ function buildHomeShortsShelf(items) {
     shortTitle.className = "home-short-title";
     shortTitle.textContent = item.title || "YouTube Short";
 
-    const channel = document.createElement("div");
-    channel.className = "home-short-channel";
+    const channel = document.createElement("button");
+    channel.type = "button";
+    channel.className = "home-short-channel channel-popup-link";
     channel.textContent = item.channel_title || "YouTube channel";
+    channel.title = item.channel_id ? `View ${channel.textContent} channel details` : channel.textContent;
+    channel.disabled = !item.channel_id;
+    channel.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (item.channel_id) openChannelDetails(item.channel_id);
+    });
 
     card.append(thumbWrap, shortTitle, channel);
 
     card.addEventListener("click", event => {
-      if (event.target.closest(".home-short-heart")) return;
+      if (event.target.closest(".home-short-heart") || event.target.closest(".channel-popup-link")) return;
       openLatestVideo(item);
     });
 
@@ -7249,9 +7353,17 @@ function savedVideoCard(item, options={}) {
   title.className = "favourite-card-title";
   title.textContent = item.title || "YouTube video";
 
-  const channel = document.createElement("div");
-  channel.className = "muted small";
+  const channel = document.createElement("button");
+  channel.type = "button";
+  channel.className = "muted small channel-popup-link";
   channel.textContent = item.channel_title || "YouTube";
+  channel.disabled = !item.channel_id;
+  channel.title = item.channel_id ? `View ${channel.textContent} channel details` : channel.textContent;
+  channel.onclick = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (item.channel_id) openChannelDetails(item.channel_id);
+  };
 
   const actions = document.createElement("div");
   actions.className = "favourite-card-actions";
@@ -7768,6 +7880,151 @@ async function loadDiscover(mode, force=false) {
   }
 }
 
+function syncDiscoverSubscriptionState(channelId, subscribed=true) {
+  [
+    discoverResults.downloaded,
+    discoverResults.liked,
+    discoverResults.videos,
+    discoverResults.shorts,
+    discoverResults.top100
+  ].forEach(items => (items || []).forEach(item => {
+    if (item.channel_id === channelId) item.is_subscribed = !!subscribed;
+  }));
+
+  document.querySelectorAll(
+    `.discover-action-subscribe[data-channel-id="${CSS.escape(channelId)}"]`
+  ).forEach(button => {
+    button.classList.toggle("active", !!subscribed);
+    button.innerHTML = discoverActionSvg("subscribe", !!subscribed);
+    button.disabled = !!subscribed || !googleWriteReady;
+    button.setAttribute("aria-pressed", subscribed ? "true" : "false");
+    button.title = subscribed
+      ? "Already subscribed on YouTube"
+      : (googleWriteReady ? "Subscribe to this channel on YouTube" : "Reconnect Google with write access to subscribe");
+  });
+}
+
+async function subscribeDiscoverChannel(button, item) {
+  const channelId = String(item?.channel_id || "").trim();
+  if (!channelId || item?.is_subscribed || !googleWriteReady) return;
+
+  button.disabled = true;
+  try {
+    await apiPost("/api/youtube/subscribe", {channel_id:channelId});
+    item.is_subscribed = true;
+    syncDiscoverSubscriptionState(channelId, true);
+    showAjaxToast(`Subscribed to ${item.channel_title || "YouTube channel"}.`, "success");
+  } catch (error) {
+    button.disabled = false;
+    showAjaxToast(error.message || String(error), "error");
+  }
+}
+
+async function refreshDiscoverChannelInEmby(button, item) {
+  const channelId = String(item?.channel_id || "").trim();
+  const channelTitle = item?.channel_title || item?.channel || "YouTube channel";
+  if (!embyApiConfigured || (!channelId && !channelTitle)) return;
+
+  button.disabled = true;
+  const previous = button.innerHTML;
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"></path><path d="M4 17v-5h5"></path><path d="M6.1 9a7 7 0 0 1 11.7-2.2L20 9"></path><path d="M17.9 15a7 7 0 0 1-11.7 2.2L4 15"></path></svg>`;
+
+  try {
+    const data = await apiPost("/api/emby/refresh", {
+      channel_id: channelId,
+      channel_title: channelTitle
+    });
+    showAjaxToast(data.message || `Emby refresh started for ${channelTitle}.`, "success");
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    button.disabled = false;
+    button.innerHTML = previous;
+  }
+}
+
+function makeDiscoverActionButton(kind, item) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "discover-action-icon";
+  button.dataset.discoverAction = kind;
+  button.dataset.channelId = item?.channel_id || "";
+
+  if (kind === "favourite") {
+    button.classList.add("discover-channel-heart", "discover-action-favourite");
+    button.disabled = !item?.channel_id;
+    setHeartButton(button, !!item.is_favourite_channel, item.channel_title || "channel");
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleChannelFavourite(
+        button,
+        item.channel_id || "",
+        item.channel_title || "YouTube channel",
+        item.channel_url || (item.channel_id ? `https://www.youtube.com/channel/${item.channel_id}` : ""),
+        item.channel_thumbnail_url || item.channel_avatar_url || ""
+      );
+    });
+  } else if (kind === "download") {
+    button.classList.add("discover-action-primary", "discover-action-download");
+    button.innerHTML = discoverActionSvg("download");
+    button.disabled = !(item.video_url || item.video_id);
+    button.title = `Prepare one-time download for ${item.title || "this video"}`;
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const url = item.video_url || (item.video_id ? `https://www.youtube.com/watch?v=${item.video_id}` : "");
+      if (url) queueOneTimeDownload(url);
+    });
+  } else if (kind === "emby") {
+    button.classList.add("discover-action-primary", "discover-action-emby");
+    button.innerHTML = discoverActionSvg("emby");
+    button.disabled = !embyApiConfigured || (!item?.channel_id && !(item?.channel_title || item?.channel));
+    button.title = embyApiConfigured
+      ? `Refresh ${item.channel_title || item.channel || "this channel"} in Emby`
+      : "Configure Emby in Settings → API first";
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      refreshDiscoverChannelInEmby(button, item);
+    });
+  } else if (kind === "subscribe") {
+    const subscribed = !!item.is_subscribed;
+    button.classList.add("discover-action-subscribe");
+    button.classList.toggle("active", subscribed);
+    button.innerHTML = discoverActionSvg("subscribe", subscribed);
+    button.disabled = subscribed || !googleWriteReady || !item?.channel_id;
+    button.setAttribute("aria-pressed", subscribed ? "true" : "false");
+    button.title = subscribed
+      ? "Already subscribed on YouTube"
+      : (googleWriteReady ? `Subscribe to ${item.channel_title || "this channel"}` : "Reconnect Google with write access to subscribe");
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      subscribeDiscoverChannel(button, item);
+    });
+  }
+
+  return button;
+}
+
+function makeDiscoverChannelName(item) {
+  const channel = document.createElement("button");
+  channel.type = "button";
+  channel.className = "discover-hover-channel channel-popup-link";
+  channel.textContent = item.channel_title || item.channel || "YouTube";
+  channel.title = item.channel_id
+    ? `View ${channel.textContent} channel details`
+    : channel.textContent;
+  channel.disabled = !item.channel_id;
+  channel.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (item.channel_id) openChannelDetails(item.channel_id);
+  });
+  return channel;
+}
+
 function renderDiscoverTiles(items) {
   const grid = document.getElementById("discover-grid");
   grid.replaceChildren();
@@ -7783,86 +8040,24 @@ function renderDiscoverTiles(items) {
 
   items.forEach(item => {
     const card = document.createElement("article");
-    card.className = "discover-video-tile";
+    card.className = "discover-video-tile has-subscribe-action";
     card.tabIndex = 0;
     card.setAttribute("role", "button");
-    card.title = `${item.channel_title}: ${item.title}`;
+    card.title = `${item.channel_title || item.channel || "YouTube"}: ${item.title || "YouTube video"}`;
 
     const image = document.createElement("img");
     image.className = "discover-video-thumb";
-    image.src =
-      item.thumbnail_url ||
-      "{{ url_for('static', filename='channel-placeholder.svg') }}";
+    image.src = item.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
     image.alt = item.title || "YouTube video";
     image.loading = "lazy";
     image.referrerPolicy = "no-referrer";
 
-    const heart = document.createElement("button");
-    heart.type = "button";
-    heart.className =
-      `discover-channel-heart ${item.is_favourite_channel ? "active" : ""}`;
-    heart.dataset.channelId = item.channel_id || "";
-    heart.textContent = item.is_favourite_channel ? "♥" : "♡";
-    heart.title = item.is_favourite_channel
-      ? `Remove ${item.channel_title} from favourite channels`
-      : `Favourite ${item.channel_title}`;
-
-    heart.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      toggleChannelFavourite(
-        heart,
-        item.channel_id || "",
-        item.channel_title || "YouTube channel",
-        item.channel_url ||
-          `https://www.youtube.com/channel/${item.channel_id}`,
-        item.channel_thumbnail_url ||
-          item.channel_avatar_url ||
-          ""
-      );
-    });
-
-    let downloadIcon = null;
-
-    if (discoverMode === "liked") {
-      downloadIcon = document.createElement("button");
-      downloadIcon.type = "button";
-      downloadIcon.className = "discover-download-icon";
-      downloadIcon.title = `Prepare one-time download for ${item.title || "this video"}`;
-      downloadIcon.setAttribute(
-        "aria-label",
-        `Prepare one-time download for ${item.title || "this video"}`
-      );
-
-      downloadIcon.innerHTML = `
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 4v11"></path>
-          <path d="m7.5 11 4.5 4.5 4.5-4.5"></path>
-          <path d="M5 20h14"></path>
-        </svg>
-      `;
-
-      downloadIcon.addEventListener(
-        "click",
-        event => {
-          event.preventDefault();
-          event.stopPropagation();
-
-          const url =
-            item.video_url
-            || (
-              item.video_id
-                ? `https://www.youtube.com/watch?v=${item.video_id}`
-                : ""
-            );
-
-          if (url) {
-            queueOneTimeDownload(url);
-          }
-        }
-      );
-    }
+    const favourite = makeDiscoverActionButton("favourite", item);
+    const primary = makeDiscoverActionButton(
+      discoverMode === "downloaded" ? "emby" : "download",
+      item
+    );
+    const subscribe = makeDiscoverActionButton("subscribe", item);
 
     const overlay = document.createElement("div");
     overlay.className = "discover-video-overlay";
@@ -7871,29 +8066,18 @@ function renderDiscoverTiles(items) {
     title.className = "discover-hover-title";
     title.textContent = item.title || "YouTube video";
 
-    const channel = document.createElement("div");
-    channel.className = "discover-hover-channel";
-    channel.textContent = item.channel_title || "YouTube";
+    const channel = makeDiscoverChannelName(item);
 
     const meta = document.createElement("div");
     meta.className = "discover-hover-meta";
-
     const bits = [
       formatLatestViewCount(item.view_count),
       formatLatestAge(item.published_at)
     ].filter(Boolean);
-
     meta.textContent = bits.join(" · ");
 
     overlay.append(title, channel, meta);
-
-    card.append(image, heart);
-
-    if (downloadIcon) {
-      card.appendChild(downloadIcon);
-    }
-
-    card.appendChild(overlay);
+    card.append(image, favourite, primary, subscribe, overlay);
 
     if (item.duration) {
       const duration = document.createElement("span");
@@ -7902,44 +8086,27 @@ function renderDiscoverTiles(items) {
       card.appendChild(duration);
     }
 
-    card.addEventListener("click", event => {
-      if (
-        event.target.closest(".discover-channel-heart")
-        || event.target.closest(".discover-download-icon")
-      ) {
-        return;
-      }
-
+    const openVideo = () => {
       if (item.from_pinchflat || item.metadata_complete === false) {
         openPinchflatMedia(item);
       } else {
-        if (item.from_pinchflat || item.metadata_complete === false) {
-          openPinchflatMedia(item);
-        } else {
-          openLatestVideo({
-            ...item,
-            is_short: false,
-            channel_thumbnail_url:
-              item.channel_thumbnail_url ||
-              item.channel_avatar_url ||
-              ""
-          });
-        }
-      }
-    });
-
-    card.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-
         openLatestVideo({
           ...item,
           is_short: false,
-          channel_thumbnail_url:
-            item.channel_thumbnail_url ||
-            item.channel_avatar_url ||
-            ""
+          channel_thumbnail_url: item.channel_thumbnail_url || item.channel_avatar_url || ""
         });
+      }
+    };
+
+    card.addEventListener("click", event => {
+      if (event.target.closest(".discover-action-icon") || event.target.closest(".channel-popup-link")) return;
+      openVideo();
+    });
+
+    card.addEventListener("keydown", event => {
+      if ((event.key === "Enter" || event.key === " ") && !event.target.closest("button")) {
+        event.preventDefault();
+        openVideo();
       }
     });
 
@@ -7984,7 +8151,8 @@ function renderTop100Tiles(items) {
     const country = document.createElement("div"); country.className = "top100-country"; country.textContent = [item.primary_language, item.country].filter(Boolean).join(" · ");
 
     link.append(rank, channel, subscribers, country);
-    card.append(avatar, link);
+    const subscribe = makeDiscoverActionButton("subscribe", item);
+    card.append(avatar, link, subscribe);
     grid.appendChild(card);
     syncChannelAvatarControls(item.channel_id || "", {favourite:!!item.is_favourite_channel});
   });
@@ -8050,7 +8218,11 @@ async function playRandomShort(index) {
   const item = items[shortsIndex];
 
   document.getElementById("shorts-title").textContent = item.title;
-  document.getElementById("shorts-channel").textContent = item.channel_title;
+  const shortsChannel = document.getElementById("shorts-channel");
+  shortsChannel.textContent = item.channel_title || "YouTube channel";
+  shortsChannel.disabled = !item.channel_id;
+  shortsChannel.title = item.channel_id ? `View ${shortsChannel.textContent} channel details` : shortsChannel.textContent;
+  shortsChannel.onclick = item.channel_id ? () => openChannelDetails(item.channel_id) : null;
   document.getElementById("shorts-description").textContent =
     item.description || "No description provided for this Short.";
   document.getElementById("shorts-youtube-link").href = item.shorts_url || item.video_url;
@@ -9128,9 +9300,16 @@ async function testEmbyConnection() {
 
     const serverName = data.server_name || data.server?.ServerName || data.server?.server_name || "Emby";
     const version = data.version || data.server?.Version || data.server?.version || "";
-    const message = `Connected to ${serverName}${version ? ` · ${version}` : ""}`;
+    const library = data.youtube_library || {};
+    const message = data.message || `Connected to ${serverName}${version ? ` · ${version}` : ""}`;
+    const libraryStatus = document.getElementById("emby-library-status");
+    if (libraryStatus) {
+      libraryStatus.textContent = library.name
+        ? `${library.name} · ${library.location || "path unavailable"} · ${library.match_reason || "auto-detected"}`
+        : (data.youtube_library_error || "Connected, but the YouTube library has not been matched yet.");
+    }
     if (status) status.textContent = message;
-    showAjaxToast(message, "success");
+    showAjaxToast(message, library.name ? "success" : "error");
   } catch (error) {
     const message = error.message || String(error);
     if (status) status.textContent = message;
@@ -9140,11 +9319,11 @@ async function testEmbyConnection() {
 
 async function refreshEmbyLibrary() {
   const status = document.getElementById("emby-api-status");
-  if (status) status.textContent = "Starting Emby library refresh…";
+  if (status) status.textContent = "Scanning the detected Emby YouTube library…";
 
   try {
     const data = await apiPost("/api/emby/refresh", {});
-    const message = data.message || "Emby library refresh started.";
+    const message = data.message || "Emby YouTube library scan started.";
     if (status) status.textContent = message;
     showAjaxToast(message, "success");
   } catch (error) {
@@ -9950,10 +10129,88 @@ function markSourceRowDirty(control) {
   updateBulkSaveOption();
 }
 
-function sourceToggleChanged(input) {
+async function sourceToggleChanged(input) {
+  const row = input.closest(".source-row");
   const label = input.closest(".source-toggle")?.querySelector(".source-toggle-text");
-  if (label) label.textContent = input.checked ? "Enabled" : "Disabled";
-  markSourceRowDirty(input);
+  if (!row) return;
+
+  const channelId = String(row.dataset.channelId || "").trim();
+  if (!channelId) return;
+
+  const previousEnabled = row.dataset.downloadEnabled === "1";
+  const desiredEnabled = !!input.checked;
+
+  // The Enabled toggle is an immediate action. Range and Media Profile
+  // changes remain local until Save changes is pressed.
+  input.disabled = true;
+  if (label) label.textContent = desiredEnabled ? "Enabling…" : "Disabling…";
+
+  try {
+    const formData = new FormData();
+    formData.append("_csrf", document.querySelector('meta[name="csrf-token"]').content);
+    formData.append("channel_ids", channelId);
+    formData.append("bulk_action", desiredEnabled ? "enable" : "disable");
+
+    const response = await fetch("/subscriptions/bulk", {
+      method:"POST",
+      headers:{"Accept":"application/json", "X-Requested-With":"XMLHttpRequest"},
+      body:formData
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || data.message || "Download setting could not be changed.");
+    }
+
+    const updated = (data.subscriptions || []).find(item => item.channel_id === channelId);
+    const finalEnabled = updated ? !!updated.download_enabled : desiredEnabled;
+
+    row.dataset.downloadEnabled = finalEnabled ? "1" : "0";
+    if (updated) {
+      row.dataset.status = updated.ui_status || row.dataset.status || "";
+      row.dataset.sourceId = updated.pinchflat_source_id || "";
+      row.dataset.error = updated.last_error ? "1" : "0";
+    }
+
+    input.checked = finalEnabled;
+    if (label) label.textContent = finalEnabled ? "Enabled" : "Disabled";
+
+    // Keep any unsaved Range or Media Profile edits intact. Only the Enabled
+    // state is committed here.
+    syncChannelAvatarControls(channelId, {
+      enabled: finalEnabled,
+      subscribed: updated ? !!updated.active : row.dataset.active === "1",
+      sourceId: updated?.pinchflat_source_id || row.dataset.sourceId || ""
+    });
+
+    if (currentSubscriptionChannelId === channelId && currentSubscriptionChannelData?.subscription) {
+      currentSubscriptionChannelData.subscription.download_enabled = finalEnabled;
+      if (updated) {
+        currentSubscriptionChannelData.subscription.pinchflat_source_id = updated.pinchflat_source_id || "";
+        currentSubscriptionChannelData.subscription.pinchflat_added = !!updated.pinchflat_added;
+      }
+      document.getElementById("subscription-channel-status").textContent = `${updated?.active ?? (row.dataset.active === "1") ? "Subscribed" : "Unsubscribed"} · ${finalEnabled ? "Enabled" : "Disabled"}`;
+      document.getElementById("subscription-channel-source").textContent = (updated?.pinchflat_source_id || row.dataset.sourceId) ? `#${updated?.pinchflat_source_id || row.dataset.sourceId}` : "Not in Pinchflat";
+    }
+
+    const favItem = (favouritesState.channels || []).find(item => item.channel_id === channelId);
+    if (favItem) {
+      favItem.download_enabled = finalEnabled;
+      if (updated) favItem.pinchflat_source_id = updated.pinchflat_source_id || "";
+    }
+
+    updateSubscriptionDashboardCounts();
+    renderSettingsFavouriteOverview();
+    applyFilters({preserveScroll:true, anchorRow:row});
+    showAjaxToast(`${row.dataset.channelTitle || "Channel"} downloads ${finalEnabled ? "enabled" : "disabled"}.`, "success");
+  } catch (error) {
+    input.checked = previousEnabled;
+    if (label) label.textContent = previousEnabled ? "Enabled" : "Disabled";
+    syncChannelAvatarControls(channelId, {enabled: previousEnabled});
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    input.disabled = false;
+  }
 }
 
 
@@ -10146,50 +10403,63 @@ function confirmBulkAction() {
   return window.confirm(`${label} for ${count} selected channel(s)?`);
 }
 
+// Apply the saved layout immediately because this is cheap and prevents a
+// visible layout jump. Everything which scans hundreds of subscription rows,
+// polls Pinchflat or calls YouTube starts only after the browser has painted
+// the header and summary tiles once.
 applyConfiguredPageOrder();
-initialisePageViewSettings();
 
-{% if page_view.load_subscriptions %}
-initialFilter();
-applyFilters();
-toggleBulkOptions();
-bindSubscriptionAjaxForms();
-updateSubscriptionDashboardCounts();
-setSubscriptionsMinimised(
-  {{ 'true' if page_view.min_subscriptions else 'false' }}
-);
-{% endif %}
+function startDeferredDashboardWork() {
+  initialisePageViewSettings();
 
-{% if page_view.load_pinchflat_downloads %}
-setPinchflatDownloadMinimised(
-  {{ 'true' if page_view.min_pinchflat_downloads else 'false' }}
-);
-{% endif %}
-
-{% if google_connected and page_view.load_latest_videos %}
-setLatestSectionMinimised(
-  {{ 'true' if page_view.min_latest_videos else 'false' }}
-);
-{% endif %}
-
-(async () => {
   {% if page_view.load_pinchflat_downloads %}
-  await loadPinchflatDownloadOverview(true);
-  startPinchflatDownloadPolling();
+  setPinchflatDownloadMinimised(
+    {{ 'true' if page_view.min_pinchflat_downloads else 'false' }}
+  );
+  // Start the summary/download request first. Fetch is asynchronous, so the
+  // already-rendered status tiles stay responsive while the request runs.
+  Promise.resolve(loadPinchflatDownloadOverview(true))
+    .finally(() => startPinchflatDownloadPolling());
   {% elif page_view.show_summary_latest_download %}
-  await loadPinchflatDownloadOverview(true);
+  Promise.resolve(loadPinchflatDownloadOverview(true));
   setInterval(() => loadPinchflatDownloadOverview(false), 15000);
   {% endif %}
 
   {% if google_connected and page_view.load_latest_videos %}
-  // Latest subscriptions deliberately starts after all other configured
-  // dashboard sections have had a chance to initialise.
+  setLatestSectionMinimised(
+    {{ 'true' if page_view.min_latest_videos else 'false' }}
+  );
+  // YouTube remains the last network-heavy dashboard request.
   setTimeout(
     () => loadLatestSubscriptionVideos(false),
     900
   );
   {% endif %}
-})();
+
+  {% if page_view.load_subscriptions %}
+  // Filtering and sorting 600+ subscription rows is the largest synchronous
+  // browser task on startup. Give the summary tiles their first paint before
+  // doing this work.
+  setTimeout(() => {
+    initialFilter();
+    applyFilters();
+    toggleBulkOptions();
+    bindSubscriptionAjaxForms();
+    updateSubscriptionDashboardCounts();
+    setSubscriptionsMinimised(
+      {{ 'true' if page_view.min_subscriptions else 'false' }}
+    );
+  }, 40);
+  {% endif %}
+}
+
+if (typeof requestAnimationFrame === "function") {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(startDeferredDashboardWork);
+  });
+} else {
+  setTimeout(startDeferredDashboardWork, 0);
+}
 const settingsHashTabs = new Set(["security", "pinchflat", "general", "pageview", "youtube", "downloads", "favourites", "automation", "logs", "advanced"]);
 const requestedSettingsTab = window.location.hash.replace("#", "");
 if (settingsHashTabs.has(requestedSettingsTab)) {

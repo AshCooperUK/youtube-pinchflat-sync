@@ -2,25 +2,28 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 2.13.0b
+## Version 2.14.0.0
 
-Channel-actions correction, Emby integration and Channel UI refinement.
+Emby library targeting and Discover interaction update.
 
-- Restores a compact per-channel Actions menu. Clicking a channel name opens Channel insights, while Actions opens management commands beside the row.
-- Mirrors every per-channel Actions command in Subscription tools bulk actions, including Pinchflat actions, Emby refresh, unsubscribe and destructive removal options.
-- Adds Settings → API → Emby with Server URL, API key, automatic post-download refresh, connection test and an Emby Scan Library Files control.
-- Adds automatic Emby library scans after newly completed Pinchflat downloads are detected.
-- Adds Refresh Emby to individual channel Actions and bulk actions.
-- Adds YouTube Featured channels to Channel insights using YouTube channel sections where available.
-- Moves Channel videos and About directly below the Channel identity header.
-- Replaces the text-heavy YouTube and Pinchflat header buttons with compact service-logo controls.
-- Adds visual status overlays to the channel image for Favourite, Downloads enabled and Force Scan.
-- Groups Channel statistics into clearer overview, recent performance, channel details and Pinchflat sections while keeping the existing information.
-- Removes the explanatory daily-snapshot text from the growth-history panel.
-- Makes Favourite, Downloads enabled and Force Scan overlays interactive wherever channel artwork is shown in the main channel interfaces.
-- Moves About and channel tags into the Channel identity panel, uses a YouTube service icon and keeps long descriptions naturally expanding without an inner scrollbar.
-- Adds filesystem capacity and a usage progress indicator to Settings → Downloads.
-- Adds a Favourites overview with live counters and image-only favourite-channel tiles.
+- Automatically resolves the host directory mounted at `/downloads` from Docker instead of asking you to duplicate the YouTube library path in Settings.
+- Matches that host bind to Emby's Virtual Folders, including a different in-container path used by a local Emby container.
+- Supports an Emby library rooted at the YouTube directory itself or a subfolder such as `YouTube/shows`.
+- Channel-level Refresh Emby first refreshes the matching channel item recursively.
+- If a new channel folder has not been indexed yet, only the detected Emby YouTube library is refreshed. Other Emby libraries are not scanned.
+- Settings → API → Emby now reports the automatically detected YouTube library when Test connection is used.
+- Settings → API → Emby Scan Library Files now scans only the detected YouTube library.
+- Automatic refresh after a completed Pinchflat download and Bulk Refresh Emby use the same targeted library logic.
+- Reworks Discover video controls into a consistent icon system.
+- Discover → Downloaded shows Favourite, Refresh in Emby and YouTube subscription state/actions.
+- Discover → Liked Videos and Random Videos show Favourite, one-time Download and Subscribe actions.
+- Discover → Top 100 also exposes subscription state/action alongside the existing channel controls.
+- Filled Favourite and subscribed-state icons remain visible so the current state is clear without hovering.
+- Random Videos now returns up to 150 normal videos per batch instead of 100 while continuing to reject Shorts and clips of roughly three minutes or less.
+- Channel names in Discover open the in-app Channel details view rather than leaving the application.
+- Extends the same Channel-details behaviour to additional visible channel names, including Shorts, favourite-video cards, Pinchflat activity and media-player headings.
+- Keeps the v2.13.0c fast dashboard startup and immediate subscription Enabled toggle behaviour.
+
 
 ## Version 2.13.0
 

@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.13.0b"
+VERSION = "2.14.0.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -774,64 +774,395 @@ def emby_api_request(method, path, **kwargs):
     return response
 
 
-def emby_refresh_channel(channel_id="", channel_title=""):
-    label = str(channel_title or channel_id or "").strip()
-    library_root = get_setting(
-        "emby_library_path",
-        "/media/Storage/Media/YouTube",
-    ).strip().rstrip("/\\")
+def _normalise_media_path(value):
+    text = str(value or "").strip().replace("\\", "/")
+    text = re.sub(r"/+", "/", text).rstrip("/")
+    return text.casefold()
 
-    if not label or not library_root:
-        return False
 
-    channel_path = f"{library_root}/{label}"
+def _path_basename(value):
+    text = str(value or "").strip().replace("\\", "/").rstrip("/")
+    return text.rsplit("/", 1)[-1] if text else ""
+
+
+def _docker_containers_with_mounts():
+    if not DOCKER_SOCKET_PATH.exists():
+        return []
+
     try:
-        lookup = emby_api_request(
+        status, _headers, body = docker_request(
+            "GET",
+            "/containers/json?all=1",
+            timeout=20,
+        )
+        if status >= 400:
+            return []
+        payload = json.loads(body.decode("utf-8", "replace"))
+        return payload if isinstance(payload, list) else []
+    except Exception:
+        return []
+
+
+def _download_host_mount_source():
+    """Resolve /downloads back to the host bind path from Docker."""
+    wanted = _normalise_media_path(DOWNLOAD_ROOT)
+    candidates = []
+
+    for container in _docker_containers_with_mounts():
+        names = [str(name or "").lstrip("/") for name in container.get("Names") or []]
+        image = str(container.get("Image") or "")
+        identity = " ".join(names + [image]).casefold()
+        score = 0
+        if "youtube-pinchflat-sync" in identity:
+            score += 30
+        if "pinchflat" in identity:
+            score += 10
+
+        for mount in container.get("Mounts") or []:
+            destination = _normalise_media_path(mount.get("Destination"))
+            source = str(mount.get("Source") or "").strip()
+            if destination == wanted and source:
+                candidates.append((score, source))
+
+    if not candidates:
+        return ""
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _emby_container_destinations_for_host_source(host_source):
+    wanted_source = _normalise_media_path(host_source)
+    if not wanted_source:
+        return []
+
+    destinations = []
+    for container in _docker_containers_with_mounts():
+        names = [str(name or "").lstrip("/") for name in container.get("Names") or []]
+        image = str(container.get("Image") or "")
+        identity = " ".join(names + [image]).casefold()
+        if "emby" not in identity:
+            continue
+
+        for mount in container.get("Mounts") or []:
+            if _normalise_media_path(mount.get("Source")) != wanted_source:
+                continue
+            destination = str(mount.get("Destination") or "").strip()
+            if destination:
+                destinations.append(destination)
+
+    return list(dict.fromkeys(destinations))
+
+
+def emby_virtual_folders():
+    response = emby_api_request("GET", "Library/VirtualFolders", timeout=20)
+    payload = response.json() if response.content else []
+    if isinstance(payload, dict):
+        payload = payload.get("Items") or payload.get("items") or []
+    return payload if isinstance(payload, list) else []
+
+
+def _emby_item_id_for_path(path):
+    path = str(path or "").strip()
+    if not path:
+        return ""
+
+    try:
+        response = emby_api_request(
             "GET",
             "Items",
             params={
-                "Path": channel_path,
+                "Path": path,
                 "Fields": "Path",
-                "Limit": 10,
+                "Limit": 20,
             },
             timeout=20,
         )
-        payload = lookup.json() if lookup.content else {}
+        payload = response.json() if response.content else {}
         items = payload.get("Items") or payload.get("items") or []
-        selected = None
-        wanted_path = channel_path.rstrip("/\\").casefold()
-        wanted_name = label.casefold()
-
+        wanted = _normalise_media_path(path)
         for item in items:
-            item_path = str(
-                item.get("Path") or item.get("path") or ""
-            ).rstrip("/\\")
-            item_name = str(item.get("Name") or item.get("name") or "")
-            if (
-                item_path.casefold() == wanted_path
-                or item_name.casefold() == wanted_name
-            ):
-                selected = item
-                break
+            if _normalise_media_path(item.get("Path") or item.get("path")) == wanted:
+                return str(item.get("Id") or item.get("id") or "").strip()
+    except Exception:
+        pass
+    return ""
 
-        if not selected:
+
+def emby_detect_youtube_library():
+    """
+    Locate the Emby library backed by the same host directory as /downloads.
+
+    The app learns the host bind source from Docker, maps the same source into
+    a local Emby container when possible, then matches the result against
+    Emby's VirtualFolders API. A legacy saved path and the folder name are
+    retained as safe fallbacks for remote Emby servers.
+    """
+    if not emby_configured():
+        raise RuntimeError("Configure the Emby Server URL and API key in Settings → API.")
+
+    host_source = _download_host_mount_source()
+    emby_mounts = _emby_container_destinations_for_host_source(host_source)
+    legacy_path = get_setting("emby_library_path", "").strip()
+    source_basename = _path_basename(host_source or DOWNLOAD_ROOT)
+    virtual_folders = emby_virtual_folders()
+
+    best = None
+    best_score = -1
+
+    for folder in virtual_folders:
+        name = str(folder.get("Name") or folder.get("name") or "").strip()
+        locations = folder.get("Locations") or folder.get("locations") or []
+        if isinstance(locations, str):
+            locations = [locations]
+
+        for location in locations or [""]:
+            location = str(location or "").strip()
+            normal_location = _normalise_media_path(location)
+            score = 0
+            match_reason = ""
+
+            relative_root = ""
+            host_normal = _normalise_media_path(host_source)
+            if host_source and normal_location == host_normal:
+                score = 120
+                match_reason = "same Docker host bind"
+            elif host_source and host_normal and normal_location.startswith(host_normal + "/"):
+                score = 112
+                match_reason = "subfolder of the same Docker host bind"
+                relative_root = normal_location[len(host_normal) + 1:]
+
+            for destination in emby_mounts:
+                destination_normal = _normalise_media_path(destination)
+                if normal_location == destination_normal and score < 115:
+                    score = 115
+                    match_reason = "same Docker bind inside Emby"
+                    relative_root = ""
+                elif (
+                    destination_normal
+                    and normal_location.startswith(destination_normal + "/")
+                    and score < 110
+                ):
+                    score = 110
+                    match_reason = "subfolder of the same Docker bind inside Emby"
+                    relative_root = normal_location[len(destination_normal) + 1:]
+
+            if legacy_path and normal_location == _normalise_media_path(legacy_path) and score < 100:
+                score = 100
+                match_reason = "saved path fallback"
+
+            location_basename = _path_basename(location)
+            if (
+                source_basename
+                and location_basename.casefold() == source_basename.casefold()
+                and score < 70
+            ):
+                score = 70
+                match_reason = "matching media folder name"
+
+            if "youtube" in name.casefold() and score < 60:
+                score = 60
+                match_reason = "YouTube library name"
+
+            if "youtube" in location.casefold() and score < 50:
+                score = 50
+                match_reason = "YouTube library path"
+
+            if score <= best_score:
+                continue
+
+            item_id = str(
+                folder.get("ItemId")
+                or folder.get("itemId")
+                or folder.get("Id")
+                or folder.get("id")
+                or ""
+            ).strip()
+            best = {
+                "name": name or "YouTube",
+                "item_id": item_id,
+                "location": location,
+                "host_source": host_source,
+                "app_path": str(DOWNLOAD_ROOT),
+                "emby_mounts": emby_mounts,
+                "match_reason": match_reason,
+                "download_relative_root": relative_root,
+                "score": score,
+            }
+            best_score = score
+
+    if not best or best_score < 40:
+        raise RuntimeError(
+            "The Emby YouTube library could not be matched to the app's /downloads bind mount. "
+            "No whole-server Emby scan was started."
+        )
+
+    if not best.get("item_id") and best.get("location"):
+        best["item_id"] = _emby_item_id_for_path(best["location"])
+
+    if not best.get("item_id"):
+        raise RuntimeError(
+            f"Matched the Emby library {best.get('name') or 'YouTube'}, but its item ID could not be resolved."
+        )
+
+    return best
+
+
+def _join_emby_path(root, relative):
+    root = str(root or "").strip().rstrip("/\\")
+    relative = str(relative or "").strip().replace("\\", "/").strip("/")
+    if not relative:
+        return root
+    separator = "\\" if "\\" in root and "/" not in root else "/"
+    return root + separator + relative.replace("/", separator)
+
+
+def _local_channel_relative_path(channel_id="", channel_title=""):
+    title = str(channel_title or "").strip()
+    output_template = None
+
+    if channel_id:
+        try:
+            with db() as conn:
+                row = conn.execute(
+                    "SELECT media_profile_id, title FROM subscriptions WHERE channel_id = ?",
+                    (channel_id,),
+                ).fetchone()
+            if row:
+                title = str(row["title"] or title).strip()
+                profile_id = str(row["media_profile_id"] or effective_media_profile_id())
+                output_template = media_profile_settings(profile_id).get("output_path_template")
+        except Exception:
+            pass
+
+    parent = subscription_folder_parent(output_template)
+    if not parent or not parent.exists() or not title:
+        return ""
+
+    wanted = normalise_storage_name(title)
+    for candidate in parent.iterdir():
+        if candidate.is_dir() and normalise_storage_name(candidate.name) == wanted:
+            try:
+                return candidate.resolve().relative_to(DOWNLOAD_ROOT.resolve()).as_posix()
+            except Exception:
+                return ""
+    return ""
+
+
+def _emby_find_channel_item(library, channel_id="", channel_title=""):
+    title = str(channel_title or channel_id or "").strip()
+    if not title:
+        return None
+
+    library_id = str(library.get("item_id") or "").strip()
+    library_location = str(library.get("location") or "").strip()
+    relative_path = _local_channel_relative_path(channel_id, title)
+
+    if relative_path and library_location:
+        library_relative_root = str(library.get("download_relative_root") or "").strip().replace("\\", "/").strip("/")
+        relative_for_library = relative_path
+        if library_relative_root:
+            prefix = library_relative_root.casefold() + "/"
+            if relative_for_library.casefold().startswith(prefix):
+                relative_for_library = relative_for_library[len(library_relative_root) + 1:]
+            elif relative_for_library.casefold() == library_relative_root.casefold():
+                relative_for_library = ""
+        expected_path = _join_emby_path(library_location, relative_for_library)
+        try:
+            response = emby_api_request(
+                "GET",
+                "Items",
+                params={
+                    "Path": expected_path,
+                    "Fields": "Path",
+                    "Limit": 20,
+                },
+                timeout=20,
+            )
+            payload = response.json() if response.content else {}
+            items = payload.get("Items") or payload.get("items") or []
+            wanted_path = _normalise_media_path(expected_path)
+            for item in items:
+                if _normalise_media_path(item.get("Path") or item.get("path")) == wanted_path:
+                    return item
+        except Exception:
+            pass
+
+    if not library_id:
+        return None
+
+    try:
+        response = emby_api_request(
+            "GET",
+            "Items",
+            params={
+                "ParentId": library_id,
+                "Recursive": "true",
+                "SearchTerm": title,
+                "Fields": "Path",
+                "Limit": 100,
+            },
+            timeout=25,
+        )
+        payload = response.json() if response.content else {}
+        items = payload.get("Items") or payload.get("items") or []
+        wanted_name = normalise_storage_name(title)
+
+        exact = []
+        partial = []
+        for item in items:
+            name = str(item.get("Name") or item.get("name") or "").strip()
+            path = str(item.get("Path") or item.get("path") or "").strip()
+            path_name = _path_basename(path)
+            if normalise_storage_name(name) == wanted_name or normalise_storage_name(path_name) == wanted_name:
+                exact.append(item)
+            elif wanted_name and wanted_name in normalise_storage_name(name):
+                partial.append(item)
+
+        if exact:
+            return exact[0]
+        if partial:
+            return partial[0]
+    except Exception:
+        pass
+
+    return None
+
+
+def _emby_refresh_item(item_id, recursive=True):
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        raise RuntimeError("Emby item ID is missing.")
+
+    return emby_api_request(
+        "POST",
+        f"Items/{quote(item_id, safe='')}/Refresh",
+        params={"Recursive": "true" if recursive else "false"},
+        json={"ReplaceThumbnailImages": False},
+        timeout=45,
+    )
+
+
+def emby_refresh_channel(channel_id="", channel_title="", library=None):
+    label = str(channel_title or channel_id or "").strip()
+    if not label:
+        return False
+
+    try:
+        library = library or emby_detect_youtube_library()
+        item = _emby_find_channel_item(library, channel_id, channel_title)
+        if not item:
             return False
 
-        item_id = str(selected.get("Id") or selected.get("id") or "").strip()
+        item_id = str(item.get("Id") or item.get("id") or "").strip()
         if not item_id:
             return False
 
-        emby_api_request(
-            "POST",
-            f"Items/{quote(item_id, safe='')}/Refresh",
-            params={"Recursive": "true"},
-            json={"ReplaceThumbnailImages": False},
-            timeout=45,
-        )
+        _emby_refresh_item(item_id, recursive=True)
         log_activity(
             "emby",
             "Emby channel refresh",
-            f"Started a recursive Emby refresh for {label}.",
+            f"Started a recursive Emby refresh for {label} inside {library['name']}.",
             "success",
             channel_id or None,
         )
@@ -847,32 +1178,45 @@ def emby_refresh_channel(channel_id="", channel_title=""):
         return False
 
 
-def emby_refresh_library(channel_id="", channel_title=""):
+def emby_refresh_library(channel_id="", channel_title="", library=None):
     label = str(channel_title or channel_id or "").strip()
 
-    if label and emby_refresh_channel(channel_id, channel_title):
-        return True
+    if label and emby_refresh_channel(channel_id, channel_title, library=library):
+        return {
+            "scope": "channel",
+            "channel": label,
+        }
 
-    response = emby_api_request("POST", "Library/Refresh", timeout=45)
+    library = library or emby_detect_youtube_library()
+    _emby_refresh_item(library["item_id"], recursive=True)
+
     detail = f" Requested for {label}." if label else ""
     log_activity(
         "emby",
-        "Emby library refresh",
-        "Emby library scan started." + detail,
+        "Emby YouTube library refresh",
+        f"Emby library {library['name']} scan started.{detail}",
         "success",
         channel_id or None,
     )
-    return response
-
+    return {
+        "scope": "library",
+        "library": library,
+        "channel": label,
+    }
 
 def emby_test_connection():
     response = emby_api_request("GET", "System/Info", timeout=15)
     data = response.json() if response.content else {}
-    return {
+    result = {
         "server_name": data.get("ServerName") or data.get("serverName") or "Emby",
         "version": data.get("Version") or data.get("version") or "",
         "id": data.get("Id") or data.get("id") or "",
     }
+    try:
+        result["youtube_library"] = emby_detect_youtube_library()
+    except Exception as exc:
+        result["youtube_library_error"] = str(exc)
+    return result
 
 
 def emby_auto_refresh_new_downloads():
@@ -2827,8 +3171,8 @@ def youtube_discovery_results(kind="videos", limit=24):
         )
 
     kind = "shorts" if kind == "shorts" else "videos"
-    max_limit = 40 if kind == "shorts" else 100
-    default_limit = 24 if kind == "shorts" else 100
+    max_limit = 40 if kind == "shorts" else 160
+    default_limit = 24 if kind == "shorts" else 150
     limit = min(max(int(limit or default_limit), 1), max_limit)
 
     with db() as conn:
@@ -2913,7 +3257,7 @@ def youtube_discovery_results(kind="videos", limit=24):
     seen_video_ids = set()
     search_calls = 0
     search_remaining = stats["search_remaining"]
-    target_pool = 75 if kind == "shorts" else 165
+    target_pool = 75 if kind == "shorts" else 220
 
     for plan_index, plan in enumerate(search_plans):
         if search_calls >= search_remaining:
@@ -9112,9 +9456,10 @@ def get_new_source_form(session_obj=None, auto_create_profile=True):
     return session_obj, form, profile_ids
 
 
-def pinchflat_profile_status():
+def pinchflat_profile_status(known_online=None):
     """Return whether Pinchflat has a usable profile, creating one if needed."""
-    if not pinchflat_health():
+    online = pinchflat_health() if known_online is None else bool(known_online)
+    if not online:
         return {
             "ready": False,
             "message": "Pinchflat is offline or unreachable.",
@@ -10522,8 +10867,9 @@ def delete_pinchflat_source(
 
 
 
-def pinchflat_profiles():
-    if not pinchflat_health():
+def pinchflat_profiles(known_online=None):
+    online = pinchflat_health() if known_online is None else bool(known_online)
+    if not online:
         return []
 
     try:
@@ -11780,8 +12126,12 @@ def index():
 
     defaults = default_history_settings()
     pinchflat_container = pinchflat_container_status()
-    profile_status = pinchflat_profile_status()
-    profiles = pinchflat_profiles()
+    # Resolve Pinchflat health once during the initial page request. Profile
+    # checks and profile loading reuse the result instead of repeating the
+    # Docker/HTTP health probe several times before the first page render.
+    pinchflat_online = pinchflat_health()
+    profile_status = pinchflat_profile_status(known_online=pinchflat_online)
+    profiles = pinchflat_profiles(known_online=pinchflat_online)
     profile_settings = media_profile_settings(effective_media_profile_id())
     profile_settings = migrate_legacy_subscription_output_path(
         profile_settings
@@ -11866,7 +12216,7 @@ def index():
         media_profile_settings=profile_settings,
         emby_output_path_template=EMBY_OUTPUT_PATH_TEMPLATE,
         sponsorblock_common_categories=SPONSORBLOCK_COMMON_CATEGORIES,
-        pinchflat_online=pinchflat_health(),
+        pinchflat_online=pinchflat_online,
         pinchflat_container=pinchflat_container,
         pinchflat_worker_concurrency=(
             pinchflat_container.get(
@@ -13282,7 +13632,17 @@ def bulk_subscription_action():
 
     errors = 0
     changed = 0
-    emby_full_scan_needed = False
+    emby_library_scan_needed = False
+    emby_target_library = None
+
+    if action == "emby_refresh":
+        try:
+            emby_target_library = emby_detect_youtube_library()
+        except Exception as exc:
+            if ajax:
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            flash(str(exc), "error")
+            return redirect(url_for("index") + "#subscriptions")
 
     for row in rows:
         try:
@@ -13422,8 +13782,9 @@ def bulk_subscription_action():
                 if not emby_refresh_channel(
                     channel_id=row["channel_id"] or "",
                     channel_title=row["title"] or "",
+                    library=emby_target_library,
                 ):
-                    emby_full_scan_needed = True
+                    emby_library_scan_needed = True
 
             elif action == "unsubscribe":
                 unsubscribe_subscription(row["channel_id"])
@@ -13452,9 +13813,9 @@ def bulk_subscription_action():
                     (str(exc)[:1000], row["channel_id"]),
                 )
 
-    if action == "emby_refresh" and emby_full_scan_needed:
+    if action == "emby_refresh" and emby_library_scan_needed:
         try:
-            emby_refresh_library()
+            emby_refresh_library(library=emby_target_library)
         except Exception as exc:
             errors += 1
             log_activity(
@@ -14514,7 +14875,7 @@ def discover_videos():
 
         result = youtube_discovery_results(
             kind=kind,
-            limit=24 if kind == "shorts" else 100,
+            limit=24 if kind == "shorts" else 150,
         )
         result["results"] = annotate_favourites(result.get("results", []))
         return jsonify({"ok": True, **result})
@@ -14526,10 +14887,6 @@ def discover_videos():
 def save_api_settings():
     server_url = str(request.form.get("emby_server_url") or "").strip().rstrip("/")
     api_key = str(request.form.get("emby_api_key") or "").strip()
-    library_path = str(
-        request.form.get("emby_library_path")
-        or "/media/Storage/Media/YouTube"
-    ).strip()
     auto_refresh = request.form.get("emby_auto_refresh_after_download") == "1"
     clear_key = request.form.get("emby_clear_api_key") == "1"
 
@@ -14542,10 +14899,6 @@ def save_api_settings():
     set_setting(
         "emby_auto_refresh_after_download",
         "1" if auto_refresh else "0",
-    )
-    set_setting(
-        "emby_library_path",
-        library_path or "/media/Storage/Media/YouTube",
     )
 
     # Seed the automatic-refresh marker when Emby is first configured. This
@@ -14578,14 +14931,23 @@ def save_api_settings():
 def emby_test_api():
     try:
         info = emby_test_connection()
+        library = info.get("youtube_library") or {}
+        library_note = (
+            f" · YouTube library: {library.get('name')}"
+            if library.get("name")
+            else ""
+        )
         return jsonify(
             {
                 "ok": True,
                 "message": (
                     f"Connected to {info['server_name']}"
                     + (f" · Emby {info['version']}" if info.get("version") else "")
+                    + library_note
                 ),
                 "server": info,
+                "youtube_library": library,
+                "youtube_library_error": info.get("youtube_library_error") or "",
             }
         )
     except Exception as exc:
@@ -14604,14 +14966,21 @@ def emby_refresh_api():
     channel_title = str(payload.get("channel_title") or "").strip()
 
     try:
-        emby_refresh_library(
+        result = emby_refresh_library(
             channel_id=channel_id,
             channel_title=channel_title,
         )
+        if result.get("scope") == "channel":
+            message = f"Emby refresh started for {result.get('channel') or 'the channel'}."
+        else:
+            library = result.get("library") or {}
+            message = f"Emby scan started for {library.get('name') or 'the YouTube library'}."
         return jsonify(
             {
                 "ok": True,
-                "message": "Emby library scan started.",
+                "message": message,
+                "scope": result.get("scope"),
+                "library": result.get("library") or {},
             }
         )
     except Exception as exc:

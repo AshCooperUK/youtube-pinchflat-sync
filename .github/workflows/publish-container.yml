@@ -42,8 +42,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/ashcooperuk/youtube-pinchflat-sync:latest
-            ghcr.io/ashcooperuk/youtube-pinchflat-sync:2.13.0b
+            ghcr.io/ashcooperuk/youtube-pinchflat-sync:2.14.0.0
           labels: |
             org.opencontainers.image.source=https://github.com/AshCooperUK/youtube-pinchflat-sync
             org.opencontainers.image.title=YouTube Pinchflat Sync
-            org.opencontainers.image.version=2.13.0b
+            org.opencontainers.image.version=2.14.0.0
