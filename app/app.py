@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.14.0.4"
+VERSION = "2.14.0.5"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -667,6 +667,14 @@ def init_db():
             "page_button_discover": "1",
             "page_button_favourites": "1",
             "page_button_logout": "1",
+
+            # Channel image controls are global. These switches apply anywhere
+            # the interface renders the shared channel avatar control widget.
+            "page_channel_controls": "1",
+            "page_channel_control_favourite": "1",
+            "page_channel_control_downloads": "1",
+            "page_channel_control_scan": "1",
+            "page_channel_control_delete": "1",
 
             "page_section_order": "summary,pinchflat,latest,subscriptions",
             "page_summary_order": "google,pinchflat,latest_download,subscriptions,downloads,errors",
@@ -12399,6 +12407,27 @@ def index():
             "page_button_logout",
             True,
         ),
+
+        "channel_controls": setting_bool(
+            "page_channel_controls",
+            True,
+        ),
+        "channel_control_favourite": setting_bool(
+            "page_channel_control_favourite",
+            True,
+        ),
+        "channel_control_downloads": setting_bool(
+            "page_channel_control_downloads",
+            True,
+        ),
+        "channel_control_scan": setting_bool(
+            "page_channel_control_scan",
+            True,
+        ),
+        "channel_control_delete": setting_bool(
+            "page_channel_control_delete",
+            True,
+        ),
     }
 
     page_section_order = setting_order(
@@ -13356,6 +13385,12 @@ def save_page_view_settings():
         "page_button_discover",
         "page_button_favourites",
         "page_button_logout",
+
+        "page_channel_controls",
+        "page_channel_control_favourite",
+        "page_channel_control_downloads",
+        "page_channel_control_scan",
+        "page_channel_control_delete",
     }
 
     for key in boolean_settings:

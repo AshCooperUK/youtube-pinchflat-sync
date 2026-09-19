@@ -2772,6 +2772,34 @@
     .channel-image-control-wrap.compact .channel-image-control.channel-control-delete { bottom:-6px; right:-7px; }
     .channel-image-control-wrap.compact .channel-image-control.channel-control-delete svg { width:11px; height:11px; }
 
+    /* Global Page View control for the shared channel-image actions. */
+    body.hide-channel-controls .channel-image-control { display:none !important; }
+    body.hide-channel-favourite .channel-control-favourite { display:none !important; }
+    body.hide-channel-downloads .channel-control-enabled { display:none !important; }
+    body.hide-channel-scan .channel-control-scan { display:none !important; }
+    body.hide-channel-delete .channel-control-delete { display:none !important; }
+
+    .channel-video-card {
+      position:relative;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:0;
+    }
+    .channel-video-thumb-wrap { position:relative; min-width:0; }
+    .channel-video-open {
+      display:block; width:100%; border:0; padding:0; background:transparent; cursor:pointer; text-align:left;
+    }
+    .channel-video-open img { width:100%; display:block; border-radius:10px; aspect-ratio:16/9; object-fit:cover; }
+    .channel-video-download-action {
+      position:absolute; right:9px; bottom:9px; z-index:3; width:34px; height:34px; border-radius:50%;
+      border:1px solid rgba(255,255,255,.22); background:rgba(7,17,29,.88); color:#fff; display:grid; place-items:center;
+      font-size:18px; font-weight:900; box-shadow:0 4px 14px rgba(0,0,0,.36); cursor:pointer; backdrop-filter:blur(4px);
+    }
+    .channel-video-download-action:hover { transform:scale(1.06); background:#2563eb; }
+    .subscription-channel-description a { color:#7db6ff; text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
+    .subscription-channel-description a:hover { color:#b5d6ff; }
+
     #subscription-channel-dialog { width:min(1240px,96vw); max-height:94vh; }
     #subscription-channel-dialog .modal-body { max-height:calc(94vh - 78px); overflow:auto; }
     .subscription-channel-hero {
@@ -3015,7 +3043,7 @@
     }
 </style>
 </head>
-<body>
+<body class="{% if not page_view.channel_controls %}hide-channel-controls{% endif %} {% if not page_view.channel_control_favourite %}hide-channel-favourite{% endif %} {% if not page_view.channel_control_downloads %}hide-channel-downloads{% endif %} {% if not page_view.channel_control_scan %}hide-channel-scan{% endif %} {% if not page_view.channel_control_delete %}hide-channel-delete{% endif %}">
 <div class="wrap">
   <div class="header">
     <div>
@@ -3736,7 +3764,9 @@
           <div class="debug-function-row" data-debug-search="emby download playlist automation"><div class="debug-function-name">Emby Download playlist</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Checks the private Emby Download playlist and sends requested videos through the automatic download workflow.</div></div>
           <div class="debug-function-row" data-debug-search="concurrent downloads workers yt-dlp docker"><div class="debug-function-name">Concurrent downloads</div><div class="debug-service-badge">Pinchflat + Docker</div><div class="debug-function-description">Changes Pinchflat's yt-dlp worker concurrency and recreates the container while preserving its configuration.</div></div>
           <div class="debug-function-row" data-debug-search="media profiles pinchflat settings"><div class="debug-function-name">Media Profiles</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Creates, edits and deletes Pinchflat media profiles including path, quality, metadata, artwork and SponsorBlock options.</div></div>
-          <div class="debug-function-row" data-debug-search="page view settings show hide load minimise"><div class="debug-function-name">Page View</div><div class="debug-service-badge">Local app / Browser</div><div class="debug-function-description">Controls which dashboard sections load, their default minimised state, status tiles, header buttons and ordering.</div></div>
+          <div class="debug-function-row" data-debug-search="page view settings show hide load minimise"><div class="debug-function-name">Page View</div><div class="debug-service-badge">Local app / Browser</div><div class="debug-function-description">Controls which dashboard sections load, their default minimised state, status tiles, header buttons, ordering and the shared channel-image controls.</div></div>
+          <div class="debug-function-row" data-debug-search="channel image controls icons heart tick scan delete global"><div class="debug-function-name">Channel image controls</div><div class="debug-service-badge">Local app + YouTube + Pinchflat</div><div class="debug-function-description">Global Page View switches control whether Favourite, download enable, Force Scan and remove icons appear around channel artwork throughout the web app.</div></div>
+          <div class="debug-function-row" data-debug-search="429 too many requests bot yt-dlp rate limit concurrency"><div class="debug-function-name">YouTube HTTP 429</div><div class="debug-service-badge">YouTube / yt-dlp / Pinchflat</div><div class="debug-function-description">YouTube is rate-limiting the downloader. Reduce Pinchflat concurrent downloads to 1 first. Cookies or a current yt-dlp PO Token provider may also be required when YouTube asks for bot confirmation.</div></div>
           <div class="debug-function-row" data-debug-search="logs activity sync pinchflat direct downloads"><div class="debug-function-name">Logs</div><div class="debug-service-badge">Local app + Pinchflat</div><div class="debug-function-description">Shows application activity, direct downloads, sync runs and Pinchflat logs for troubleshooting.</div></div>
         </div>
       </section>
@@ -4617,6 +4647,34 @@
         </div>
 
         <div class="setting-box" style="margin-top:14px">
+          <h3>Channel image controls</h3>
+          <p class="muted small">These settings apply globally anywhere Pinchflat Sync shows a channel image, including Subscriptions, Discover, Favourites, Channel details and the media player.</p>
+
+          <div class="page-view-grid">
+            <label class="page-view-option">
+              <input type="checkbox" name="page_channel_controls" value="1" {% if page_view.channel_controls %}checked{% endif %}>
+              <span><strong>Show channel image controls</strong><span class="muted small">Master switch for the action icons around channel artwork.</span></span>
+            </label>
+            <label class="page-view-option">
+              <input type="checkbox" name="page_channel_control_favourite" value="1" {% if page_view.channel_control_favourite %}checked{% endif %}>
+              <span><strong>Favourite heart</strong><span class="muted small">Add or remove a channel from Favourites.</span></span>
+            </label>
+            <label class="page-view-option">
+              <input type="checkbox" name="page_channel_control_downloads" value="1" {% if page_view.channel_control_downloads %}checked{% endif %}>
+              <span><strong>Downloads tick</strong><span class="muted small">Enable or disable the channel in Pinchflat.</span></span>
+            </label>
+            <label class="page-view-option">
+              <input type="checkbox" name="page_channel_control_scan" value="1" {% if page_view.channel_control_scan %}checked{% endif %}>
+              <span><strong>Force Scan</strong><span class="muted small">Ask Pinchflat to scan the channel immediately.</span></span>
+            </label>
+            <label class="page-view-option">
+              <input type="checkbox" name="page_channel_control_delete" value="1" {% if page_view.channel_control_delete %}checked{% endif %}>
+              <span><strong>Remove / delete</strong><span class="muted small">Open the channel removal menu.</span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="setting-box" style="margin-top:14px">
           <h3>Top buttons</h3>
           <p class="muted small">Settings always remains visible. Choose the other controls you want in the page header.</p>
 
@@ -5237,6 +5295,9 @@
                 <div class="profile-control-help">
                   Controls Pinchflat's <code>YT_DLP_WORKER_CONCURRENCY</code>.
                   Higher values allow more yt-dlp download jobs to run at the same time.
+                </div>
+                <div class="profile-control-help" style="margin-top:8px">
+                  If YouTube returns HTTP 429 or “Sign in to confirm you’re not a bot”, use <strong>1</strong> concurrent download first. Pinchflat recommends one worker when the IP is being limited.
                 </div>
               </div>
 
@@ -9731,6 +9792,38 @@ function formatChannelDate(value) {
   return new Intl.DateTimeFormat("en-GB", {day:"numeric", month:"short", year:"numeric"}).format(date);
 }
 
+function renderChannelDescriptionWithLinks(element, value) {
+  if (!element) return;
+  const text = String(value || "");
+  element.replaceChildren();
+  if (!text) return;
+
+  const matcher = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi;
+  let cursor = 0;
+  for (const match of text.matchAll(matcher)) {
+    const start = match.index ?? 0;
+    if (start > cursor) element.append(document.createTextNode(text.slice(cursor, start)));
+
+    let raw = match[0];
+    let trailing = "";
+    while (/[),.;!?\]]$/.test(raw)) {
+      trailing = raw.slice(-1) + trailing;
+      raw = raw.slice(0, -1);
+    }
+
+    const anchor = document.createElement("a");
+    const isEmail = raw.includes("@") && !/^https?:/i.test(raw) && !/^www\./i.test(raw);
+    anchor.href = isEmail ? `mailto:${raw}` : (/^www\./i.test(raw) ? `https://${raw}` : raw);
+    anchor.textContent = raw;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    element.append(anchor);
+    if (trailing) element.append(document.createTextNode(trailing));
+    cursor = start + match[0].length;
+  }
+  if (cursor < text.length) element.append(document.createTextNode(text.slice(cursor)));
+}
+
 function openChannelLink(event, element) {
   const channelId = element?.dataset?.channelPopupId || "";
   if (!channelId) return true;
@@ -10188,19 +10281,23 @@ function renderChannelVideos() {
     grid.innerHTML = `<div class="muted small">No ${channelVideoTab} video data is available.</div>`;
   } else {
     videos.forEach(video => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "channel-video-card";
+      const card = document.createElement("div");
+      card.className = "channel-video-card";
+
+      const thumbWrap = document.createElement("div");
+      thumbWrap.className = "channel-video-thumb-wrap";
+
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "channel-video-open";
+      openButton.title = "Play video";
+
       const img = document.createElement("img");
       img.src = video.thumbnail_url || (video.video_id ? `https://i.ytimg.com/vi/${video.video_id}/mqdefault.jpg` : "");
       img.alt = video.title || "YouTube video";
       img.loading = "lazy";
-      const title = document.createElement("strong");
-      title.textContent = video.title || "YouTube video";
-      const meta = document.createElement("span");
-      meta.textContent = [formatCompactNumber(video.view_count) + " views", video.duration, formatLatestAge(video.published_at)].filter(Boolean).join(" · ");
-      button.append(img,title,meta);
-      button.onclick = () => openLatestVideo({
+      openButton.appendChild(img);
+      openButton.onclick = () => openLatestVideo({
         ...video,
         channel_id: yt.channel_id || currentSubscriptionChannelId,
         channel_title: yt.title || currentSubscriptionChannelData?.subscription?.title || "YouTube channel",
@@ -10208,7 +10305,32 @@ function renderChannelVideos() {
         channel_thumbnail_url: yt.thumbnail_url || "",
         metadata_complete:false
       });
-      grid.appendChild(button);
+
+      const downloadButton = document.createElement("button");
+      downloadButton.type = "button";
+      downloadButton.className = "channel-video-download-action";
+      downloadButton.textContent = "↓";
+      downloadButton.title = "One-time download";
+      downloadButton.setAttribute("aria-label", `One-time download ${video.title || "video"}`);
+      downloadButton.onclick = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const url = video.video_url || (video.video_id ? `https://www.youtube.com/watch?v=${video.video_id}` : "");
+        if (url) openSingleDownload(url);
+      };
+
+      thumbWrap.append(openButton, downloadButton);
+
+      const title = document.createElement("strong");
+      title.textContent = video.title || "YouTube video";
+      title.title = "Play video";
+      title.style.cursor = "pointer";
+      title.onclick = () => openButton.click();
+
+      const meta = document.createElement("span");
+      meta.textContent = [formatCompactNumber(video.view_count) + " views", video.duration, formatLatestAge(video.published_at)].filter(Boolean).join(" · ");
+      card.append(thumbWrap,title,meta);
+      grid.appendChild(card);
     });
   }
 
@@ -10312,7 +10434,10 @@ async function openChannelDetails(channelId) {
     document.getElementById("subscription-channel-handle").textContent = handle || "@channel";
     document.getElementById("subscription-channel-age").textContent = yt.age?.label || "Age unavailable";
     document.getElementById("subscription-channel-age-tile").textContent = yt.age?.label || "—";
-    document.getElementById("subscription-channel-description").textContent = yt.description || "No YouTube channel description was returned.";
+    renderChannelDescriptionWithLinks(
+      document.getElementById("subscription-channel-description"),
+      yt.description || "No YouTube channel description was returned."
+    );
 
     const youtubeLink = document.getElementById("subscription-channel-youtube-link");
     youtubeLink.href = sub?.channel_url || `https://www.youtube.com/channel/${channelId}`;
