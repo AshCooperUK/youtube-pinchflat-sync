@@ -157,10 +157,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.14.0.0"
+  version: "2.14.0.1"
   update_at: "2026-09-19"
   release_notes:
-    en_US: v2.14.0.0 adds automatic Emby YouTube-library detection, targeted Emby refreshes and consistent Discover actions.
+    en_US: v2.14.0.1 fixes dashboard spacing, removes duplicate latest-download content and adds the searchable debug/function reference.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

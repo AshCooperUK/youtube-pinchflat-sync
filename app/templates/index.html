@@ -2487,6 +2487,115 @@
     }
     .settings-favourite-channel-tile:hover { border-color:#45658f; background:#0d1b2e; }
 
+    .pinchflat-download-card-no-latest { margin-bottom:18px; }
+
+    .app-footer {
+      margin:20px 0 4px;
+      padding:14px 2px 2px;
+      border-top:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      color:var(--muted);
+      font-size:13px;
+    }
+    .app-footer-debug {
+      width:38px;
+      height:38px;
+      display:grid;
+      place-items:center;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#0b1626;
+      color:#b8c9e3;
+      cursor:pointer;
+      padding:0;
+    }
+    .app-footer-debug:hover { background:#15243a; color:#fff; border-color:#4b6385; }
+    .app-footer-debug svg {
+      width:20px;
+      height:20px;
+      stroke:currentColor;
+      fill:none;
+      stroke-width:1.8;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+    }
+    .app-footer-github { color:#b8c9e3; text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+    .app-footer-github:hover { color:#fff; text-decoration:underline; }
+    .app-footer-github svg { width:18px; height:18px; fill:currentColor; }
+
+    #debug-reference-dialog {
+      width:min(1180px,96vw);
+      height:min(880px,92vh);
+    }
+    #debug-reference-dialog .modal-body {
+      height:calc(100% - 73px);
+      max-height:none;
+      overflow-y:auto;
+      overflow-x:hidden;
+    }
+    .debug-reference-intro { margin-bottom:14px; }
+    .debug-reference-toolbar {
+      position:sticky;
+      top:-18px;
+      z-index:3;
+      margin:-18px -20px 16px;
+      padding:14px 20px;
+      background:linear-gradient(180deg,var(--panel2) 82%,rgba(11,22,38,0));
+    }
+    .debug-reference-toolbar input { width:100%; }
+    .debug-function-group { margin:0 0 20px; }
+    .debug-function-group h3 { margin:0 0 8px; font-size:17px; }
+    .debug-function-list {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px;
+    }
+    .debug-function-row {
+      min-width:0;
+      display:grid;
+      grid-template-columns:minmax(150px,210px) minmax(110px,150px) 1fr;
+      align-items:start;
+      gap:10px;
+      padding:11px 12px;
+      border:1px solid var(--line);
+      border-radius:11px;
+      background:#0b1728;
+    }
+    .debug-function-name { font-weight:800; color:#eef4ff; line-height:1.3; }
+    .debug-service-badge {
+      display:inline-flex;
+      width:max-content;
+      max-width:100%;
+      align-items:center;
+      min-height:25px;
+      padding:3px 8px;
+      border:1px solid #355173;
+      border-radius:999px;
+      background:#13253d;
+      color:#bcd3f2;
+      font-size:12px;
+      font-weight:700;
+      line-height:1.2;
+    }
+    .debug-function-description { color:var(--muted); line-height:1.42; }
+    .debug-function-group.debug-group-hidden { display:none; }
+    .debug-function-row.debug-row-hidden { display:none; }
+    .debug-reference-empty { display:none; padding:30px; text-align:center; color:var(--muted); }
+    .debug-reference-empty.visible { display:block; }
+
+    @media(max-width:900px) {
+      .debug-function-list { grid-template-columns:1fr; }
+      .debug-function-row { grid-template-columns:minmax(130px,190px) minmax(100px,140px) 1fr; }
+    }
+    @media(max-width:640px) {
+      .app-footer { align-items:flex-start; }
+      .app-footer-github span { display:none; }
+      .debug-function-row { grid-template-columns:1fr; }
+    }
+
     @media(max-width:760px) {
       .latest-download-summary-button { grid-template-columns:88px minmax(0,1fr); }
       .latest-download-summary-button img { width:88px; }
@@ -2687,7 +2796,7 @@
 
   {% if page_view.load_pinchflat_downloads %}
   <div
-    class="card pinchflat-download-card"
+    class="card pinchflat-download-card{% if not (google_connected and page_view.load_latest_videos) %} pinchflat-download-card-no-latest{% endif %}"
     id="pinchflat-download-card"
     data-page-section="pinchflat"
   >
@@ -2752,7 +2861,9 @@
         <div class="pinchflat-download-empty">Checking Pinchflat for active downloads…</div>
       </div>
 
+      {% if not (page_view.load_summary and page_view.show_summary_latest_download) %}
       <div id="pinchflat-last-download" class="pinchflat-last-download hidden"></div>
+      {% endif %}
     </div>
   </div>
   {% endif %}
@@ -2819,7 +2930,6 @@
     <div class="header">
       <div>
         <h2>Subscriptions</h2>
-        <div class="muted small">New subscriptions follow the policy in Settings. Filters and sorting are remembered in this browser.</div>
       </div>
 
       <div class="subscription-header-actions">
@@ -3084,9 +3194,161 @@
   </div>
   {% endif %}
   </div>
+<footer class="app-footer" aria-label="Application footer">
+  <button
+    class="app-footer-debug"
+    type="button"
+    onclick="openDebugReference()"
+    title="Debug and function reference"
+    aria-label="Open debug and function reference"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 2l1.2 2.2"></path>
+      <path d="M16 2l-1.2 2.2"></path>
+      <path d="M3 13h4"></path>
+      <path d="M17 13h4"></path>
+      <path d="M5 7l2.6 2"></path>
+      <path d="M19 7l-2.6 2"></path>
+      <rect x="7" y="5" width="10" height="15" rx="5"></rect>
+      <path d="M9 10h6"></path>
+      <path d="M9 14h6"></path>
+    </svg>
+  </button>
+
+  <a
+    class="app-footer-github"
+    href="https://github.com/AshCooperUK/youtube-pinchflat-sync"
+    target="_blank"
+    rel="noopener"
+    title="Open the Pinchflat Sync GitHub repository"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 .7A11.5 11.5 0 0 0 8.36 23.1c.58.11.79-.25.79-.56v-2.2c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.78 1.19 1.78 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.29-5.27-5.73 0-1.27.45-2.3 1.19-3.11-.12-.29-.52-1.47.11-3.07 0 0 .97-.31 3.16 1.19A11 11 0 0 1 12 6.07a11 11 0 0 1 2.88.39c2.19-1.5 3.16-1.19 3.16-1.19.63 1.6.23 2.78.11 3.07.74.81 1.19 1.84 1.19 3.11 0 4.45-2.71 5.43-5.29 5.72.42.36.79 1.06.79 2.14v3.18c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .7z"></path>
+    </svg>
+    <span>AshCooperUK/youtube-pinchflat-sync</span>
+  </a>
+</footer>
 </div>
 
+
+
 <div id="ajax-toast" class="ajax-toast" role="status" aria-live="polite"></div>
+
+<dialog id="debug-reference-dialog">
+  <div class="modal-head">
+    <div>
+      <h2 style="margin:0">Debug &amp; function reference</h2>
+      <div class="muted small">A quick reference for user-facing controls, what each one does and the external service involved.</div>
+    </div>
+    <button class="modal-close" type="button" onclick="closeDebugReference()" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="debug-reference-toolbar">
+      <input id="debug-function-search" type="search" placeholder="Search functions, actions or services…" autocomplete="off" oninput="filterDebugReference()" aria-label="Search function reference">
+    </div>
+
+    <div class="debug-reference-intro muted small">
+      Use this list when checking which system an action talks to. Descriptions cover the web app behaviour rather than low-level implementation details.
+    </div>
+
+    <div id="debug-reference-groups">
+      <section class="debug-function-group">
+        <h3>Dashboard &amp; account</h3>
+        <div class="debug-function-list">
+          <div class="debug-function-row" data-debug-search="pinchflat sync youtube subscriptions sources"><div class="debug-function-name">Pinchflat Sync</div><div class="debug-service-badge">YouTube + Pinchflat</div><div class="debug-function-description">Synchronises the app's subscription state with Pinchflat sources and applies the configured source rules.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh youtube subscriptions google data api"><div class="debug-function-name">Refresh YouTube</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Reloads the connected account's current YouTube subscriptions and updates local subscription records.</div></div>
+          <div class="debug-function-row" data-debug-search="single download yt-dlp one-time"><div class="debug-function-name">Single Download</div><div class="debug-service-badge">yt-dlp / Local app</div><div class="debug-function-description">Downloads one supplied YouTube URL using the selected one-time download options.</div></div>
+          <div class="debug-function-row" data-debug-search="google status oauth cloud console"><div class="debug-function-name">Google status tile</div><div class="debug-service-badge">Google OAuth</div><div class="debug-function-description">Shows whether Google is connected and whether the token has read/write access. The logo opens Google Cloud Console.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat online power start stop docker"><div class="debug-function-name">Pinchflat power</div><div class="debug-service-badge">Docker</div><div class="debug-function-description">Starts or stops the Pinchflat container through the mounted Docker socket.</div></div>
+          <div class="debug-function-row" data-debug-search="latest download tile player"><div class="debug-function-name">Latest download tile</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Shows the newest completed Pinchflat download. Clicking the video opens the in-app media player.</div></div>
+          <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Opens the complete list of waiting Pinchflat jobs and refreshes the queue while the popup remains open.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Immediately reloads current Pinchflat workers, waiting count and recent completed download data.</div></div>
+        </div>
+      </section>
+
+      <section class="debug-function-group">
+        <h3>Subscriptions &amp; channel actions</h3>
+        <div class="debug-function-list">
+          <div class="debug-function-row" data-debug-search="enable disable downloads source toggle"><div class="debug-function-name">Enable / Disable</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Immediately creates or removes the channel's Pinchflat source according to the Enabled switch.</div></div>
+          <div class="debug-function-row" data-debug-search="save range profile history"><div class="debug-function-name">Save changes</div><div class="debug-service-badge">Local app + Pinchflat</div><div class="debug-function-description">Saves changed download range or media profile settings and applies them to the channel source.</div></div>
+          <div class="debug-function-row" data-debug-search="download pending action"><div class="debug-function-name">Download Pending</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Requests Pinchflat to process media which is pending for the selected source.</div></div>
+          <div class="debug-function-row" data-debug-search="re-download existing redownload"><div class="debug-function-name">Re-Download Existing</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Requests Pinchflat to download media again for items already known to that source.</div></div>
+          <div class="debug-function-row" data-debug-search="force scan source"><div class="debug-function-name">Force Scan</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Forces Pinchflat to check the channel now rather than waiting for its normal source schedule.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh media metadata"><div class="debug-function-name">Refresh Media</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Refreshes Pinchflat's media information for the selected source.</div></div>
+          <div class="debug-function-row" data-debug-search="sync files disk"><div class="debug-function-name">Sync Files on Disk</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Asks Pinchflat to reconcile its media records with files currently present on disk.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh emby channel scan"><div class="debug-function-name">Refresh Emby</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Refreshes the matching channel folder in the auto-detected YouTube library. If the folder is not indexed yet, it refreshes only the YouTube library.</div></div>
+          <div class="debug-function-row" data-debug-search="unsubscribe youtube"><div class="debug-function-name">Unsubscribe</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Unsubscribes the connected Google account from the channel while retaining the local channel record.</div></div>
+          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove source"><div class="debug-function-name">Unsubscribe &amp; Delete Channel</div><div class="debug-service-badge">YouTube + Pinchflat</div><div class="debug-function-description">Unsubscribes, removes the Pinchflat source and removes the channel from the normal local subscription list while keeping downloaded media.</div></div>
+          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove media destructive"><div class="debug-function-name">Unsubscribe, Delete Channel &amp; Remove Media</div><div class="debug-service-badge">YouTube + Pinchflat + Storage</div><div class="debug-function-description">Performs the destructive channel removal and also deletes downloaded media belonging to the channel.</div></div>
+          <div class="debug-function-row" data-debug-search="bulk actions selected channels"><div class="debug-function-name">Bulk actions</div><div class="debug-service-badge">Multiple services</div><div class="debug-function-description">Runs the chosen channel action across every selected subscription. Destructive actions ask for confirmation first.</div></div>
+          <div class="debug-function-row" data-debug-search="channel name details popup stats"><div class="debug-function-name">Channel name</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Opens the rich Channel popup with YouTube statistics, videos, featured channels, local source details and history.</div></div>
+          <div class="debug-function-row" data-debug-search="heart favourite channel"><div class="debug-function-name">Heart icon</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Adds or removes the channel from Favourite Channels. The same state is reflected throughout the interface.</div></div>
+          <div class="debug-function-row" data-debug-search="tick enabled downloads"><div class="debug-function-name">Download tick icon</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Enables or disables Pinchflat downloads for the channel directly from channel artwork.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh icon force scan artwork"><div class="debug-function-name">Channel refresh icon</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Runs Force Scan for the channel directly from the channel-image overlay.</div></div>
+        </div>
+      </section>
+
+      <section class="debug-function-group">
+        <h3>Channel details &amp; media player</h3>
+        <div class="debug-function-list">
+          <div class="debug-function-row" data-debug-search="youtube logo channel"><div class="debug-function-name">YouTube logo</div><div class="debug-service-badge">YouTube</div><div class="debug-function-description">Opens the current channel directly on YouTube in a new browser tab.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat logo source"><div class="debug-function-name">Pinchflat logo</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Opens the associated Pinchflat source when a source exists.</div></div>
+          <div class="debug-function-row" data-debug-search="popular latest channel videos"><div class="debug-function-name">Popular / Latest videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Switches the channel video strip between popular results and recent uploads.</div></div>
+          <div class="debug-function-row" data-debug-search="featured channels"><div class="debug-function-name">Featured Channels</div><div class="debug-service-badge">YouTube</div><div class="debug-function-description">Shows channels featured by the current channel where YouTube exposes that public channel section.</div></div>
+          <div class="debug-function-row" data-debug-search="growth history chart snapshots"><div class="debug-function-name">Growth history</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Charts public YouTube totals stored by the app as daily channel snapshots.</div></div>
+          <div class="debug-function-row" data-debug-search="favourite video media player"><div class="debug-function-name">Favourite video</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Adds or removes the playing video from Favourite Videos.</div></div>
+          <div class="debug-function-row" data-debug-search="subscribe media player"><div class="debug-function-name">Subscribe</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Subscribes the connected YouTube account to the video's channel.</div></div>
+          <div class="debug-function-row" data-debug-search="like youtube video"><div class="debug-function-name">Like on YouTube</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Likes the current video using the connected Google account.</div></div>
+          <div class="debug-function-row" data-debug-search="one-time download player"><div class="debug-function-name">One-time download</div><div class="debug-service-badge">Local app / yt-dlp</div><div class="debug-function-description">Opens Single Download with the current video's URL filled in. The download does not begin until you press Download.</div></div>
+          <div class="debug-function-row" data-debug-search="open youtube player"><div class="debug-function-name">Open on YouTube</div><div class="debug-service-badge">YouTube</div><div class="debug-function-description">Opens the current video on YouTube, useful when embedding is restricted.</div></div>
+        </div>
+      </section>
+
+      <section class="debug-function-group">
+        <h3>Discover</h3>
+        <div class="debug-function-list">
+          <div class="debug-function-row" data-debug-search="discover downloaded pinchflat"><div class="debug-function-name">Downloaded</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Shows recently completed Pinchflat downloads and refreshes while this Discover view is open.</div></div>
+          <div class="debug-function-row" data-debug-search="liked videos discover youtube"><div class="debug-function-name">Liked Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads videos liked by the connected YouTube account, following YouTube pagination.</div></div>
+          <div class="debug-function-row" data-debug-search="random videos discover recommendations"><div class="debug-function-name">Random Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Builds a larger recommendation-style selection influenced by subscriptions, favourites and liked videos.</div></div>
+          <div class="debug-function-row" data-debug-search="random shorts discover"><div class="debug-function-name">Random Shorts</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads vertical Shorts into the in-app Shorts player with next, sound, favourite, subscribe and YouTube controls.</div></div>
+          <div class="debug-function-row" data-debug-search="top 100 channels discover"><div class="debug-function-name">Top 100</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Shows the app's curated major English-language channel list enriched with current YouTube data.</div></div>
+          <div class="debug-function-row" data-debug-search="download icon discover"><div class="debug-function-name">Download icon</div><div class="debug-service-badge">Local app / yt-dlp</div><div class="debug-function-description">Opens Single Download with the selected Discover video's URL ready for confirmation.</div></div>
+          <div class="debug-function-row" data-debug-search="subscribe icon discover"><div class="debug-function-name">Subscribe icon</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Subscribes or shows the current subscribed state for the video's channel.</div></div>
+          <div class="debug-function-row" data-debug-search="emby icon discover downloaded refresh"><div class="debug-function-name">Emby refresh icon</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Refreshes the video's channel folder inside the detected Emby YouTube library.</div></div>
+        </div>
+      </section>
+
+      <section class="debug-function-group">
+        <h3>Emby, automation &amp; Pinchflat settings</h3>
+        <div class="debug-function-list">
+          <div class="debug-function-row" data-debug-search="test emby connection api"><div class="debug-function-name">Test Emby connection</div><div class="debug-service-badge">Emby API</div><div class="debug-function-description">Checks the configured Emby server URL and API key and reports whether the server responds.</div></div>
+          <div class="debug-function-row" data-debug-search="emby scan library files youtube library"><div class="debug-function-name">Emby Scan Library Files</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Scans only the automatically detected Emby YouTube library. It does not request a full-server media scan.</div></div>
+          <div class="debug-function-row" data-debug-search="auto refresh emby downloads"><div class="debug-function-name">Automatic Emby refresh</div><div class="debug-service-badge">Pinchflat + Emby</div><div class="debug-function-description">Detects a newly completed Pinchflat download and refreshes its channel in Emby automatically.</div></div>
+          <div class="debug-function-row" data-debug-search="subscription sync schedule automation youtube"><div class="debug-function-name">YouTube subscription sync</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Controls the scheduled refresh of YouTube subscriptions.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat sync schedule automation"><div class="debug-function-name">Pinchflat sync schedule</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Controls scheduled reconciliation between local subscription settings and Pinchflat sources.</div></div>
+          <div class="debug-function-row" data-debug-search="emby download playlist automation"><div class="debug-function-name">Emby Download playlist</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Checks the private Emby Download playlist and sends requested videos through the automatic download workflow.</div></div>
+          <div class="debug-function-row" data-debug-search="concurrent downloads workers yt-dlp docker"><div class="debug-function-name">Concurrent downloads</div><div class="debug-service-badge">Pinchflat + Docker</div><div class="debug-function-description">Changes Pinchflat's yt-dlp worker concurrency and recreates the container while preserving its configuration.</div></div>
+          <div class="debug-function-row" data-debug-search="media profiles pinchflat settings"><div class="debug-function-name">Media Profiles</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Creates, edits and deletes Pinchflat media profiles including path, quality, metadata, artwork and SponsorBlock options.</div></div>
+          <div class="debug-function-row" data-debug-search="page view settings show hide load minimise"><div class="debug-function-name">Page View</div><div class="debug-service-badge">Local app / Browser</div><div class="debug-function-description">Controls which dashboard sections load, their default minimised state, status tiles, header buttons and ordering.</div></div>
+          <div class="debug-function-row" data-debug-search="logs activity sync pinchflat direct downloads"><div class="debug-function-name">Logs</div><div class="debug-service-badge">Local app + Pinchflat</div><div class="debug-function-description">Shows application activity, direct downloads, sync runs and Pinchflat logs for troubleshooting.</div></div>
+        </div>
+      </section>
+
+      <section class="debug-function-group">
+        <h3>Security &amp; local interface</h3>
+        <div class="debug-function-list">
+          <div class="debug-function-row" data-debug-search="remember login signed in cookie security"><div class="debug-function-name">Keep me signed in</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Controls how long the persistent authentication cookie remains valid after the browser closes.</div></div>
+          <div class="debug-function-row" data-debug-search="inactivity timeout security"><div class="debug-function-name">Inactivity timeout</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Ends a logged-in session after the configured period without activity.</div></div>
+          <div class="debug-function-row" data-debug-search="two factor 2fa security"><div class="debug-function-name">Two-factor authentication</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Adds a time-based second authentication factor and recovery codes for supported users.</div></div>
+          <div class="debug-function-row" data-debug-search="minimise sections browser"><div class="debug-function-name">Minimise section</div><div class="debug-service-badge">Browser / Local app</div><div class="debug-function-description">Collapses a dashboard section without changing whether the section is enabled in Page View.</div></div>
+          <div class="debug-function-row" data-debug-search="github repository source code"><div class="debug-function-name">GitHub footer link</div><div class="debug-service-badge">GitHub</div><div class="debug-function-description">Opens the source repository used for your GitHub Desktop publishing workflow.</div></div>
+        </div>
+      </section>
+    </div>
+
+    <div id="debug-reference-empty" class="debug-reference-empty">No matching function was found.</div>
+  </div>
+</dialog>
 
 <dialog id="subscriptions-tools-dialog">
   <div class="modal-head">
@@ -4966,6 +5228,7 @@
 
 <script>
 const settingsDialog = document.getElementById("settings-dialog");
+const debugReferenceDialog = document.getElementById("debug-reference-dialog");
 const subscriptionsToolsDialog = document.getElementById("subscriptions-tools-dialog");
 const subscriptionChannelDialog = document.getElementById("subscription-channel-dialog");
 const subscriptionActionsMenu = document.getElementById("subscription-actions-menu");
@@ -5014,6 +5277,41 @@ let youtubeIframeApiPromise = null;
 let pinchflatDownloadTimer = null;
 let pinchflatQueueTimer = null;
 let pinchflatDownloadSnapshot = null;
+
+function openDebugReference() {
+  if (!debugReferenceDialog) return;
+  debugReferenceDialog.showModal();
+  const search = document.getElementById("debug-function-search");
+  if (search) {
+    search.value = "";
+    filterDebugReference();
+    setTimeout(() => search.focus(), 0);
+  }
+}
+
+function closeDebugReference() {
+  debugReferenceDialog?.close();
+}
+
+function filterDebugReference() {
+  const search = document.getElementById("debug-function-search");
+  const query = String(search?.value || "").trim().toLowerCase();
+  let visibleTotal = 0;
+
+  document.querySelectorAll("#debug-reference-groups .debug-function-group").forEach(group => {
+    let groupVisible = 0;
+    group.querySelectorAll(".debug-function-row").forEach(row => {
+      const haystack = `${row.dataset.debugSearch || ""} ${row.textContent || ""}`.toLowerCase();
+      const visible = !query || haystack.includes(query);
+      row.classList.toggle("debug-row-hidden", !visible);
+      if (visible) groupVisible += 1;
+    });
+    group.classList.toggle("debug-group-hidden", groupVisible === 0);
+    visibleTotal += groupVisible;
+  });
+
+  document.getElementById("debug-reference-empty")?.classList.toggle("visible", visibleTotal === 0);
+}
 
 function safeDateTime(value) {
   if (!value) return "—";
@@ -10512,7 +10810,7 @@ latestVideoDialog?.addEventListener(
   }
 );
 
-[settingsDialog, activityDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
+[settingsDialog, debugReferenceDialog, activityDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
   d?.addEventListener("click", event => {
     if (event.target === d) d.close();
   });

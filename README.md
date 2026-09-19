@@ -2,9 +2,15 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 2.14.0.0
+## Version 2.14.0.1
 
-Emby library targeting and Discover interaction update.
+Dashboard layout and built-in function reference update.
+
+- Keeps normal vertical spacing between Pinchflat Downloads and Subscriptions when Latest from your subscriptions is disabled.
+- Hides the duplicate Last downloaded row inside Pinchflat Downloads when the dedicated Latest download status tile is enabled.
+- Removes the subscription helper sentence under the Subscriptions heading.
+- Adds a footer link to the GitHub repository.
+- Adds a Debug & function reference popup from the bug icon in the bottom-left footer, with searchable descriptions of user-facing controls and the service each action talks to.
 
 - Automatically resolves the host directory mounted at `/downloads` from Docker instead of asking you to duplicate the YouTube library path in Settings.
 - Matches that host bind to Emby's Virtual Folders, including a different in-container path used by a local Emby container.
