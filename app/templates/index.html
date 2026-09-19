@@ -1016,12 +1016,14 @@
     #discover-dialog { width:min(1220px,96vw); height:min(840px,92vh); }
     #discover-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
 
-    /* Random Shorts is sized to fit the popup instead of scrolling. */
+    /* Random Shorts uses the same spacious layout as the main media player. */
     #discover-dialog.shorts-mode {
-      height:min(760px,90vh);
+      width:min(1320px,97vw);
+      height:min(900px,94vh);
     }
     #discover-dialog.shorts-mode .modal-body {
-      overflow:hidden;
+      overflow-y:auto;
+      overflow-x:hidden;
     }
     .discover-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
     .discover-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:16px; }
@@ -1618,49 +1620,78 @@
       .latest-popup-action-grid { grid-template-columns:1fr; }
       .latest-popup-header-video { white-space:normal; }
     }
+    /* Random Shorts now shares the visual language of the main media player. */
     .shorts-shell {
       display:grid;
-      grid-template-columns:minmax(230px,280px) minmax(240px,1fr);
-      gap:20px;
+      grid-template-columns:minmax(300px,370px) minmax(520px,1fr);
+      gap:18px;
       align-items:start;
     }
+    .shorts-main-column { min-width:0; }
     .shorts-player-frame {
-      width:min(100%,280px);
+      width:min(100%,370px);
       aspect-ratio:9/16;
       background:#000;
+      border:1px solid var(--line);
       border-radius:16px;
       overflow:hidden;
       margin:0 auto;
+      box-shadow:0 12px 30px rgba(0,0,0,.18);
     }
     .shorts-player-frame iframe { display:block; width:100%; height:100%; border:0; }
-    .shorts-info {
-      padding:14px;
+    .shorts-action-dock { padding-top:12px; }
+    .shorts-action-dock .next-short-action {
+      color:#d7e8ff;
+      border-color:#315b94;
+      background:#17345d;
+    }
+    .shorts-action-dock .next-short-action:hover:not(:disabled) { background:#214a80; }
+    .shorts-auto-next-card {
+      display:flex;
+      align-items:flex-start;
+      gap:10px;
+      margin-top:12px;
+      padding:11px 12px;
+      border:1px solid var(--line);
+      border-radius:11px;
+      background:var(--panel);
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.4;
+    }
+    .shorts-auto-next-card input { margin-top:2px; flex:0 0 auto; }
+    .shorts-detail-stack { display:grid; gap:12px; min-width:0; }
+    .shorts-channel-card { padding:0; overflow:hidden; }
+    .shorts-channel-card .latest-popup-channel-card-body { padding-bottom:15px; }
+    .shorts-video-card,
+    .shorts-about-card {
+      padding:15px;
       border:1px solid var(--line);
       border-radius:14px;
       background:var(--panel);
     }
-    .shorts-actions {
-      align-items:flex-start;
-      min-height:44px;
-      gap:7px;
-    }
-    .shorts-actions .btn {
-      padding:8px 10px;
+    .shorts-video-title {
+      margin:0;
+      font-size:20px;
+      line-height:1.25;
+      overflow-wrap:anywhere;
     }
     .shorts-description {
-      margin:10px 0 12px;
-      padding:10px 12px;
-      border:1px solid var(--line);
-      border-radius:12px;
-      background:rgba(255,255,255,.025);
+      margin:0;
       color:var(--text);
-      line-height:1.4;
+      line-height:1.5;
       white-space:pre-wrap;
       overflow-wrap:anywhere;
-      max-height:min(180px,22vh);
-      overflow:hidden;
     }
+    .shorts-description a {
+      color:#7db6ff;
+      text-decoration:underline;
+      text-underline-offset:2px;
+      overflow-wrap:anywhere;
+    }
+    .shorts-description a:hover { color:#b5d6ff; }
     .shorts-description:empty { display:none; }
+    .shorts-interest-note { margin:10px 0 0; }
     .top100-rank { font-size:13px; color:var(--accent); font-weight:800; }
     .top100-subs { color:var(--text); font-weight:800; }
     .top100-country { color:var(--muted); font-size:12px; min-height:18px; }
@@ -1772,23 +1803,16 @@
 
     #list-picker-dialog { width:min(520px,92vw); }
     @media (max-width:760px) { .favourite-list-layout { grid-template-columns:1fr; } }
-    @media (max-width:760px) {
-      #discover-dialog.shorts-mode {
-        height:min(860px,94vh);
-      }
-      #discover-dialog.shorts-mode .modal-body {
-        overflow:hidden;
-      }
-      .shorts-shell {
-        grid-template-columns:1fr;
-        gap:12px;
-      }
-      .shorts-player-frame {
-        width:min(100%,230px);
-      }
-      .shorts-description {
-        max-height:110px;
-      }
+    @media (max-width:900px) {
+      #discover-dialog.shorts-mode { height:min(940px,96vh); }
+      .shorts-shell { grid-template-columns:1fr; gap:14px; }
+      .shorts-detail-stack { order:-1; }
+      .shorts-player-frame { width:min(100%,310px); }
+    }
+    @media (max-width:620px) {
+      .shorts-player-frame { width:min(100%,270px); }
+      .shorts-video-title { font-size:17px; }
+      .shorts-video-card, .shorts-about-card { padding:12px; }
     }
     .tabs { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:18px; }
     .tab-btn { border:1px solid var(--line); background:#132139; color:var(--text); padding:8px 11px; border-radius:8px; cursor:pointer; }
@@ -3764,7 +3788,7 @@
           <div class="debug-function-row" data-debug-search="liked videos discover youtube"><div class="debug-function-name">Liked Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads videos liked by the connected YouTube account, following YouTube pagination.</div></div>
           <div class="debug-function-row" data-debug-search="disliked videos discover youtube rating"><div class="debug-function-name">Disliked Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads videos disliked by the connected YouTube account from its YouTube rating history.</div></div>
           <div class="debug-function-row" data-debug-search="random videos discover recommendations"><div class="debug-function-name">Random Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Builds a larger recommendation-style selection influenced by subscriptions, favourites and liked videos.</div></div>
-          <div class="debug-function-row" data-debug-search="random shorts discover"><div class="debug-function-name">Random Shorts</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads vertical Shorts into the in-app Shorts player with next, sound, favourite, subscribe and YouTube controls.</div></div>
+          <div class="debug-function-row" data-debug-search="random shorts discover"><div class="debug-function-name">Random Shorts</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads vertical Shorts into the media-player-style Discover view with channel controls, video statistics, next, sound, favourite, subscribe, download and YouTube controls.</div></div>
           <div class="debug-function-row" data-debug-search="top 100 channels discover"><div class="debug-function-name">Top 100</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Shows the app's curated major English-language channel list enriched with current YouTube data.</div></div>
           <div class="debug-function-row" data-debug-search="download icon discover"><div class="debug-function-name">Download icon</div><div class="debug-service-badge">Local app / yt-dlp</div><div class="debug-function-description">Opens Single Download with the selected Discover video's URL ready for confirmation.</div></div>
           <div class="debug-function-row" data-debug-search="subscribe icon discover"><div class="debug-function-name">Subscribe icon</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Subscribes or shows the current subscribed state for the video's channel.</div></div>
@@ -4374,25 +4398,67 @@
     </div>
     <div id="discover-shorts-panel" class="hidden">
       <div class="shorts-shell">
-        <div class="shorts-player-frame"><div id="youtube-shorts-player"></div></div>
-        <div class="shorts-info">
-          <div class="actions shorts-actions">
-            <button class="btn" type="button" onclick="nextRandomShort()">Next Short</button>
-            <button id="shorts-sound-btn" class="btn secondary" type="button" onclick="toggleShortsSound()">Sound on</button>
-            <button id="shorts-video-heart" class="btn secondary" type="button" onclick="toggleCurrentShortVideoFavourite()">♡ Video</button>
-            <button id="shorts-channel-heart" class="btn secondary" type="button" onclick="toggleCurrentShortChannelFavourite()">♡ Channel</button>
-            <button id="shorts-youtube-subscribe" class="btn secondary" type="button" onclick="subscribeCurrentShortChannel()">＋ Subscribe</button>
-            <button id="shorts-youtube-like" class="btn secondary" type="button" onclick="likeCurrentShortOnYouTube()">👍 Like on YouTube</button>
-            <button id="shorts-download" class="btn secondary" type="button" onclick="downloadCurrentShort()">↓ Download</button>
-            <a id="shorts-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank">Open on YouTube</a>
+        <section class="shorts-main-column">
+          <div class="shorts-player-frame"><div id="youtube-shorts-player"></div></div>
+
+          <div class="media-player-action-dock shorts-action-dock" aria-label="Short actions">
+            <button id="shorts-next-btn" class="media-player-action next-short-action" type="button" onclick="nextRandomShort()" title="Next Short" aria-label="Next Short">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13"></path><path d="m13 6 6 6-6 6"></path></svg>
+            </button>
+            <button id="shorts-sound-btn" class="media-player-action" type="button" onclick="toggleShortsSound()" title="Turn sound on" aria-label="Turn sound on"></button>
+            <button id="shorts-video-heart" class="media-player-action video-favourite" type="button" onclick="toggleCurrentShortVideoFavourite()" title="Add video to favourites" aria-label="Add video to favourites" aria-pressed="false"></button>
+            <button id="shorts-youtube-subscribe" class="media-player-action" type="button" onclick="subscribeCurrentShortChannel()" title="Subscribe to channel on YouTube" aria-label="Subscribe to channel on YouTube" aria-pressed="false"></button>
+            <button id="shorts-youtube-like" class="media-player-action" type="button" onclick="likeCurrentShortOnYouTube()" title="Like video on YouTube" aria-label="Like video on YouTube" aria-pressed="false"></button>
+            <button id="shorts-download" class="media-player-action" type="button" onclick="downloadCurrentShort()" title="Prepare one-time download" aria-label="Prepare one-time download"></button>
+            <a id="shorts-youtube-link" class="media-player-action youtube-action" href="https://www.youtube.com" target="_blank" rel="noopener" title="Open Short on YouTube" aria-label="Open Short on YouTube"></a>
           </div>
 
-          <h3 id="shorts-title" style="margin-top:18px">Random Short</h3>
-          <button id="shorts-channel" class="muted channel-popup-link" type="button" style="display:block;margin:0 0 10px;padding:0"></button>
-          <div id="shorts-description" class="shorts-description"></div>
+          <label class="shorts-auto-next-card">
+            <input id="shorts-auto-next" type="checkbox" checked>
+            <span><strong style="display:block;color:var(--text);margin-bottom:2px">Auto-next</strong>Play the next Short automatically when this one finishes.</span>
+          </label>
+          <p id="shorts-interest-note" class="muted small shorts-interest-note">Shorts are selected using your favourite channels, videos you like here, and your current YouTube subscriptions.</p>
+        </section>
 
-          <label style="margin-top:16px"><input id="shorts-auto-next" type="checkbox" checked> Automatically play the next Short when the current video finishes</label>
-          <p id="shorts-interest-note" class="muted small">Shorts are selected using your favourite channels, videos you like here, and your current YouTube subscriptions.</p>
+        <div class="shorts-detail-stack">
+          <aside class="latest-popup-info shorts-channel-card">
+            <div id="shorts-channel-banner" class="latest-popup-channel-banner" aria-hidden="true"></div>
+            <div class="latest-popup-channel-card-body">
+              <div class="latest-popup-channel-summary">
+                <div id="shorts-channel-avatar-slot" style="min-width:82px"></div>
+                <button id="shorts-channel" class="channel-summary-button" type="button" style="min-width:0;text-align:left">
+                  <strong id="shorts-channel-name" class="latest-popup-channel-name">YouTube channel</strong>
+                  <span id="shorts-channel-handle" class="latest-popup-stats"></span>
+                  <span id="shorts-channel-video-stats" class="latest-popup-stats"></span>
+                </button>
+              </div>
+              <div class="latest-popup-channel-stat-grid">
+                <div><span>Subscribers</span><strong id="shorts-channel-subscribers">—</strong></div>
+                <div><span>Total views</span><strong id="shorts-channel-views">—</strong></div>
+                <div><span>Videos</span><strong id="shorts-channel-videos">—</strong></div>
+                <div><span>Country</span><strong id="shorts-channel-country">—</strong></div>
+                <div><span>Category</span><strong id="shorts-channel-category">—</strong></div>
+                <div><span>Age</span><strong id="shorts-channel-age">—</strong></div>
+              </div>
+            </div>
+          </aside>
+
+          <div class="shorts-video-card">
+            <div class="latest-video-card-heading"><h3 id="shorts-title" class="shorts-video-title">Random Short</h3></div>
+            <div class="latest-video-primary-grid">
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg></div><div><span>Views</span><strong id="shorts-views">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v10H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h3Z"></path><path d="M7 20h9.5a2 2 0 0 0 1.9-1.4l2.1-6A2 2 0 0 0 18.6 10H14l.7-3.5A2.9 2.9 0 0 0 11.9 3L7 10Z"></path></svg></div><div><span>Likes</span><strong id="shorts-likes">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3v-7a4 4 0 0 1-1-2.7V7a4 4 0 0 1 4-4h11a4 4 0 0 1 4 4v8Z"></path></svg></div><div><span>Comments</span><strong id="shorts-comments">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4"></path><path d="M8 3v4"></path><path d="M3 10h18"></path></svg></div><div><span>Published</span><strong id="shorts-published">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></div><div><span>Duration</span><strong id="shorts-duration">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13 11 22l-9-9V4h9l9 9Z"></path><circle cx="7" cy="9" r="1.5"></circle></svg></div><div><span>Category</span><strong id="shorts-category">—</strong></div></div>
+            </div>
+          </div>
+
+          <div class="shorts-about-card">
+            <div class="latest-video-card-heading"><h3>About this Short</h3></div>
+            <div id="shorts-description" class="shorts-description"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -9449,19 +9515,25 @@ function showEmptyShortsState() {
     frame.appendChild(playerHost);
   }
 
-  document.getElementById("shorts-title").textContent =
-    "No Shorts found in this batch";
-  document.getElementById("shorts-channel").textContent = "";
-  document.getElementById("shorts-description").textContent =
-    "Press Refresh to search again using another mix of your subscriptions, favourites and liked videos.";
+  document.getElementById("shorts-title").textContent = "No Shorts found in this batch";
+  document.getElementById("shorts-channel-name").textContent = "YouTube channel";
+  document.getElementById("shorts-channel-handle").textContent = "";
+  document.getElementById("shorts-channel-video-stats").textContent = "";
+  renderChannelDescriptionWithLinks(
+    document.getElementById("shorts-description"),
+    "Press Refresh to search again using another mix of your subscriptions, favourites and liked videos."
+  );
+  const slot = document.getElementById("shorts-channel-avatar-slot");
+  if (slot) slot.replaceChildren();
+  ["shorts-channel-subscribers","shorts-channel-views","shorts-channel-videos","shorts-channel-country","shorts-channel-category","shorts-channel-age","shorts-views","shorts-likes","shorts-comments","shorts-published","shorts-duration","shorts-category"].forEach(id => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = "—";
+  });
 }
 
 function ensureShortsPlayerHost() {
   let host = document.getElementById("youtube-shorts-player");
 
-  // YT.Player replaces the original DIV with an IFRAME. If the player was
-  // destroyed or the empty state rebuilt the frame, recreate the DIV before
-  // constructing another player.
   if (!host || host.tagName === "IFRAME") {
     const frame = document.querySelector(".shorts-player-frame");
     if (!frame) return null;
@@ -9474,6 +9546,156 @@ function ensureShortsPlayerHost() {
   return host;
 }
 
+function renderShortsVideoDetails(item) {
+  if (!item) return;
+  document.getElementById("shorts-title").textContent = item.title || "Random Short";
+  renderChannelDescriptionWithLinks(
+    document.getElementById("shorts-description"),
+    item.description || "No description provided for this Short."
+  );
+
+  const values = {
+    "shorts-views": item.view_count ? formatCompactNumber(item.view_count) : "—",
+    "shorts-likes": item.like_count ? formatCompactNumber(item.like_count) : "—",
+    "shorts-comments": item.comment_count ? formatCompactNumber(item.comment_count) : "—",
+    "shorts-published": formatChannelDate(item.published_at),
+    "shorts-duration": item.duration || "—",
+    "shorts-category": item.category || "—"
+  };
+  Object.entries(values).forEach(([id,value]) => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = value;
+  });
+}
+
+function renderShortsActions(item) {
+  const videoHeart = document.getElementById("shorts-video-heart");
+  if (videoHeart) {
+    videoHeart.innerHTML = discoverActionSvg("favourite", !!item.is_favourite_video);
+    videoHeart.classList.toggle("active", !!item.is_favourite_video);
+    videoHeart.setAttribute("aria-pressed", item.is_favourite_video ? "true" : "false");
+    videoHeart.title = item.is_favourite_video ? "Remove video from favourites" : "Add video to favourites";
+    videoHeart.setAttribute("aria-label", videoHeart.title);
+  }
+
+  const subscribe = document.getElementById("shorts-youtube-subscribe");
+  if (subscribe) {
+    subscribe.innerHTML = discoverActionSvg("subscribe", !!item.is_subscribed);
+    subscribe.classList.toggle("active", !!item.is_subscribed);
+    subscribe.disabled = !!item.is_subscribed || !item.channel_id;
+    subscribe.setAttribute("aria-pressed", item.is_subscribed ? "true" : "false");
+    subscribe.title = item.is_subscribed ? "Subscribed on YouTube" : "Subscribe to channel on YouTube";
+    subscribe.setAttribute("aria-label", subscribe.title);
+  }
+
+  const like = document.getElementById("shorts-youtube-like");
+  if (like) {
+    like.innerHTML = discoverActionSvg("like", !!item.is_liked_on_youtube);
+    like.classList.toggle("active", !!item.is_liked_on_youtube);
+    like.disabled = !!item.is_liked_on_youtube;
+    like.setAttribute("aria-pressed", item.is_liked_on_youtube ? "true" : "false");
+    like.title = item.is_liked_on_youtube ? "Liked on YouTube" : "Like video on YouTube";
+    like.setAttribute("aria-label", like.title);
+  }
+
+  const download = document.getElementById("shorts-download");
+  if (download) {
+    download.innerHTML = discoverActionSvg("download");
+    download.title = "Prepare one-time download";
+    download.setAttribute("aria-label", download.title);
+    setOneTimeDownloadButtonState(download, item, !!(item.video_url || item.shorts_url || item.video_id));
+  }
+
+  const youtubeLink = document.getElementById("shorts-youtube-link");
+  if (youtubeLink) {
+    youtubeLink.innerHTML = discoverActionSvg("youtube");
+    youtubeLink.href = item.shorts_url || item.video_url || (item.video_id ? `https://www.youtube.com/shorts/${item.video_id}` : "https://www.youtube.com");
+  }
+}
+
+function renderShortsChannelSummary(item) {
+  const channelId = item?.channel_id || "";
+  const channelName = item?.channel_title || "YouTube channel";
+  const button = document.getElementById("shorts-channel");
+  const name = document.getElementById("shorts-channel-name");
+  const handle = document.getElementById("shorts-channel-handle");
+  const stats = document.getElementById("shorts-channel-video-stats");
+  const slot = document.getElementById("shorts-channel-avatar-slot");
+
+  if (name) name.textContent = channelName;
+  if (handle) handle.textContent = item?.channel_handle || "";
+  if (stats) stats.textContent = [formatLatestViewCount(item?.view_count), formatLatestAge(item?.published_at)].filter(Boolean).join(" · ");
+  if (button) {
+    button.disabled = !channelId;
+    button.title = channelId ? `View ${channelName} channel details` : channelName;
+    button.onclick = channelId ? () => openChannelDetails(channelId) : null;
+  }
+  if (slot) {
+    slot.replaceChildren(makeChannelAvatarWidget({
+      channel_id:channelId,
+      channel_title:channelName,
+      channel_url:item?.channel_url || (channelId ? `https://www.youtube.com/channel/${channelId}` : ""),
+      channel_thumbnail_url:item?.channel_avatar_url || item?.channel_thumbnail_url || "",
+      thumbnail_url:item?.channel_avatar_url || item?.channel_thumbnail_url || "",
+      is_favourite_channel:!!item?.is_favourite_channel,
+      is_subscribed:!!item?.is_subscribed,
+      download_enabled:!!item?.download_enabled,
+      pinchflat_source_id:item?.pinchflat_source_id || ""
+    }, {size:82}));
+  }
+}
+
+async function loadShortsChannelDetails(channelId, expectedVideoId) {
+  if (!channelId) return;
+  try {
+    const response = await fetch(`/api/channels/${encodeURIComponent(channelId)}/details?videos=recent`, {headers:{"Accept":"application/json"}});
+    const data = await response.json();
+    const current = currentShortItem();
+    if (!response.ok || !data.ok || !data.youtube || !current || current.video_id !== expectedVideoId) return;
+
+    const yt = data.youtube;
+    const localSub = data.subscription || null;
+    Object.assign(current, {
+      channel_title:yt.title || current.channel_title,
+      channel_handle:yt.handle || yt.custom_url || "",
+      channel_avatar_url:yt.thumbnail_url || current.channel_avatar_url || "",
+      is_favourite_channel:!!data.favourite,
+      is_subscribed:!!localSub?.active,
+      download_enabled:!!localSub?.download_enabled,
+      pinchflat_source_id:localSub?.pinchflat_source_id || ""
+    });
+
+    renderShortsChannelSummary(current);
+    renderShortsActions(current);
+    syncChannelAvatarControls(channelId, {
+      favourite:!!data.favourite,
+      subscribed:!!localSub?.active,
+      enabled:!!localSub?.download_enabled,
+      sourceId:localSub?.pinchflat_source_id || ""
+    });
+
+    const banner = document.getElementById("shorts-channel-banner");
+    if (banner) {
+      const bannerUrl = String(yt.banner_url || "").trim();
+      banner.style.backgroundImage = bannerUrl
+        ? `linear-gradient(to bottom, rgba(8,17,31,.06), rgba(8,17,31,.22)), url(${JSON.stringify(bannerUrl)})`
+        : "";
+    }
+
+    const fields = {
+      "shorts-channel-subscribers": yt.hidden_subscriber_count ? "Hidden" : formatCompactNumber(yt.subscriber_count),
+      "shorts-channel-views": yt.view_count ? formatCompactNumber(yt.view_count) : "—",
+      "shorts-channel-videos": yt.video_count ? formatCompactNumber(yt.video_count) : "—",
+      "shorts-channel-country": formatCountryName(yt.country),
+      "shorts-channel-category": yt.category || (yt.topics || [])[0] || "—",
+      "shorts-channel-age": yt.age?.label || "—"
+    };
+    Object.entries(fields).forEach(([id,value]) => {
+      const target = document.getElementById(id);
+      if (target) target.textContent = value;
+    });
+  } catch (_) {}
+}
 
 async function playRandomShort(index) {
   const items = discoverResults.shorts || [];
@@ -9482,33 +9704,30 @@ async function playRandomShort(index) {
     return;
   }
   shortsIndex = ((index % items.length) + items.length) % items.length;
-  const item = items[shortsIndex];
+  let item = items[shortsIndex];
 
-  document.getElementById("shorts-title").textContent = item.title;
-  const shortsChannel = document.getElementById("shorts-channel");
-  shortsChannel.textContent = item.channel_title || "YouTube channel";
-  shortsChannel.disabled = !item.channel_id;
-  shortsChannel.title = item.channel_id ? `View ${shortsChannel.textContent} channel details` : shortsChannel.textContent;
-  shortsChannel.onclick = item.channel_id ? () => openChannelDetails(item.channel_id) : null;
-  document.getElementById("shorts-description").textContent =
-    item.description || "No description provided for this Short.";
-  document.getElementById("shorts-youtube-link").href = item.shorts_url || item.video_url;
-  const videoHeart = document.getElementById("shorts-video-heart");
-  videoHeart.textContent = item.is_favourite_video ? "♥ Video" : "♡ Video";
-  videoHeart.classList.toggle("active", !!item.is_favourite_video);
-  const channelHeart = document.getElementById("shorts-channel-heart");
-  channelHeart.textContent = item.is_favourite_channel ? "♥ Channel" : "♡ Channel";
-  channelHeart.classList.toggle("active", !!item.is_favourite_channel);
+  renderShortsVideoDetails(item);
+  renderShortsChannelSummary(item);
+  renderShortsActions(item);
+  updateShortsSoundButton();
 
-  const youtubeSubscribe = document.getElementById("shorts-youtube-subscribe");
-  youtubeSubscribe.textContent = item.is_subscribed ? "Subscribed ✓" : "＋ Subscribe";
-  youtubeSubscribe.disabled = !!item.is_subscribed;
-  youtubeSubscribe.classList.toggle("active", !!item.is_subscribed);
+  ["shorts-channel-subscribers","shorts-channel-views","shorts-channel-videos","shorts-channel-country","shorts-channel-category","shorts-channel-age"].forEach(id => {
+    const target = document.getElementById(id);
+    if (target) target.textContent = "—";
+  });
+  const banner = document.getElementById("shorts-channel-banner");
+  if (banner) banner.style.backgroundImage = "";
 
-  const youtubeLike = document.getElementById("shorts-youtube-like");
-  youtubeLike.textContent = "👍 Like on YouTube";
-  youtubeLike.disabled = false;
-  youtubeLike.classList.remove("active");
+  const expectedVideoId = item.video_id;
+  fetchCompleteVideoMetadata(item).then(enriched => {
+    const current = currentShortItem();
+    if (!current || current.video_id !== expectedVideoId) return;
+    item = {...current, ...enriched, video_id:expectedVideoId, metadata_rich:true};
+    discoverResults.shorts[shortsIndex] = item;
+    renderShortsVideoDetails(item);
+    renderShortsActions(item);
+  });
+  loadShortsChannelDetails(item.channel_id, expectedVideoId);
 
   await ensureYouTubeIframeApi();
 
@@ -9568,33 +9787,31 @@ function currentShortItem() {
   const items = discoverResults.shorts || [];
   return items.length ? items[shortsIndex] : null;
 }
-function toggleCurrentShortVideoFavourite() {
+async function toggleCurrentShortVideoFavourite() {
   const item = currentShortItem();
   if (!item) return;
-  toggleVideoFavourite(document.getElementById("shorts-video-heart"), item).then(() => playRandomShort(shortsIndex));
-}
-function toggleCurrentShortChannelFavourite() {
-  const item = currentShortItem();
-  if (!item) return;
-  toggleChannelFavourite(document.getElementById("shorts-channel-heart"), item.channel_id, item.channel_title, `https://www.youtube.com/channel/${item.channel_id}`, item.channel_avatar_url || "").then(() => playRandomShort(shortsIndex));
+  const favourite = await toggleVideoFavourite(document.getElementById("shorts-video-heart"), item);
+  if (typeof favourite === "boolean") item.is_favourite_video = favourite;
+  renderShortsActions(item);
 }
 async function subscribeCurrentShortChannel() {
   const item = currentShortItem();
   const button = document.getElementById("shorts-youtube-subscribe");
   if (!item?.channel_id || item.is_subscribed || !button) return;
-  const original = button.textContent;
+  const originalHtml = button.innerHTML;
   button.disabled = true;
-  button.textContent = "Subscribing…";
+  button.classList.add("loading");
   try {
     await apiPost("/api/youtube/subscribe", { channel_id: item.channel_id });
     item.is_subscribed = true;
-    button.textContent = "Subscribed ✓";
-    button.classList.add("active");
-    button.disabled = true;
+    syncChannelAvatarControls(item.channel_id, {subscribed:true});
+    renderShortsActions(item);
   } catch (err) {
-    button.textContent = original;
+    button.innerHTML = originalHtml;
     button.disabled = false;
     alert(`YouTube subscribe failed: ${err.message || String(err)}`);
+  } finally {
+    button.classList.remove("loading");
   }
 }
 async function likeVideoOnYouTube(button, item) {
@@ -9667,7 +9884,12 @@ function nextRandomShort() {
 function updateShortsSoundButton() {
   const button = document.getElementById("shorts-sound-btn");
   if (!button) return;
-  button.textContent = shortsMuted ? "Sound on" : "Mute";
+  button.innerHTML = shortsMuted
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"></path><path d="M15 9a4 4 0 0 1 0 6"></path><path d="M17.5 6.5a8 8 0 0 1 0 11"></path></svg>`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"></path><path d="m16 9 5 5"></path><path d="m21 9-5 5"></path></svg>`;
+  button.title = shortsMuted ? "Turn sound on" : "Mute Short";
+  button.setAttribute("aria-label", button.title);
+  button.classList.toggle("active", !shortsMuted);
 }
 
 function toggleShortsSound() {

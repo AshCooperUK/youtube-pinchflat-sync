@@ -2,9 +2,28 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 2.14.0.11
+## Version 2.14.0.12
 
-### v2.14.0.11
+### v2.14.0.12
+
+- Redesigns Discover → Random Shorts to use the same visual language as the main media player.
+- Replaces the old large Shorts text buttons with the shared icon action dock for favourite, subscribe, like, one-time download and YouTube.
+- Adds a matching channel information card with global channel image controls, banner and public channel statistics.
+- Adds a compact video overview for views, likes, comments, date, duration and category.
+- Makes Short descriptions use the same clickable-link handling as the main media player.
+- Adds repository screenshots under `docs/screenshots` so GitHub displays app previews directly from the README after the files are pushed.
+
+## Screenshots
+
+Dashboard:
+
+![Pinchflat Sync dashboard](docs/screenshots/dashboard.png)
+
+Media player:
+
+![Pinchflat Sync media player](docs/screenshots/media-player.png)
+
+## Version 2.14.0.11
 
 - One-time Download controls now detect completed direct downloads which still exist on disk.
 - Download icons are disabled and greyed out for videos already present from One-time Download.
@@ -12,6 +31,7 @@ A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates an
 - Manual Single Download requests also refuse to duplicate a completed video while its file remains present.
 - Removing the downloaded file makes the video eligible for One-time Download again after the next status lookup/page load.
 
+## Version 2.14.0.10
 
 Settings notification correction.
 
