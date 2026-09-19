@@ -2806,6 +2806,7 @@
       border:1px solid rgba(255,255,255,.22); background:rgba(7,17,29,.88); color:#fff; display:grid; place-items:center;
       font-size:18px; font-weight:900; box-shadow:0 4px 14px rgba(0,0,0,.36); cursor:pointer; backdrop-filter:blur(4px);
     }
+    .channel-video-download-action svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
     .channel-video-download-action:hover { transform:scale(1.06); background:#2563eb; }
     .subscription-channel-description a { color:#7db6ff; text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
     .subscription-channel-description a:hover { color:#b5d6ff; }
@@ -10464,7 +10465,7 @@ function renderChannelVideos() {
       const downloadButton = document.createElement("button");
       downloadButton.type = "button";
       downloadButton.className = "channel-video-download-action";
-      downloadButton.textContent = "↓";
+      downloadButton.innerHTML = discoverActionSvg("download");
       downloadButton.title = "One-time download";
       downloadButton.setAttribute("aria-label", `One-time download ${video.title || "video"}`);
       downloadButton.onclick = event => {
