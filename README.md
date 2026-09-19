@@ -2,6 +2,18 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.14.0.4
+
+Media player visual redesign.
+
+- Rebuilds the shared media-player popup with a cleaner visual layout and a wider player area.
+- Replaces the large text-heavy action buttons with compact icon actions for video favourite, YouTube subscribe, YouTube like, one-time download and Open on YouTube.
+- Keeps channel favourite, download enable/disable, Force Scan and remove controls on the channel artwork instead of duplicating those actions as large buttons.
+- Adds the YouTube channel banner to the media-player channel card when available.
+- Increases the channel artwork size and groups channel statistics into a more compact visual card.
+- Reorganises video data into an icon-led overview, technical details and a separate About this video section.
+- Keeps channel names and the About channel card linked to the full in-app Channel details popup.
+
 ## Version 2.14.0.3
 
 Emby scan and metadata sequencing update.

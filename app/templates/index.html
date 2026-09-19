@@ -2364,6 +2364,332 @@
     .latest-popup-tag { padding:4px 7px; border-radius:999px; background:#0b1626; border:1px solid var(--line); color:var(--muted); font-size:11px; }
     .latest-popup-channel-description { max-height:160px; overflow:auto; white-space:pre-wrap; line-height:1.45; }
 
+
+    /* v2.14.0.4 media player visual refresh */
+    #latest-video-dialog {
+      width:min(1320px,97vw);
+      max-height:94vh;
+    }
+    #latest-video-dialog .modal-body {
+      max-height:calc(94vh - 78px);
+      overflow-y:auto;
+      padding:18px;
+    }
+    #latest-video-dialog .latest-media-head {
+      padding:16px 20px;
+    }
+    .latest-popup-shell {
+      grid-template-columns:minmax(560px,1.7fr) minmax(330px,.8fr);
+      gap:18px;
+    }
+    .latest-popup-player {
+      border-radius:16px;
+      box-shadow:0 12px 30px rgba(0,0,0,.18);
+    }
+    .media-player-action-dock {
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      flex-wrap:wrap;
+      padding:12px 10px 0;
+    }
+    .media-player-action {
+      width:46px;
+      height:46px;
+      padding:0;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#0b1626;
+      color:#dbe8f7;
+      display:grid;
+      place-items:center;
+      cursor:pointer;
+      text-decoration:none;
+      transition:transform .15s ease, background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .media-player-action:hover:not(:disabled) {
+      transform:translateY(-2px);
+      background:#13233a;
+      border-color:#45658f;
+    }
+    .media-player-action:disabled {
+      opacity:.5;
+      cursor:not-allowed;
+      transform:none;
+    }
+    .media-player-action.active {
+      background:#183d2a;
+      border-color:#2c7a4b;
+      color:#fff;
+    }
+    .media-player-action.video-favourite.active {
+      background:#681c2b;
+      border-color:#b91c1c;
+    }
+    .media-player-action svg {
+      width:22px;
+      height:22px;
+      fill:none;
+      stroke:currentColor;
+      stroke-width:2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+      pointer-events:none;
+    }
+    .media-player-action.youtube-action {
+      color:#ff334f;
+    }
+    .media-player-action.youtube-action svg {
+      width:25px;
+      height:25px;
+      fill:currentColor;
+      stroke:none;
+    }
+    .media-player-action.loading svg {
+      animation:mediaActionSpin .8s linear infinite;
+    }
+    @keyframes mediaActionSpin { to { transform:rotate(360deg); } }
+
+    .latest-video-detail-panel {
+      margin-top:14px;
+      padding:0;
+      border:0;
+      background:transparent;
+    }
+    .latest-video-overview-card,
+    .latest-video-about-card {
+      padding:15px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:var(--panel);
+    }
+    .latest-video-about-card { margin-top:12px; }
+    .latest-video-card-heading {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:12px;
+    }
+    .latest-video-card-heading h3 {
+      margin:0;
+      font-size:16px;
+    }
+    .latest-video-primary-grid {
+      display:grid;
+      grid-template-columns:repeat(6,minmax(0,1fr));
+      gap:8px;
+    }
+    .latest-video-primary-stat {
+      min-width:0;
+      min-height:76px;
+      padding:10px;
+      border:1px solid var(--line);
+      border-radius:11px;
+      background:#0b1626;
+      display:grid;
+      grid-template-columns:28px minmax(0,1fr);
+      align-items:center;
+      gap:8px;
+    }
+    .latest-video-primary-stat .stat-icon {
+      width:28px;
+      height:28px;
+      border-radius:9px;
+      display:grid;
+      place-items:center;
+      background:#13233a;
+      color:#8eb7e8;
+    }
+    .latest-video-primary-stat .stat-icon svg {
+      width:16px;
+      height:16px;
+      fill:none;
+      stroke:currentColor;
+      stroke-width:2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+    }
+    .latest-video-primary-stat span,
+    .latest-video-tech-item span {
+      display:block;
+      color:var(--muted);
+      font-size:10px;
+      line-height:1.2;
+    }
+    .latest-video-primary-stat strong,
+    .latest-video-tech-item strong {
+      display:block;
+      margin-top:4px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .latest-video-tech-grid {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:7px;
+      margin-top:9px;
+    }
+    .latest-video-tech-item {
+      padding:8px 9px;
+      border:1px solid var(--line);
+      border-radius:9px;
+      background:rgba(11,22,38,.7);
+      min-width:0;
+    }
+    .latest-video-about-card .latest-popup-description {
+      margin-top:0;
+      max-height:none;
+      overflow:visible;
+      background:transparent;
+      border:0;
+      padding:0;
+      line-height:1.5;
+    }
+    .latest-popup-tags { margin-top:12px; }
+
+    .latest-popup-info {
+      padding:0;
+      overflow:hidden;
+      background:var(--panel);
+    }
+    .latest-popup-channel-banner {
+      height:104px;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(58,109,170,.28), transparent 44%),
+        linear-gradient(135deg,#11233b,#08111f 65%);
+      background-size:cover;
+      background-position:center;
+      border-bottom:1px solid var(--line);
+    }
+    .latest-popup-channel-card-body {
+      padding:0 16px 16px;
+    }
+    .latest-popup-channel-summary {
+      grid-template-columns:82px minmax(0,1fr);
+      gap:14px;
+      align-items:center;
+      padding:0 0 14px;
+      margin:-34px 0 12px;
+      border-bottom:1px solid var(--line);
+      position:relative;
+    }
+    .latest-popup-channel-summary .channel-image-control-wrap {
+      background:#0b1626;
+      border-radius:50%;
+      box-shadow:0 0 0 5px #0b1626;
+    }
+    .latest-popup-channel-avatar {
+      width:82px;
+      height:82px;
+    }
+    .latest-popup-channel-name {
+      font-size:18px;
+      white-space:normal;
+      line-height:1.16;
+    }
+    .latest-popup-channel-summary .latest-popup-stats {
+      margin-top:4px;
+      display:block;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .latest-popup-channel-stat-grid {
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:7px;
+      margin:0;
+    }
+    .latest-popup-channel-stat-grid > div {
+      min-height:62px;
+      padding:9px 10px;
+      background:#0b1626;
+    }
+    .latest-popup-channel-stat-grid strong {
+      font-size:15px;
+    }
+    .latest-popup-channel-secondary-grid {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:7px;
+      margin-top:7px;
+    }
+    .latest-popup-channel-secondary-grid > div {
+      padding:8px 10px;
+      border-radius:9px;
+      border:1px solid var(--line);
+      background:rgba(11,22,38,.7);
+      min-width:0;
+    }
+    .latest-popup-channel-secondary-grid span {
+      display:block;
+      color:var(--muted);
+      font-size:10px;
+    }
+    .latest-popup-channel-secondary-grid strong {
+      display:block;
+      margin-top:3px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      font-size:13px;
+    }
+    .latest-popup-channel-about {
+      margin-top:10px;
+      padding:11px 12px;
+      border-radius:10px;
+      background:#0b1626;
+      border:1px solid var(--line);
+    }
+    .latest-popup-channel-about-label {
+      display:block;
+      color:var(--muted);
+      font-size:10px;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.05em;
+      margin-bottom:5px;
+    }
+    .latest-popup-channel-description {
+      max-height:none;
+      text-align:left;
+      overflow:visible;
+      display:-webkit-box;
+      -webkit-box-orient:vertical;
+      -webkit-line-clamp:5;
+      line-clamp:5;
+      overflow:hidden;
+      white-space:pre-wrap;
+      line-height:1.42;
+    }
+    .latest-popup-open-channel-hint {
+      display:block;
+      margin-top:6px;
+      color:#8eb7e8;
+      font-size:10px;
+    }
+
+    @media(max-width:1180px) {
+      .latest-popup-shell { grid-template-columns:minmax(500px,1.5fr) minmax(300px,.9fr); }
+      .latest-video-primary-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .latest-video-tech-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    }
+    @media(max-width:900px) {
+      .latest-popup-shell { grid-template-columns:1fr; }
+      .latest-popup-info { order:-1; }
+      .latest-popup-channel-banner { height:92px; }
+    }
+    @media(max-width:620px) {
+      #latest-video-dialog .modal-body { padding:12px; }
+      .latest-video-primary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .latest-video-tech-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .media-player-action { width:43px; height:43px; }
+      .latest-popup-channel-summary { grid-template-columns:72px minmax(0,1fr); }
+      .latest-popup-channel-avatar { width:72px; height:72px; }
+    }
+
     @media(max-width:1100px) {
       .channel-video-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
       .channel-featured-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
@@ -3801,80 +4127,105 @@
           ></iframe>
         </div>
 
+        <div class="media-player-action-dock" aria-label="Video actions">
+          <button id="latest-popup-video-heart" class="media-player-action video-favourite" type="button" onclick="toggleLatestPopupVideoFavourite()" title="Add video to favourites" aria-label="Add video to favourites" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z"></path></svg>
+          </button>
+          <button id="latest-popup-youtube-subscribe" class="media-player-action" type="button" onclick="subscribeLatestPopupChannel()" title="Subscribe to channel on YouTube" aria-label="Subscribe to channel on YouTube" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 19a6 6 0 0 0-12 0"></path><circle cx="9" cy="7" r="4"></circle><path d="M19 8v6"></path><path d="M16 11h6"></path></svg>
+          </button>
+          <button id="latest-popup-youtube-like" class="media-player-action" type="button" onclick="likeLatestPopupOnYouTube()" title="Like video on YouTube" aria-label="Like video on YouTube" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v10H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h3Z"></path><path d="M7 20h9.5a2 2 0 0 0 1.9-1.4l2.1-6A2 2 0 0 0 18.6 10H14l.7-3.5A2.9 2.9 0 0 0 11.9 3L7 10Z"></path></svg>
+          </button>
+          <button id="latest-popup-download" class="media-player-action" type="button" onclick="downloadLatestPopupVideo()" title="Prepare one-time download" aria-label="Prepare one-time download">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"></path><path d="m7.5 11 4.5 4.5 4.5-4.5"></path><path d="M5 20h14"></path></svg>
+          </button>
+          <a id="latest-popup-youtube-link" class="media-player-action youtube-action" href="https://www.youtube.com" target="_blank" rel="noopener" title="Open video on YouTube" aria-label="Open video on YouTube">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23 12s0-3.5-.45-5.2a3 3 0 0 0-2.1-2.1C18.7 4.2 12 4.2 12 4.2s-6.7 0-8.45.5a3 3 0 0 0-2.1 2.1C1 8.5 1 12 1 12s0 3.5.45 5.2a3 3 0 0 0 2.1 2.1c1.75.5 8.45.5 8.45.5s6.7 0 8.45-.5a3 3 0 0 0 2.1-2.1C23 15.5 23 12 23 12Z"></path><path d="m10 15.5 6-3.5-6-3.5v7Z" style="fill:#fff"></path></svg>
+          </a>
+        </div>
+
         <div class="latest-video-detail-panel">
-          <div class="latest-video-stat-grid">
-            <div class="latest-video-stat"><span>Views</span><strong id="latest-popup-views">—</strong></div>
-            <div class="latest-video-stat"><span>Likes</span><strong id="latest-popup-likes">—</strong></div>
-            <div class="latest-video-stat"><span>Comments</span><strong id="latest-popup-comments">—</strong></div>
-            <div class="latest-video-stat"><span>Published</span><strong id="latest-popup-published">—</strong></div>
-            <div class="latest-video-stat"><span>Duration</span><strong id="latest-popup-duration">—</strong></div>
-            <div class="latest-video-stat"><span>Category</span><strong id="latest-popup-category">—</strong></div>
-            <div class="latest-video-stat"><span>Quality</span><strong id="latest-popup-quality">—</strong></div>
-            <div class="latest-video-stat"><span>Captions</span><strong id="latest-popup-captions">—</strong></div>
-            <div class="latest-video-stat"><span>Language</span><strong id="latest-popup-language">—</strong></div>
-            <div class="latest-video-stat"><span>Audio language</span><strong id="latest-popup-audio-language">—</strong></div>
-            <div class="latest-video-stat"><span>Privacy</span><strong id="latest-popup-privacy">—</strong></div>
-            <div class="latest-video-stat"><span>Licensed content</span><strong id="latest-popup-licensed">—</strong></div>
-            <div class="latest-video-stat"><span>Embeddable</span><strong id="latest-popup-embeddable">—</strong></div>
-            <div class="latest-video-stat"><span>Video format</span><strong id="latest-popup-format">—</strong></div>
+          <div class="latest-video-overview-card">
+            <div class="latest-video-card-heading"><h3>Video overview</h3></div>
+            <div class="latest-video-primary-grid">
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg></div><div><span>Views</span><strong id="latest-popup-views">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v10H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h3Z"></path><path d="M7 20h9.5a2 2 0 0 0 1.9-1.4l2.1-6A2 2 0 0 0 18.6 10H14l.7-3.5A2.9 2.9 0 0 0 11.9 3L7 10Z"></path></svg></div><div><span>Likes</span><strong id="latest-popup-likes">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3v-7a4 4 0 0 1-1-2.7V7a4 4 0 0 1 4-4h11a4 4 0 0 1 4 4v8Z"></path></svg></div><div><span>Comments</span><strong id="latest-popup-comments">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M16 3v4"></path><path d="M8 3v4"></path><path d="M3 10h18"></path></svg></div><div><span>Published</span><strong id="latest-popup-published">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></div><div><span>Duration</span><strong id="latest-popup-duration">—</strong></div></div>
+              <div class="latest-video-primary-stat"><div class="stat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13 11 22l-9-9V4h9l9 9Z"></path><circle cx="7" cy="9" r="1.5"></circle></svg></div><div><span>Category</span><strong id="latest-popup-category">—</strong></div></div>
+            </div>
+            <div class="latest-video-tech-grid">
+              <div class="latest-video-tech-item"><span>Quality</span><strong id="latest-popup-quality">—</strong></div>
+              <div class="latest-video-tech-item"><span>Captions</span><strong id="latest-popup-captions">—</strong></div>
+              <div class="latest-video-tech-item"><span>Language</span><strong id="latest-popup-language">—</strong></div>
+              <div class="latest-video-tech-item"><span>Audio language</span><strong id="latest-popup-audio-language">—</strong></div>
+              <div class="latest-video-tech-item"><span>Privacy</span><strong id="latest-popup-privacy">—</strong></div>
+              <div class="latest-video-tech-item"><span>Licensed</span><strong id="latest-popup-licensed">—</strong></div>
+              <div class="latest-video-tech-item"><span>Embeddable</span><strong id="latest-popup-embeddable">—</strong></div>
+              <div class="latest-video-tech-item"><span>Format</span><strong id="latest-popup-format">—</strong></div>
+            </div>
           </div>
 
-          <div class="latest-popup-section-label">Description</div>
-          <div id="latest-popup-description" class="latest-popup-description"></div>
-          <div id="latest-popup-tags" class="latest-popup-tags"></div>
+          <div class="latest-video-about-card">
+            <div class="latest-video-card-heading"><h3>About this video</h3></div>
+            <div id="latest-popup-description" class="latest-popup-description"></div>
+            <div id="latest-popup-tags" class="latest-popup-tags"></div>
+          </div>
         </div>
       </div>
 
-      <div class="latest-popup-info">
-        <div class="latest-popup-channel-summary">
-          <div id="latest-popup-channel-avatar-wrap" class="channel-image-control-wrap compact" style="--channel-avatar-size:52px">
-            <button id="latest-popup-channel-summary-button" class="channel-image-open" type="button" aria-label="Open channel details">
-              <img
-                id="latest-popup-channel-avatar"
-                class="latest-popup-channel-avatar"
-                src="{{ url_for('static', filename='channel-placeholder.svg') }}"
-                alt="YouTube channel"
-              >
+      <aside class="latest-popup-info">
+        <div id="latest-popup-channel-banner" class="latest-popup-channel-banner" aria-hidden="true"></div>
+        <div class="latest-popup-channel-card-body">
+          <div class="latest-popup-channel-summary">
+            <div id="latest-popup-channel-avatar-wrap" class="channel-image-control-wrap" style="--channel-avatar-size:82px">
+              <button id="latest-popup-channel-summary-button" class="channel-image-open" type="button" aria-label="Open channel details">
+                <img
+                  id="latest-popup-channel-avatar"
+                  class="latest-popup-channel-avatar"
+                  src="{{ url_for('static', filename='channel-placeholder.svg') }}"
+                  alt="YouTube channel"
+                >
+              </button>
+              <button id="latest-popup-channel-avatar-heart" class="channel-image-control channel-control-favourite" type="button" data-channel-favourite-control="1" title="Toggle favourite">♡</button>
+              {% if is_admin %}
+              <button id="latest-popup-channel-avatar-enabled" class="channel-image-control channel-control-enabled" type="button" data-channel-enabled-control="1" title="Toggle downloads">✓</button>
+              <button id="latest-popup-channel-avatar-scan" class="channel-image-control channel-control-scan" type="button" data-channel-scan-control="1" title="Force Pinchflat scan">↻</button>
+              <button id="latest-popup-channel-avatar-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
+              {% endif %}
+            </div>
+            <button id="latest-popup-channel-text-button" class="channel-summary-button" type="button" style="min-width:0;text-align:left">
+              <strong id="latest-popup-channel" class="latest-popup-channel-name">YouTube channel</strong>
+              <span id="latest-popup-channel-handle" class="latest-popup-stats"></span>
+              <span id="latest-popup-stats" class="latest-popup-stats"></span>
             </button>
-            <button id="latest-popup-channel-avatar-heart" class="channel-image-control channel-control-favourite" type="button" data-channel-favourite-control="1" title="Toggle favourite">♡</button>
-            {% if is_admin %}
-            <button id="latest-popup-channel-avatar-enabled" class="channel-image-control channel-control-enabled" type="button" data-channel-enabled-control="1" title="Toggle downloads">✓</button>
-            <button id="latest-popup-channel-avatar-scan" class="channel-image-control channel-control-scan" type="button" data-channel-scan-control="1" title="Force Pinchflat scan">↻</button>
-            <button id="latest-popup-channel-avatar-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
-            {% endif %}
           </div>
-          <button id="latest-popup-channel-text-button" class="channel-summary-button" type="button" style="min-width:0;text-align:left">
-            <strong id="latest-popup-channel" class="latest-popup-channel-name">YouTube channel</strong>
-            <span id="latest-popup-channel-handle" class="latest-popup-stats"></span>
-            <span id="latest-popup-stats" class="latest-popup-stats"></span>
+
+          <div id="latest-popup-channel-stats" class="latest-popup-channel-stat-grid">
+            <div><span>Subscribers</span><strong id="latest-popup-channel-subscribers">—</strong></div>
+            <div><span>Total views</span><strong id="latest-popup-channel-views">—</strong></div>
+            <div><span>Videos</span><strong id="latest-popup-channel-videos">—</strong></div>
+            <div><span>Country</span><strong id="latest-popup-channel-country">—</strong></div>
+            <div><span>Category</span><strong id="latest-popup-channel-category">—</strong></div>
+            <div><span>Age</span><strong id="latest-popup-channel-age">—</strong></div>
+          </div>
+
+          <div class="latest-popup-channel-secondary-grid">
+            <div><span>Created</span><strong id="latest-popup-channel-created">—</strong></div>
+            <div><span>Recent avg. views</span><strong id="latest-popup-channel-recent-views">—</strong></div>
+            <div><span>Views / subscriber</span><strong id="latest-popup-channel-vps">—</strong></div>
+            <div><span>Language</span><strong id="latest-popup-channel-language">—</strong></div>
+          </div>
+
+          <button id="latest-popup-channel-about-button" class="latest-popup-channel-about channel-popup-link" type="button" title="Open full channel details">
+            <span class="latest-popup-channel-about-label">About channel</span>
+            <span id="latest-popup-channel-description" class="latest-popup-channel-description muted small"></span>
+            <span class="latest-popup-open-channel-hint">Click for full channel details</span>
           </button>
         </div>
-
-        <div id="latest-popup-channel-stats" class="latest-popup-channel-stat-grid">
-          <div><span>Subscribers</span><strong id="latest-popup-channel-subscribers">—</strong></div>
-          <div><span>Total views</span><strong id="latest-popup-channel-views">—</strong></div>
-          <div><span>Videos</span><strong id="latest-popup-channel-videos">—</strong></div>
-          <div><span>Country</span><strong id="latest-popup-channel-country">—</strong></div>
-          <div><span>Category</span><strong id="latest-popup-channel-category">—</strong></div>
-          <div><span>Age</span><strong id="latest-popup-channel-age">—</strong></div>
-          <div><span>Created</span><strong id="latest-popup-channel-created">—</strong></div>
-          <div><span>Recent avg. views</span><strong id="latest-popup-channel-recent-views">—</strong></div>
-          <div><span>Views / subscriber</span><strong id="latest-popup-channel-vps">—</strong></div>
-          <div><span>Language</span><strong id="latest-popup-channel-language">—</strong></div>
-        </div>
-
-        <div class="latest-popup-action-grid">
-          <button id="latest-popup-video-heart" class="btn secondary" type="button" onclick="toggleLatestPopupVideoFavourite()">♡ Favourite video</button>
-          <button id="latest-popup-channel-heart" class="btn secondary" type="button" onclick="toggleLatestPopupChannelFavourite()">♡ Favourite channel</button>
-          <button id="latest-popup-youtube-subscribe" class="btn secondary" type="button" onclick="subscribeLatestPopupChannel()">＋ Subscribe</button>
-          <button id="latest-popup-youtube-like" class="btn secondary" type="button" onclick="likeLatestPopupOnYouTube()">👍 Like on YouTube</button>
-          <button id="latest-popup-download" class="btn secondary" type="button" onclick="downloadLatestPopupVideo()">↓ One-time download</button>
-          <a id="latest-popup-youtube-link" class="btn ghost" href="https://www.youtube.com" target="_blank" rel="noopener">Open on YouTube</a>
-        </div>
-
-        <div class="latest-popup-section-label">Channel description</div>
-        <div id="latest-popup-channel-description" class="latest-popup-channel-description muted small"></div>
-      </div>
+      </aside>
     </div>
   </div>
 </dialog>
@@ -6779,6 +7130,14 @@ function discoverActionSvg(kind, active=false) {
       ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>`
       : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 19a6 6 0 0 0-12 0"></path><circle cx="9" cy="7" r="4"></circle><path d="M19 8v6"></path><path d="M16 11h6"></path></svg>`;
   }
+  if (kind === "like") {
+    return active
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true" style="fill:currentColor"><path d="M7 10v10H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h3Z"></path><path d="M7 20h9.5a2 2 0 0 0 1.9-1.4l2.1-6A2 2 0 0 0 18.6 10H14l.7-3.5A2.9 2.9 0 0 0 11.9 3L7 10Z"></path></svg>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v10H4a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h3Z"></path><path d="M7 20h9.5a2 2 0 0 0 1.9-1.4l2.1-6A2 2 0 0 0 18.6 10H14l.7-3.5A2.9 2.9 0 0 0 11.9 3L7 10Z"></path></svg>`;
+  }
+  if (kind === "youtube") {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" style="fill:currentColor;stroke:none"><path d="M23 12s0-3.5-.45-5.2a3 3 0 0 0-2.1-2.1C18.7 4.2 12 4.2 12 4.2s-6.7 0-8.45.5a3 3 0 0 0-2.1 2.1C1 8.5 1 12 1 12s0 3.5.45 5.2a3 3 0 0 0 2.1 2.1c1.75.5 8.45.5 8.45.5s6.7 0 8.45-.5a3 3 0 0 0 2.1-2.1C23 15.5 23 12 23 12Z"></path><path d="m10 15.5 6-3.5-6-3.5v7Z" style="fill:#fff"></path></svg>`;
+  }
   if (kind === "list") {
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>`;
   }
@@ -6896,8 +7255,13 @@ async function toggleVideoFavourite(button, item) {
     const data = await apiPost("/api/favourites/video/toggle", item);
     if (button) {
       button.classList.toggle("active", !!data.favourite);
-      if (button.classList.contains("discover-action-icon")) {
+      if (button.classList.contains("discover-action-icon") || button.classList.contains("media-player-action")) {
         button.innerHTML = discoverActionSvg("favourite", !!data.favourite);
+        if (button.classList.contains("media-player-action")) {
+          button.setAttribute("aria-pressed", data.favourite ? "true" : "false");
+          button.title = data.favourite ? "Remove video from favourites" : "Add video to favourites";
+          button.setAttribute("aria-label", button.title);
+        }
       } else {
         button.textContent = data.favourite ? "♥ Video" : "♡ Video";
       }
@@ -6992,42 +7356,50 @@ function updateLatestPopupButtons() {
   if (!latestPopupVideo) return;
 
   const videoHeart = document.getElementById("latest-popup-video-heart");
-  const channelHeart = document.getElementById("latest-popup-channel-heart");
   const youtubeSubscribe = document.getElementById("latest-popup-youtube-subscribe");
   const youtubeLike = document.getElementById("latest-popup-youtube-like");
+  const download = document.getElementById("latest-popup-download");
+  const youtubeLink = document.getElementById("latest-popup-youtube-link");
 
   if (videoHeart) {
-    videoHeart.textContent = latestPopupVideo.is_favourite_video
-      ? "♥ Favourite video"
-      : "♡ Favourite video";
-    videoHeart.classList.toggle(
-      "active",
-      !!latestPopupVideo.is_favourite_video
-    );
-  }
-
-  if (channelHeart) {
-    channelHeart.textContent = latestPopupVideo.is_favourite_channel
-      ? "♥ Favourite channel"
-      : "♡ Favourite channel";
-    channelHeart.classList.toggle(
-      "active",
-      !!latestPopupVideo.is_favourite_channel
-    );
+    const active = !!latestPopupVideo.is_favourite_video;
+    videoHeart.innerHTML = discoverActionSvg("favourite", active);
+    videoHeart.classList.toggle("active", active);
+    videoHeart.setAttribute("aria-pressed", active ? "true" : "false");
+    videoHeart.title = active ? "Remove video from favourites" : "Add video to favourites";
+    videoHeart.setAttribute("aria-label", videoHeart.title);
   }
 
   if (youtubeSubscribe) {
-    youtubeSubscribe.textContent = latestPopupVideo.is_subscribed
-      ? "Subscribed ✓"
-      : "＋ Subscribe";
-    youtubeSubscribe.disabled = !!latestPopupVideo.is_subscribed;
-    youtubeSubscribe.classList.toggle("active", !!latestPopupVideo.is_subscribed);
+    const subscribed = !!latestPopupVideo.is_subscribed;
+    youtubeSubscribe.innerHTML = discoverActionSvg("subscribe", subscribed);
+    youtubeSubscribe.classList.toggle("active", subscribed);
+    youtubeSubscribe.disabled = subscribed || !latestPopupVideo.channel_id;
+    youtubeSubscribe.setAttribute("aria-pressed", subscribed ? "true" : "false");
+    youtubeSubscribe.title = subscribed ? "Subscribed on YouTube" : "Subscribe to this channel on YouTube";
+    youtubeSubscribe.setAttribute("aria-label", youtubeSubscribe.title);
   }
 
   if (youtubeLike) {
-    youtubeLike.textContent = "👍 Like on YouTube";
-    youtubeLike.disabled = false;
-    youtubeLike.classList.remove("active");
+    const liked = !!latestPopupVideo.is_liked_on_youtube;
+    youtubeLike.innerHTML = discoverActionSvg("like", liked);
+    youtubeLike.classList.toggle("active", liked);
+    youtubeLike.disabled = liked || !latestPopupVideo.video_id;
+    youtubeLike.setAttribute("aria-pressed", liked ? "true" : "false");
+    youtubeLike.title = liked ? "Liked on YouTube" : "Like this video on YouTube";
+    youtubeLike.setAttribute("aria-label", youtubeLike.title);
+  }
+
+  if (download) {
+    download.innerHTML = discoverActionSvg("download");
+    download.title = "Prepare one-time download";
+    download.setAttribute("aria-label", download.title);
+  }
+
+  if (youtubeLink) {
+    youtubeLink.innerHTML = discoverActionSvg("youtube");
+    youtubeLink.title = "Open video on YouTube";
+    youtubeLink.setAttribute("aria-label", youtubeLink.title);
   }
 }
 
@@ -7043,6 +7415,8 @@ function renderLatestVideoDetails(item) {
   const youtubeLink = document.getElementById("latest-popup-youtube-link");
   const channelSummaryButton = document.getElementById("latest-popup-channel-summary-button");
   const channelTextButton = document.getElementById("latest-popup-channel-text-button");
+  const channelAboutButton = document.getElementById("latest-popup-channel-about-button");
+  const channelBanner = document.getElementById("latest-popup-channel-banner");
 
   headerVideo.textContent = item.title || "YouTube video";
   headerVideo.title = item.title || "";
@@ -7063,6 +7437,13 @@ function renderLatestVideoDetails(item) {
   if (channelTextButton) {
     channelTextButton.disabled = !item.channel_id;
     channelTextButton.onclick = item.channel_id ? () => openChannelDetails(item.channel_id) : null;
+  }
+  if (channelAboutButton) {
+    channelAboutButton.disabled = !item.channel_id;
+    channelAboutButton.onclick = item.channel_id ? () => openChannelDetails(item.channel_id) : null;
+  }
+  if (channelBanner) {
+    channelBanner.style.backgroundImage = "";
   }
 
   const playerHeart = document.getElementById("latest-popup-channel-avatar-heart");
@@ -7162,6 +7543,14 @@ async function loadLatestPopupChannelDetails(channelId, expectedVideoId) {
 
     const avatar = document.getElementById("latest-popup-channel-avatar");
     if (avatar && yt.thumbnail_url) avatar.src = yt.thumbnail_url;
+
+    const banner = document.getElementById("latest-popup-channel-banner");
+    if (banner) {
+      const bannerUrl = String(yt.banner_url || "").trim();
+      banner.style.backgroundImage = bannerUrl
+        ? `linear-gradient(to bottom, rgba(8,17,31,.06), rgba(8,17,31,.22)), url(${JSON.stringify(bannerUrl)})`
+        : "";
+    }
 
     const fields = {
       "latest-popup-channel-subscribers": yt.hidden_subscriber_count ? "Hidden" : formatCompactNumber(yt.subscriber_count),
@@ -7282,32 +7671,26 @@ async function toggleLatestPopupVideoFavourite() {
   );
 }
 
-async function toggleLatestPopupChannelFavourite() {
-  if (!latestPopupVideo) return;
-
-  await toggleChannelFavourite(
-    document.getElementById("latest-popup-channel-heart"),
-    latestPopupVideo.channel_id || "",
-    latestPopupVideo.channel_title || "YouTube channel",
-    latestPopupVideo.channel_url || "",
-    latestPopupVideo.channel_thumbnail_url || ""
-  );
-
-  updateLatestPopupButtons();
-}
 
 async function subscribeLatestPopupChannel() {
   if (!latestPopupVideo?.channel_id || latestPopupVideo.is_subscribed) return;
   const button = document.getElementById("latest-popup-youtube-subscribe");
-  const original = button?.textContent || "＋ Subscribe";
-  if (button) { button.disabled = true; button.textContent = "Subscribing…"; }
+  if (button) {
+    button.disabled = true;
+    button.classList.add("loading");
+    button.title = "Subscribing on YouTube…";
+  }
   try {
     await apiPost("/api/youtube/subscribe", { channel_id: latestPopupVideo.channel_id });
     latestPopupVideo.is_subscribed = true;
-    updateLatestPopupButtons();
+    syncDiscoverSubscriptionState(latestPopupVideo.channel_id, true);
+    syncChannelAvatarControls(latestPopupVideo.channel_id, {subscribed:true});
+    showAjaxToast(`Subscribed to ${latestPopupVideo.channel_title || "YouTube channel"}.`, "success");
   } catch (err) {
-    if (button) { button.disabled = false; button.textContent = original; }
     alert(`YouTube subscribe failed: ${err.message || String(err)}`);
+  } finally {
+    if (button) button.classList.remove("loading");
+    updateLatestPopupButtons();
   }
 }
 
@@ -8862,9 +9245,18 @@ async function subscribeCurrentShortChannel() {
 async function likeVideoOnYouTube(button, item) {
   if (!item?.video_id || !button) return;
 
-  const original = button.textContent;
+  const iconMode = button.classList.contains("media-player-action");
+  const originalText = button.textContent;
+  const originalHtml = button.innerHTML;
+  const originalTitle = button.title;
   button.disabled = true;
-  button.textContent = "Liking…";
+
+  if (iconMode) {
+    button.classList.add("loading");
+    button.title = "Liking on YouTube…";
+  } else {
+    button.textContent = "Liking…";
+  }
 
   try {
     await apiPost("/api/youtube/video/like", {
@@ -8874,12 +9266,31 @@ async function likeVideoOnYouTube(button, item) {
       channel_title: item.channel_title || "YouTube"
     });
 
-    button.textContent = "✓ Liked on YouTube";
-    button.classList.add("active");
-    button.title = "This video is liked on your YouTube account";
-    button.disabled = true;
+    item.is_liked_on_youtube = true;
+    if (latestPopupVideo?.video_id === item.video_id) latestPopupVideo.is_liked_on_youtube = true;
+
+    if (iconMode) {
+      button.innerHTML = discoverActionSvg("like", true);
+      button.classList.add("active");
+      button.classList.remove("loading");
+      button.title = "Liked on YouTube";
+      button.setAttribute("aria-label", button.title);
+      button.setAttribute("aria-pressed", "true");
+      button.disabled = true;
+    } else {
+      button.textContent = "✓ Liked on YouTube";
+      button.classList.add("active");
+      button.title = "This video is liked on your YouTube account";
+      button.disabled = true;
+    }
   } catch (err) {
-    button.textContent = original;
+    if (iconMode) {
+      button.innerHTML = originalHtml;
+      button.classList.remove("loading");
+      button.title = originalTitle;
+    } else {
+      button.textContent = originalText;
+    }
     button.disabled = false;
     alert(`YouTube Like failed: ${err.message || String(err)}`);
   }
