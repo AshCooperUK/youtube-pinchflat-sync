@@ -2,6 +2,15 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.14.0.3
+
+Emby scan and metadata sequencing update.
+
+- Every Emby channel or YouTube-library scan now queues a second metadata pass after a short delay so newly indexed media and NFO files are available first.
+- The second pass uses Emby's FullRefresh / Replace all metadata mode while keeping existing images and video preview thumbnails.
+- Single Download now scans the detected Emby YouTube library after a successful download and automatically follows with the delayed metadata refresh.
+- Emby refreshes remain scoped to the detected YouTube library or matching channel folder. Other Emby libraries are not scanned.
+
 ## Version 2.14.0.2
 
 - Adds a consistent channel removal icon to channel artwork, with choices matching the Actions menu for YouTube, Pinchflat Sync, Pinchflat and media cleanup.

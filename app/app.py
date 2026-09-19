@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.14.0.2"
+VERSION = "2.14.0.3"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -1138,6 +1138,7 @@ def _emby_find_channel_item(library, channel_id="", channel_title=""):
 
 
 def _emby_refresh_item(item_id, recursive=True):
+    """Run the normal Emby item/library refresh used to discover new files."""
     item_id = str(item_id or "").strip()
     if not item_id:
         raise RuntimeError("Emby item ID is missing.")
@@ -1149,6 +1150,79 @@ def _emby_refresh_item(item_id, recursive=True):
         json={"ReplaceThumbnailImages": False},
         timeout=45,
     )
+
+
+def _emby_refresh_metadata_item(item_id, recursive=True):
+    """Run Emby's 'Replace all metadata' refresh without replacing images."""
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        raise RuntimeError("Emby item ID is missing.")
+
+    return emby_api_request(
+        "POST",
+        f"Items/{quote(item_id, safe='')}/Refresh",
+        params={
+            "Recursive": "true" if recursive else "false",
+            "MetadataRefreshMode": "FullRefresh",
+            "ImageRefreshMode": "Default",
+            "ReplaceAllMetadata": "true",
+            "ReplaceAllImages": "false",
+        },
+        json={"ReplaceThumbnailImages": False},
+        timeout=45,
+    )
+
+
+def _emby_schedule_metadata_refresh(
+    item_id,
+    label="",
+    *,
+    recursive=True,
+    channel_id="",
+    delay_seconds=15,
+):
+    """
+    Queue a second Emby metadata pass after the filesystem scan has had time
+    to discover new files. The delay keeps the FullRefresh request from racing
+    the initial scan, which otherwise can run before newly downloaded NFO and
+    media files have appeared in Emby's item tree.
+    """
+    item_id = str(item_id or "").strip()
+    if not item_id:
+        return False
+
+    label = str(label or "Emby item").strip() or "Emby item"
+    try:
+        delay_seconds = max(1, int(delay_seconds))
+    except (TypeError, ValueError):
+        delay_seconds = 15
+
+    def worker():
+        time.sleep(delay_seconds)
+        try:
+            _emby_refresh_metadata_item(item_id, recursive=recursive)
+            log_activity(
+                "emby",
+                "Emby metadata refresh",
+                f"Started Replace all metadata for {label} after the library scan.",
+                "success",
+                channel_id or None,
+            )
+        except Exception as exc:
+            log_activity(
+                "emby",
+                "Emby metadata refresh failed",
+                f"{label}: {exc}",
+                "error",
+                channel_id or None,
+            )
+
+    threading.Thread(
+        target=worker,
+        name="emby-metadata-refresh",
+        daemon=True,
+    ).start()
+    return True
 
 
 def emby_refresh_channel(channel_id="", channel_title="", library=None):
@@ -1167,10 +1241,16 @@ def emby_refresh_channel(channel_id="", channel_title="", library=None):
             return False
 
         _emby_refresh_item(item_id, recursive=True)
+        _emby_schedule_metadata_refresh(
+            item_id,
+            label=f"{label} in {library['name']}",
+            recursive=True,
+            channel_id=channel_id,
+        )
         log_activity(
             "emby",
             "Emby channel refresh",
-            f"Started a recursive Emby refresh for {label} inside {library['name']}.",
+            f"Started a recursive Emby scan for {label} inside {library['name']}; a Replace all metadata pass will follow.",
             "success",
             channel_id or None,
         )
@@ -1197,12 +1277,18 @@ def emby_refresh_library(channel_id="", channel_title="", library=None):
 
     library = library or emby_detect_youtube_library()
     _emby_refresh_item(library["item_id"], recursive=True)
+    _emby_schedule_metadata_refresh(
+        library["item_id"],
+        label=f"{library['name']} library",
+        recursive=True,
+        channel_id=channel_id,
+    )
 
     detail = f" Requested for {label}." if label else ""
     log_activity(
         "emby",
         "Emby YouTube library refresh",
-        f"Emby library {library['name']} scan started.{detail}",
+        f"Emby library {library['name']} scan started; a Replace all metadata pass will follow.{detail}",
         "success",
         channel_id or None,
     )
@@ -5214,6 +5300,27 @@ def run_download_job(job_id):
             )
 
         storage_snapshot(force=True)
+
+        # A one-off Single Download writes its media/NFO directly into the
+        # shared YouTube library rather than passing through Pinchflat. Ask
+        # Emby to discover the new file, then perform the delayed FullRefresh
+        # metadata pass used by the rest of the Emby integration.
+        if job.get("source_type") == "single" and emby_configured():
+            try:
+                emby_refresh_library()
+                log_activity(
+                    "emby",
+                    "Single Download Emby refresh",
+                    f"Queued the YouTube library scan and metadata refresh after {info.get('title') or job['youtube_url']} completed.",
+                    "success",
+                )
+            except Exception as exc:
+                log_activity(
+                    "emby",
+                    "Single Download Emby refresh failed",
+                    f"{info.get('title') or job['youtube_url']}: {exc}",
+                    "warning",
+                )
 
     except Exception as exc:
         update_download_job(
@@ -15446,10 +15553,10 @@ def emby_refresh_api():
             channel_title=channel_title,
         )
         if result.get("scope") == "channel":
-            message = f"Emby refresh started for {result.get('channel') or 'the channel'}."
+            message = f"Emby scan started for {result.get('channel') or 'the channel'}. Metadata refresh will follow."
         else:
             library = result.get("library") or {}
-            message = f"Emby scan started for {library.get('name') or 'the YouTube library'}."
+            message = f"Emby scan started for {library.get('name') or 'the YouTube library'}. Metadata refresh will follow."
         return jsonify(
             {
                 "ok": True,

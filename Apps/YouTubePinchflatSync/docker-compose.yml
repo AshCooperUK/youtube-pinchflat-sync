@@ -157,10 +157,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.14.0.2"
+  version: "2.14.0.3"
   update_at: "2026-09-19"
   release_notes:
-    en_US: v2.14.0.2 adds consistent channel removal controls, redesigns Favourites and adds Discover disliked videos.
+    en_US: v2.14.0.3 adds delayed Emby metadata refreshes after scans and refreshes Emby after Single Downloads.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
