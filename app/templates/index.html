@@ -3423,6 +3423,7 @@
       <div class="muted small">Pinchflat tasks</div>
       <div class="metric" id="pinchflat-tasks-active">0</div>
       <div class="muted small" id="pinchflat-tasks-status">No active non-download tasks</div>
+      <div class="warn small hidden" id="pinchflat-tasks-membership-errors"></div>
       <div class="muted small" id="pinchflat-tasks-current"></div>
     </div>
     {% endif %}
@@ -3951,13 +3952,13 @@
         <div class="debug-function-list">
           <div class="debug-function-row" data-debug-search="pinchflat sync youtube subscriptions sources"><div class="debug-function-name">Pinchflat Sync</div><div class="debug-service-badge">YouTube + Pinchflat</div><div class="debug-function-description">Synchronises the app's subscription state with Pinchflat sources and applies the configured source rules.</div></div>
           <div class="debug-function-row" data-debug-search="refresh youtube subscriptions google data api"><div class="debug-function-name">Refresh YouTube</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Reloads the connected account's current YouTube subscriptions and updates local subscription records.</div></div>
-          <div class="debug-function-row" data-debug-search="single download yt-dlp one-time"><div class="debug-function-name">Single Download</div><div class="debug-service-badge">yt-dlp / Local app</div><div class="debug-function-description">Downloads one supplied YouTube URL using the selected one-time download options. After completion, the detected Emby YouTube library is scanned and a delayed metadata refresh is queued.</div></div>
+          <div class="debug-function-row" data-debug-search="single download yt-dlp one-time"><div class="debug-function-name">Single Download</div><div class="debug-service-badge">yt-dlp / Local app</div><div class="debug-function-description">Downloads one supplied YouTube URL using the selected One-time Download options. The Emby / Smart TV profile prefers H.264 + AAC in MP4 and converts incompatible streams before the detected Emby One-time Download library is scanned.</div></div>
           <div class="debug-function-row" data-debug-search="google status oauth cloud console"><div class="debug-function-name">Google status tile</div><div class="debug-service-badge">Google OAuth</div><div class="debug-function-description">Shows whether Google is connected and whether the token has read/write access. The logo opens Google Cloud Console.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat online power start stop docker"><div class="debug-function-name">Pinchflat power</div><div class="debug-service-badge">Docker</div><div class="debug-function-description">Starts or stops the Pinchflat container through the mounted Docker socket.</div></div>
           <div class="debug-function-row" data-debug-search="latest download tile player"><div class="debug-function-name">Latest download tile</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Shows the newest completed Pinchflat download. Clicking the video opens the in-app media player.</div></div>
           <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Opens the complete list of waiting Pinchflat jobs and refreshes the queue while the popup remains open.</div></div>
           <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Immediately reloads current Pinchflat workers, waiting count and recent completed download data.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background"><div class="debug-function-name">Pinchflat tasks tile</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Shows active and waiting Pinchflat background work other than media downloads, such as source indexing or metadata jobs. Download jobs stay in the dedicated Pinchflat downloads section.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background membership members only join this channel"><div class="debug-function-name">Pinchflat tasks tile</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Shows active and waiting Pinchflat background work other than media downloads, such as source indexing or metadata jobs. It also counts non-completed download jobs whose stored yt-dlp error contains “Join this channel”, shown as membership errors. Download jobs remain in the dedicated Pinchflat Downloads section.</div></div>
           <div class="debug-function-row" data-debug-search="download speed live transfer yt-dlp"><div class="debug-function-name">Pinchflat download speed</div><div class="debug-service-badge">Pinchflat / yt-dlp</div><div class="debug-function-description">Shows a best-effort live transfer rate for active Pinchflat downloads. The app uses yt-dlp progress output when available and otherwise estimates speed from the growing download file.</div></div>
         </div>
       </section>
@@ -4605,7 +4606,7 @@
       </label>
       <div class="settings-path-card" style="margin:8px 0 12px">
         <span class="muted small">Current settings</span>
-        <div><strong>{{ single_download_format|upper }}</strong>{% if single_download_format == 'audio' %} · {{ single_download_audio_format|upper }}{% endif %} · <code>/downloads/{{ single_download_folder }}</code></div>
+        <div><strong>{{ single_download_format|upper }}</strong>{% if single_download_format == 'audio' %} · {{ single_download_audio_format|upper }}{% elif single_download_compatibility_profile == 'emby_tv' %} · H.264 + AAC · MP4{% else %} · Automatic codecs{% endif %} · <code>/downloads/{{ single_download_folder }}</code></div>
       </div>
       <button class="btn" id="single-download-start">Start download</button>
     </form>
@@ -5616,6 +5617,13 @@
         <form method="post" action="/settings/single-download">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <div class="profile-settings-grid">
+            <label>Playback compatibility
+              <select name="single_download_compatibility_profile">
+                <option value="emby_tv" {% if single_download_compatibility_profile == 'emby_tv' %}selected{% endif %}>Emby / Smart TV · H.264 + AAC + MP4</option>
+                <option value="automatic" {% if single_download_compatibility_profile == 'automatic' %}selected{% endif %}>Best available · automatic codecs</option>
+              </select>
+              <span class="muted small">Recommended for LG Smart TVs: H.264/AVC video, AAC audio and MP4. If YouTube does not offer that combination directly, the app converts the completed One-time Download once before Emby scans it.</span>
+            </label>
             <label>Video / download type
               <select name="single_download_format">
                 {% for value,label in [('best','Best available'),('2160p','2160p / 4K'),('1440p','1440p'),('1080p','1080p'),('720p','720p'),('480p','480p'),('360p','360p'),('audio','Audio only')] %}
@@ -5650,9 +5658,21 @@
             </div>
           </details>
 
-          <div class="settings-path-card">
-            <span class="muted small">Effective One-time Download path</span>
-            <code>/downloads/{{ single_download_folder }}/{{ single_download_output_template }}</code>
+          <div class="settings-grid" style="margin-top:12px">
+            <div class="settings-path-card">
+              <span class="muted small">Playback target</span>
+              {% if single_download_compatibility_profile == 'emby_tv' %}
+              <strong>Emby / Smart TV</strong>
+              <span class="muted small">H.264 / AVC · AAC · MP4 · yuv420p</span>
+              {% else %}
+              <strong>Best available</strong>
+              <span class="muted small">Keeps YouTube's preferred codecs. Emby may transcode unsupported AV1, VP9 or Opus streams.</span>
+              {% endif %}
+            </div>
+            <div class="settings-path-card">
+              <span class="muted small">Effective One-time Download path</span>
+              <code>/downloads/{{ single_download_folder }}/{{ single_download_output_template }}</code>
+            </div>
           </div>
           <div class="settings-note">After a successful One-time Download, the app now detects the Emby library associated with <code>/downloads/{{ single_download_folder }}</code>, scans only that target and then runs the delayed metadata refresh.</div>
           <div class="actions"><button class="btn">Save One-time Download settings</button><button class="btn ghost" type="button" onclick="showTab('emby')">View Emby matching</button></div>
@@ -6614,12 +6634,14 @@ function renderPinchflatActiveDownloads(data) {
 function renderPinchflatTasks(data) {
   const activeTarget = document.getElementById("pinchflat-tasks-active");
   const statusTarget = document.getElementById("pinchflat-tasks-status");
+  const membershipTarget = document.getElementById("pinchflat-tasks-membership-errors");
   const currentTarget = document.getElementById("pinchflat-tasks-current");
 
   if (!activeTarget || !statusTarget || !currentTarget) return;
 
   const activeCount = Number(data.summary?.tasks_active || 0);
   const waitingCount = Number(data.summary?.tasks_waiting || 0);
+  const membershipErrors = Number(data.summary?.membership_errors || 0);
   const tasks = Array.isArray(data.tasks) ? data.tasks : [];
   const running = tasks.filter(item => item.state === "executing");
 
@@ -6632,6 +6654,18 @@ function renderPinchflatTasks(data) {
     statusTarget.textContent = `Idle · ${waitingCount} waiting`;
   } else {
     statusTarget.textContent = "No active non-download tasks";
+  }
+
+  if (membershipTarget) {
+    if (membershipErrors > 0) {
+      membershipTarget.textContent = `${membershipErrors} membership error${membershipErrors === 1 ? "" : "s"}`;
+      membershipTarget.classList.remove("hidden");
+      membershipTarget.title = "Pinchflat download failures containing ‘Join this channel’, usually members-only YouTube videos.";
+    } else {
+      membershipTarget.textContent = "";
+      membershipTarget.classList.add("hidden");
+      membershipTarget.removeAttribute("title");
+    }
   }
 
   const labels = [...new Set(running.map(item => item.label).filter(Boolean))];
@@ -6913,9 +6947,14 @@ async function loadPinchflatDownloadOverview(force=false) {
 
     const taskActive = document.getElementById("pinchflat-tasks-active");
     const taskStatus = document.getElementById("pinchflat-tasks-status");
+    const taskMembership = document.getElementById("pinchflat-tasks-membership-errors");
     const taskCurrent = document.getElementById("pinchflat-tasks-current");
     if (taskActive) taskActive.textContent = "—";
     if (taskStatus) taskStatus.textContent = "Pinchflat task status unavailable";
+    if (taskMembership) {
+      taskMembership.textContent = "";
+      taskMembership.classList.add("hidden");
+    }
     if (taskCurrent) taskCurrent.textContent = "";
 
     if (target) {

@@ -11,6 +11,7 @@ import re
 import secrets
 import shutil
 import socket
+import subprocess
 import sqlite3
 import struct
 import threading
@@ -36,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.15.0.2"
+VERSION = "2.15.0.4"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -696,6 +697,7 @@ def init_db():
             "youtube_search_daily_limit": "100",
             "single_download_folder": "Single Downloads",
             "single_download_format": "best",
+            "single_download_compatibility_profile": "emby_tv",
             "single_download_audio_format": "m4a",
             "single_download_write_nfo": "1",
             "single_download_output_template": "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
@@ -5512,6 +5514,11 @@ def write_direct_download_series_metadata(info, output_path, write_nfo=True):
 
 
 
+def single_download_compatibility_profile():
+    value = get_setting("single_download_compatibility_profile", "emby_tv").strip().lower()
+    return value if value in {"emby_tv", "automatic"} else "emby_tv"
+
+
 def single_download_ydl_settings():
     mode = get_setting("single_download_format", "best").strip()
     audio_format = get_setting("single_download_audio_format", "m4a").strip().lower()
@@ -5537,6 +5544,21 @@ def single_download_ydl_settings():
         "360p": 360,
     }
     height = heights.get(mode)
+
+    # Prefer streams which are already LG/Emby friendly so the compatibility
+    # pass normally only remuxes or converts audio, rather than re-encoding
+    # the video.  A final ffmpeg verification pass below guarantees H.264/AAC.
+    if single_download_compatibility_profile() == "emby_tv":
+        limit = f"[height<={height}]" if height else ""
+        return {
+            "format": (
+                f"bv*[vcodec^=avc1]{limit}+ba[acodec^=mp4a]/"
+                f"b[vcodec^=avc1][acodec^=mp4a]{limit}/"
+                f"bv*{limit}+ba/b{limit}/best{limit}"
+            ),
+            "merge_output_format": "mp4",
+        }
+
     if height:
         return {
             "format": f"bestvideo*[height<={height}]+bestaudio/best[height<={height}]/best",
@@ -5546,6 +5568,110 @@ def single_download_ydl_settings():
         "format": "bestvideo*+bestaudio/best",
         "merge_output_format": "mp4",
     }
+
+
+def _probe_single_download_codecs(path):
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries",
+            "stream=codec_type,codec_name", "-of", "json", str(path),
+        ],
+        capture_output=True, text=True, timeout=30, check=True,
+    )
+    payload = json.loads(result.stdout or "{}")
+    video = ""
+    audio = ""
+    for stream in payload.get("streams") or []:
+        kind = str(stream.get("codec_type") or "")
+        codec = str(stream.get("codec_name") or "").lower()
+        if kind == "video" and not video:
+            video = codec
+        elif kind == "audio" and not audio:
+            audio = codec
+    return video, audio
+
+
+def resolve_direct_download_output_path(info, ydl, output_dir, current_path=""):
+    """Return the final media file after yt-dlp merging/post-processing."""
+    candidates = [
+        current_path,
+        info.get("filepath"),
+        info.get("_filename"),
+    ]
+    for requested in info.get("requested_downloads") or []:
+        candidates.extend([requested.get("filepath"), requested.get("filename")])
+    try:
+        candidates.append(ydl.prepare_filename(info))
+    except Exception:
+        pass
+
+    ignored_suffixes = {".part", ".json", ".jpg", ".jpeg", ".png", ".webp", ".nfo"}
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(str(candidate))
+        if path.exists() and path.is_file() and path.suffix.lower() not in ignored_suffixes:
+            return str(path)
+
+    video_id = str(info.get("id") or "").strip()
+    if video_id:
+        matches = []
+        try:
+            for path in Path(output_dir).rglob(f"*[{video_id}]*"):
+                if not path.is_file() or path.suffix.lower() in ignored_suffixes:
+                    continue
+                matches.append(path)
+        except Exception:
+            matches = []
+        if matches:
+            matches.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+            return str(matches[0])
+
+    return str(current_path or "")
+
+
+def ensure_single_download_emby_compatibility(output_path):
+    """Guarantee H.264 + AAC in MP4 for One-time Download video jobs only."""
+    path = Path(str(output_path or ""))
+    if not path.exists() or single_download_compatibility_profile() != "emby_tv":
+        return str(path)
+
+    video_codec, audio_codec = _probe_single_download_codecs(path)
+    video_ok = video_codec == "h264"
+    audio_ok = (not audio_codec) or audio_codec == "aac"
+    container_ok = path.suffix.lower() == ".mp4"
+    if video_ok and audio_ok and container_ok:
+        return str(path)
+
+    final_path = path.with_suffix(".mp4")
+    temp_path = final_path.with_name(f".{final_path.stem}.compat-{secrets.token_hex(4)}.mp4")
+    command = ["ffmpeg", "-y", "-i", str(path), "-map", "0:v:0", "-map", "0:a?"]
+
+    if video_ok:
+        command += ["-c:v", "copy"]
+    else:
+        command += [
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-pix_fmt", "yuv420p",
+        ]
+
+    if audio_ok:
+        command += ["-c:a", "copy"]
+    else:
+        command += ["-c:a", "aac", "-b:a", "192k"]
+
+    command += ["-map_metadata", "0", "-movflags", "+faststart", str(temp_path)]
+    try:
+        subprocess.run(command, capture_output=True, text=True, timeout=7200, check=True)
+        if final_path != path and final_path.exists():
+            final_path.unlink()
+        os.replace(temp_path, final_path)
+        if path != final_path and path.exists():
+            path.unlink()
+        return str(final_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def run_download_job(job_id):
@@ -5614,6 +5740,22 @@ def run_download_job(job_id):
                 output_path = ydl.prepare_filename(info)
             except Exception:
                 output_path = job.get("output_path") or ""
+
+        output_path = resolve_direct_download_output_path(info, ydl, output_dir, output_path)
+
+        if job.get("source_type") == "single" and get_setting("single_download_format", "best") != "audio":
+            try:
+                compatible_path = ensure_single_download_emby_compatibility(output_path)
+                if compatible_path and compatible_path != output_path:
+                    log_activity(
+                        "download",
+                        "One-time Download converted for Emby",
+                        f"{info.get('title') or job['youtube_url']} converted to H.264 + AAC in MP4.",
+                        "success",
+                    )
+                output_path = compatible_path or output_path
+            except Exception as exc:
+                raise RuntimeError(f"Emby compatibility conversion failed: {exc}") from exc
 
         update_download_job(
             job_id,
@@ -9275,6 +9417,35 @@ def pinchflat_download_overview(queue_limit=100):
             for state in ("available", "scheduled")
         )
 
+        # yt-dlp reports members-only videos with a stable message such as
+        # "Join this channel to get access to members-only content". Oban
+        # stores the failed attempt text in its errors column. Count current
+        # non-completed media-download jobs carrying that message so the
+        # dashboard can distinguish membership failures from ordinary queue
+        # activity without exposing every failed download in the queue.
+        membership_error_count = 0
+        if "errors" in job_columns:
+            try:
+                membership_error_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM oban_jobs
+                    WHERE worker = ?
+                      AND state != 'completed'
+                      AND errors IS NOT NULL
+                      AND LOWER(CAST(errors AS TEXT)) LIKE ?
+                    """,
+                    (
+                        media_worker,
+                        "%join this channel%",
+                    ),
+                ).fetchone()
+                membership_error_count = int(
+                    membership_error_row["count"] or 0
+                ) if membership_error_row else 0
+            except Exception:
+                membership_error_count = 0
+
         task_rows = conn.execute(
             f"""
             SELECT {", ".join(selected_job_columns)}
@@ -9896,6 +10067,7 @@ def pinchflat_download_overview(queue_limit=100):
                 "waiting": total_waiting_count,
                 "tasks_active": total_task_active,
                 "tasks_waiting": total_task_waiting,
+                "membership_errors": membership_error_count,
             },
             "tasks": pinchflat_tasks,
             "last_downloaded": last_downloaded,
@@ -14074,6 +14246,7 @@ def index():
         emby_library_path=get_setting("emby_library_path", "/media/Storage/Media/YouTube"),
         single_download_folder=get_setting("single_download_folder", "Single Downloads"),
         single_download_format=get_setting("single_download_format", "best"),
+        single_download_compatibility_profile=get_setting("single_download_compatibility_profile", "emby_tv"),
         single_download_audio_format=get_setting("single_download_audio_format", "m4a"),
         single_download_write_nfo=setting_bool("single_download_write_nfo", True),
         single_download_output_template=get_setting(
@@ -14985,12 +15158,15 @@ def save_download_paths():
 def save_single_download_settings():
     download_format = request.form.get("single_download_format", "best").strip()
     audio_format = request.form.get("single_download_audio_format", "m4a").strip().lower()
+    compatibility_profile = request.form.get("single_download_compatibility_profile", "emby_tv").strip().lower()
     allowed_formats = {"best", "2160p", "1440p", "1080p", "720p", "480p", "360p", "audio"}
     allowed_audio = {"m4a", "mp3", "opus", "flac", "wav"}
     if download_format not in allowed_formats:
         download_format = "best"
     if audio_format not in allowed_audio:
         audio_format = "m4a"
+    if compatibility_profile not in {"emby_tv", "automatic"}:
+        compatibility_profile = "emby_tv"
 
     try:
         folder = safe_relative_download_folder(
@@ -15008,6 +15184,7 @@ def save_single_download_settings():
 
         set_setting("single_download_folder", folder)
         set_setting("single_download_format", download_format)
+        set_setting("single_download_compatibility_profile", compatibility_profile)
         set_setting("single_download_audio_format", audio_format)
         set_setting("single_download_write_nfo", "1" if request.form.get("single_download_write_nfo") == "1" else "0")
         set_setting("single_download_output_template", template)

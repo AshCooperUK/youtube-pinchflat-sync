@@ -2,6 +2,22 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.15.0.4
+
+### v2.15.0.4
+
+- Added an Emby / Smart TV compatibility profile to Settings > Downloads > One-time Download.
+- One-time video downloads now prefer H.264/AVC video and AAC audio in MP4 for better Direct Play compatibility on Emby clients such as LG Smart TVs.
+- If YouTube does not offer a compatible stream combination, the app converts only the completed One-time Download before the targeted Emby scan. Pinchflat and Emby Download playlist jobs are unchanged.
+
+## Version 2.15.0.3
+
+### v2.15.0.3
+
+- Adds a membership-error counter to the Pinchflat tasks tile.
+- Counts non-completed Pinchflat media-download jobs whose stored yt-dlp error contains “Join this channel”, identifying members-only YouTube failures.
+- Keeps membership errors separate from active/waiting non-download task counts and hides the line when the count is zero.
+
 ## Version 2.15.0.2
 
 ### v2.15.0.2

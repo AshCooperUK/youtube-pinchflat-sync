@@ -157,10 +157,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.15.0.2"
+  version: "2.15.0.4"
   update_at: "2026-09-19"
   release_notes:
-    en_US: v2.15.0.2 fixes Settings navigation on shorter screens by giving the left navigation and right settings content independent scrolling.
+    en_US: v2.15.0.4 adds an Emby / Smart TV compatibility profile for One-time Downloads using H.264 + AAC in MP4.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
