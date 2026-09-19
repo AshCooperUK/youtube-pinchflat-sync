@@ -80,6 +80,7 @@
       background:#132139;
     }
     .pinchflat-icon-link img { width:30px; height:30px; object-fit:contain; }
+    .google-cloud-icon img { width:30px; height:30px; object-fit:contain; }
     .pinchflat-icon-fallback { display:none; width:24px; height:24px; place-items:center; border-radius:50%; background:#1e8f8b; color:#fff; font-weight:900; }
     .tile-icon-button { position:absolute; top:14px; right:14px; width:36px; height:36px; border-radius:9px; border:1px solid var(--line); background:#182740; color:#fff; font-size:23px; cursor:pointer; display:grid; place-items:center; }
     .grid .card { position:relative; }
@@ -343,6 +344,15 @@
     .subscription-tools-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     .subscription-tools-row .grow { flex:1 1 280px; }
     .subscription-tools-row select { min-width:170px; }
+    .subscription-tools-section { padding:14px; border:1px solid var(--line); border-radius:12px; background:#0b1626; }
+    .subscription-tools-section h3 { margin:0 0 4px; font-size:15px; }
+    .subscription-tools-section .section-help { margin:0 0 12px; }
+    .subscription-tool-field { display:flex; flex-direction:column; gap:5px; min-width:210px; flex:1 1 210px; }
+    .subscription-tool-field > span { font-size:12px; color:var(--muted); font-weight:700; }
+    .subscription-tools-selection { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .subscription-bulk-controls { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+    .subscription-bulk-controls .subscription-tool-field { max-width:310px; }
+    #bulk-apply-button.hidden { display:none !important; }
     .subscription-tool-footer { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px; }
 
     #subscription-channel-dialog { width:min(980px,94vw); }
@@ -1970,6 +1980,9 @@
     {% if page_view.show_summary_google %}
     <div class="card" data-summary-tile="google">
       <div class="muted small">Google</div>
+      <a class="pinchflat-icon-link google-cloud-icon" href="https://console.cloud.google.com/welcome" target="_blank" rel="noopener" title="Open Google Cloud Console" aria-label="Open Google Cloud Console">
+        <img src="https://www.gstatic.com/pantheon/images/welcome/supercloud_gradient_v2.svg" alt="Google Cloud" referrerpolicy="no-referrer">
+      </a>
       {% if google_connected and google_write_ready %}
         <div class="metric ok">Connected</div>
         <div class="muted small">Read + write access</div>
@@ -2450,66 +2463,92 @@
   </div>
   <div class="modal-body">
     <div class="subscription-tools-grid">
-      <div class="subscription-tools-row">
-        <select id="status-filter" onchange="applyFilters({preserveScroll:true})">
-          <option value="active">All active</option>
-          <option value="enabled">Enabled</option>
-          <option value="disabled">Disabled</option>
-          <option value="pending">Pending</option>
-          <option value="error">Errors</option>
-          <option value="removed">Removed</option>
-          <option value="favourites">Favourites</option>
-          <option value="all">Everything</option>
-        </select>
-        <select id="sort-filter" onchange="applyFilters({preserveScroll:true})">
-          <option value="title">A → Z</option>
-          <option value="status">Status</option>
-          <option value="newest">Newest first</option>
-          <option value="storage">Disk usage</option>
-        </select>
+      <div class="subscription-tools-section">
+        <h3>View subscriptions</h3>
+        <div class="section-help">Choose which channels are shown and how the results are ordered.</div>
+        <div class="subscription-tools-row">
+          <label class="subscription-tool-field">
+            <span>Show channels</span>
+            <select id="status-filter" onchange="applyFilters({preserveScroll:true})">
+              <option value="active">All active</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+              <option value="pending">Pending</option>
+              <option value="error">Errors</option>
+              <option value="removed">Removed</option>
+              <option value="favourites">Favourites</option>
+              <option value="all">Everything</option>
+            </select>
+          </label>
+          <label class="subscription-tool-field">
+            <span>Sort results by</span>
+            <select id="sort-filter" onchange="applyFilters({preserveScroll:true})">
+              <option value="title">Channel name A → Z</option>
+              <option value="status">Status</option>
+              <option value="newest">Newest subscription first</option>
+              <option value="storage">Largest disk usage first</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       {% if is_admin %}
-      <div class="subscription-tools-row">
-        <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(true)">Select visible</button>
-        <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(false)">Clear</button>
-        <span class="muted small" id="selected-count">0 selected</span>
-      </div>
+      <div class="subscription-tools-section">
+        <h3>Bulk actions</h3>
+        <div class="section-help">Select channels first, then choose one action to apply to the selected channels.</div>
+        <div class="subscription-tools-selection">
+          <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(true)">Select visible</button>
+          <button class="btn secondary smallbtn" type="button" onclick="setAllVisible(false)">Clear selection</button>
+          <span class="muted small" id="selected-count">0 selected</span>
+        </div>
 
-      <div class="subscription-tools-row">
-        <select id="bulk-action" name="bulk_action" form="bulk-form" onchange="toggleBulkOptions()" required>
-          <option value="">Bulk action…</option>
-          <option id="bulk-save-changes-option" value="save_changes" hidden>Save selected changes</option>
-          <option value="enable">Enable downloads</option>
-          <option value="disable">Disable downloads</option>
-          <option value="range">Set download range</option>
-          <option value="profile">Set Media Profile</option>
-          <option value="favourite">Make favourite</option>
-          <option value="unfavourite">Remove favourite</option>
-          <option value="retry">Retry errors</option>
-        </select>
+        <div class="subscription-bulk-controls">
+          <label class="subscription-tool-field">
+            <span>Action</span>
+            <select id="bulk-action" name="bulk_action" form="bulk-form" onchange="toggleBulkOptions()" required>
+              <option value="">Choose a bulk action…</option>
+              <option id="bulk-save-changes-option" value="save_changes" hidden>Save selected changes</option>
+              <option value="enable">Enable downloads</option>
+              <option value="disable">Disable downloads</option>
+              <option value="range">Set download range</option>
+              <option value="profile">Set Media Profile</option>
+              <option value="favourite">Make favourite</option>
+              <option value="unfavourite">Remove favourite</option>
+              <option value="retry">Retry errors</option>
+            </select>
+          </label>
 
-        <select id="bulk-range" name="bulk_history_mode" form="bulk-form" class="hidden">
-          <option value="default">Default range</option>
-          <option value="today">Today</option>
-          <option value="this_week">This week</option>
-          <option value="this_month">This month</option>
-          <option value="six_months">Last 6 months</option>
-          <option value="last_year">Last year</option>
-          {% for y in range(2, 11) %}<option value="years_{{ y }}">Last {{ y }} years</option>{% endfor %}
-          <option value="subscription_date">Subscription date</option>
-          <option value="custom_date">Custom date</option>
-        </select>
+          <label id="bulk-range-field" class="subscription-tool-field hidden">
+            <span>Download range</span>
+            <select id="bulk-range" name="bulk_history_mode" form="bulk-form">
+              <option value="default">Default range</option>
+              <option value="today">Today</option>
+              <option value="this_week">This week</option>
+              <option value="this_month">This month</option>
+              <option value="six_months">Last 6 months</option>
+              <option value="last_year">Last year</option>
+              {% for y in range(2, 11) %}<option value="years_{{ y }}">Last {{ y }} years</option>{% endfor %}
+              <option value="subscription_date">Subscription date</option>
+              <option value="custom_date">Custom date</option>
+            </select>
+          </label>
 
-        <input id="bulk-custom-date" name="bulk_custom_date" form="bulk-form" type="date" class="hidden">
+          <label id="bulk-custom-date-field" class="subscription-tool-field hidden">
+            <span>Start date</span>
+            <input id="bulk-custom-date" name="bulk_custom_date" form="bulk-form" type="date">
+          </label>
 
-        <select id="bulk-profile" name="bulk_profile_id" form="bulk-form" class="hidden">
-          {% for profile in profiles %}
-            <option value="{{ profile.id }}">{{ profile.name }}</option>
-          {% endfor %}
-        </select>
+          <label id="bulk-profile-field" class="subscription-tool-field hidden">
+            <span>Media Profile</span>
+            <select id="bulk-profile" name="bulk_profile_id" form="bulk-form">
+              {% for profile in profiles %}
+                <option value="{{ profile.id }}">{{ profile.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
 
-        <button class="btn" type="submit" form="bulk-form">Apply</button>
+          <button id="bulk-apply-button" class="btn hidden" type="submit" form="bulk-form">Apply to selected</button>
+        </div>
       </div>
       {% endif %}
     </div>
@@ -3940,6 +3979,19 @@
         <div class="setting-box">
           <h3>Authentication policy</h3>
           <form method="post" action="/settings/security"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <label>Keep me signed in for
+              <select name="remember_login_days">
+                <option value="1" {% if remember_login_days == 1 %}selected{% endif %}>1 day</option>
+                <option value="7" {% if remember_login_days == 7 %}selected{% endif %}>7 days</option>
+                <option value="14" {% if remember_login_days == 14 %}selected{% endif %}>14 days</option>
+                <option value="30" {% if remember_login_days == 30 %}selected{% endif %}>30 days</option>
+                <option value="60" {% if remember_login_days == 60 %}selected{% endif %}>60 days</option>
+                <option value="90" {% if remember_login_days == 90 %}selected{% endif %}>90 days</option>
+                <option value="180" {% if remember_login_days == 180 %}selected{% endif %}>180 days</option>
+                <option value="365" {% if remember_login_days == 365 %}selected{% endif %}>1 year</option>
+              </select>
+            </label>
+            <div class="profile-control-help">Keeps your login cookie after the browser closes. Existing inactivity rules still apply.</div>
             <label>Session timeout after inactivity (minutes)<input type="number" min="5" max="10080" name="session_timeout_minutes" value="{{ session_timeout_minutes }}"></label>
             <label>Failed attempts before lockout<input type="number" min="3" max="50" name="lockout_attempts" value="{{ lockout_attempts }}"></label>
             <label>Lockout duration (minutes)<input type="number" min="1" max="1440" name="lockout_minutes" value="{{ lockout_minutes }}"></label>
@@ -8175,18 +8227,31 @@ function applyFilters(options={}) {
     row.classList.toggle("hidden-row", !(titleMatch && statusMatch));
   });
 
-  const visible = rows.filter(row => !row.classList.contains("hidden-row"));
-  visible.sort((a,b) => {
+  const compareBySelectedSort = (a, b) => {
+    if (sortFilter.value === "status") {
+      return a.dataset.status.localeCompare(b.dataset.status)
+        || a.dataset.title.localeCompare(b.dataset.title);
+    }
+    if (sortFilter.value === "newest") {
+      return b.dataset.firstSeen.localeCompare(a.dataset.firstSeen)
+        || a.dataset.title.localeCompare(b.dataset.title);
+    }
+    if (sortFilter.value === "storage") {
+      return Number(b.dataset.storage || 0) - Number(a.dataset.storage || 0)
+        || a.dataset.title.localeCompare(b.dataset.title);
+    }
+    return a.dataset.title.localeCompare(b.dataset.title);
+  };
+
+  rows.sort((a, b) => {
     if (pinFavouritesToTop && a.dataset.favourite !== b.dataset.favourite) {
       return a.dataset.favourite === "1" ? -1 : 1;
     }
-    if (sortFilter.value === "status") return a.dataset.status.localeCompare(b.dataset.status) || a.dataset.title.localeCompare(b.dataset.title);
-    if (sortFilter.value === "newest") return b.dataset.firstSeen.localeCompare(a.dataset.firstSeen);
-    if (sortFilter.value === "storage") return Number(b.dataset.storage || 0) - Number(a.dataset.storage || 0);
-    return a.dataset.title.localeCompare(b.dataset.title);
+    return compareBySelectedSort(a, b);
   });
 
-  visible.forEach(row => body.appendChild(row));
+  rows.forEach(row => body.appendChild(row));
+  const visible = rows.filter(row => !row.classList.contains("hidden-row"));
 
   const badge = document.getElementById("subscriptions-count-badge");
   if (badge) badge.textContent = String(visible.length);
@@ -8223,13 +8288,23 @@ function updateSelectedCount() {
 }
 
 function toggleBulkOptions() {
-  const action = document.getElementById("bulk-action")?.value;
-  document.getElementById("bulk-range")?.classList.toggle("hidden", action !== "range");
-  document.getElementById("bulk-profile")?.classList.toggle("hidden", action !== "profile");
-  document.getElementById("bulk-custom-date")?.classList.add("hidden");
+  const action = document.getElementById("bulk-action")?.value || "";
+  const rangeField = document.getElementById("bulk-range-field");
+  const profileField = document.getElementById("bulk-profile-field");
+  const dateField = document.getElementById("bulk-custom-date-field");
+  const applyButton = document.getElementById("bulk-apply-button");
+
+  rangeField?.classList.toggle("hidden", action !== "range");
+  profileField?.classList.toggle("hidden", action !== "profile");
+  dateField?.classList.add("hidden");
+  applyButton?.classList.toggle("hidden", !action);
+
+  if (action === "range" && document.getElementById("bulk-range")?.value === "custom_date") {
+    dateField?.classList.remove("hidden");
+  }
 }
 document.getElementById("bulk-range")?.addEventListener("change", function() {
-  document.getElementById("bulk-custom-date").classList.toggle("hidden", this.value !== "custom_date");
+  document.getElementById("bulk-custom-date-field")?.classList.toggle("hidden", this.value !== "custom_date");
 });
 
 function confirmBulkAction() {

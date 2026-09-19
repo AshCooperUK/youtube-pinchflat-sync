@@ -2,6 +2,18 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.12.4
+
+Dashboard usability and persistent-login update.
+
+- Adds a Google Cloud Console shortcut to the Google status tile using the Google Cloud logo and the same tile spacing as the Pinchflat shortcut.
+- Keeps authenticated sessions across browser restarts with a configurable remembered-login period under Settings → Security.
+- Keeps the existing inactivity timeout and account lockout controls separate from the remembered-login period.
+- Makes pinned favourite subscriptions obey the selected subscription sort order instead of remaining alphabetically ordered.
+- Improves the Subscription tools popup with labelled View subscriptions and Bulk actions sections.
+- Adds clear descriptions for filtering, sorting and bulk-action controls.
+- Only shows the bulk Apply button after a bulk action has been selected.
+
 ## Version 2.12.3
 
 Pinchflat source-action reliability update.

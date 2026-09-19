@@ -157,10 +157,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.12.3"
-  update_at: "2026-09-13"
+  version: "2.12.4"
+  update_at: "2026-09-19"
   release_notes:
-    en_US: v2.6 streamlines source control, moves favourites and logs into Settings, expands Pinchflat profile editing, improves one-time downloads, and adds Subscribe controls to in-app video playback.
+    en_US: v2.12.4 adds persistent browser login, a Google Cloud Console tile shortcut, subscription sort fixes, and a clearer bulk subscription tools interface.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

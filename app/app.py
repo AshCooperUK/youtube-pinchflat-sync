@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.12.3"
+VERSION = "2.12.4"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -262,6 +262,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=ENV_APP_URL.lower().startswith("https://"),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=365),
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
@@ -587,6 +588,7 @@ def init_db():
             "single_download_write_nfo": "1",
             "single_download_output_template": "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
             "emby_download_folder": "Emby Download",
+            "auth_remember_login_days": "30",
             "auth_session_timeout_minutes": "720",
             "auth_lockout_attempts": "5",
             "auth_lockout_minutes": "15",
@@ -861,6 +863,10 @@ def session_timeout_minutes():
     return setting_int("auth_session_timeout_minutes", 720, 5, 10080)
 
 
+def remember_login_days():
+    return setting_int("auth_remember_login_days", 30, 1, 365)
+
+
 def lockout_attempt_limit():
     return setting_int("auth_lockout_attempts", 5, 3, 50)
 
@@ -957,8 +963,11 @@ def complete_login(user, method="password"):
     session.clear()
     session["auth_user_id"] = int(user["id"])
     session["auth_session_version"] = int(user["session_version"] or 1)
-    session["auth_authenticated_at"] = time.time()
-    session["auth_last_seen"] = time.time()
+    now = time.time()
+    session.permanent = True
+    session["auth_authenticated_at"] = now
+    session["auth_last_seen"] = now
+    session["auth_remember_until"] = now + (remember_login_days() * 86400)
     with db() as conn:
         conn.execute(
             """
@@ -10217,6 +10226,19 @@ def require_authentication():
         flash("Your session has expired. Sign in again.", "error")
         return redirect(url_for("login"))
 
+    # Upgrade sessions created before persistent login support so the next
+    # response writes an Expires value to the browser cookie.
+    if not session.permanent or not session.get("auth_remember_until"):
+        session.permanent = True
+        session["auth_remember_until"] = time.time() + (remember_login_days() * 86400)
+
+    remember_until = float(session.get("auth_remember_until") or 0)
+    if remember_until and time.time() > remember_until:
+        record_auth_event("session_expired", True, user=user, message="Remembered login period expired.")
+        session.clear()
+        flash("Your remembered login expired. Sign in again.", "error")
+        return redirect(url_for("login"))
+
     last_seen = float(session.get("auth_last_seen") or 0)
     timeout_seconds = session_timeout_minutes() * 60
     if last_seen and time.time() - last_seen > timeout_seconds:
@@ -10533,6 +10555,7 @@ def logout_all_sessions():
 @app.post("/settings/security")
 def save_security_settings():
     try:
+        remember_days = int(request.form.get("remember_login_days", "30") or 30)
         timeout = int(request.form.get("session_timeout_minutes", "720") or 720)
         attempts = int(request.form.get("lockout_attempts", "5") or 5)
         duration = int(request.form.get("lockout_minutes", "15") or 15)
@@ -10540,7 +10563,13 @@ def save_security_settings():
         flash("Security settings must be whole numbers.", "error")
         return redirect(url_for("index") + "#security")
 
+    remember_days = max(1, min(365, remember_days))
+    set_setting("auth_remember_login_days", str(remember_days))
     set_setting("auth_session_timeout_minutes", str(max(5, min(10080, timeout))))
+
+    if session.get("auth_user_id"):
+        session.permanent = True
+        session["auth_remember_until"] = time.time() + (remember_days * 86400)
     set_setting("auth_lockout_attempts", str(max(3, min(50, attempts))))
     set_setting("auth_lockout_minutes", str(max(1, min(1440, duration))))
     user = current_user_record()
@@ -11017,6 +11046,7 @@ def index():
         is_admin=auth["is_admin"],
         security_users=security_users,
         auth_events=auth_events,
+        remember_login_days=remember_login_days(),
         session_timeout_minutes=session_timeout_minutes(),
         lockout_attempts=lockout_attempt_limit(),
         lockout_minutes=lockout_minutes(),
