@@ -2,6 +2,16 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.14.0.6
+
+Settings and dashboard layout usability update.
+
+- Saves normal Settings forms asynchronously so the Settings dialog stays open instead of closing, reloading the dashboard and reopening.
+- Keeps the active Settings tab and scroll position while saving.
+- Applies dashboard-affecting changes with one clean refresh when Settings is closed, rather than after every Save action.
+- Clears one-time Settings URL hashes after opening so a later page refresh does not unexpectedly reopen Settings.
+- Uses a consistent 18px gap between all enabled dashboard sections regardless of custom order or disabled sections.
+
 ## Version 2.14.0.5
 
 Channel navigation and control consistency update.

@@ -856,6 +856,16 @@
     #dashboard-sections {
       display:flex;
       flex-direction:column;
+      gap:18px;
+    }
+
+    /* Keep dashboard spacing consistent regardless of the saved order or
+       which optional sections are disabled. Individual sections used to
+       carry their own top/bottom margins, which left some combinations with
+       no gap and others with a double gap. */
+    #dashboard-sections > [data-page-section] {
+      margin-top:0 !important;
+      margin-bottom:0 !important;
     }
 
     .page-view-grid {
@@ -4959,7 +4969,7 @@
           <form method="post" action="/settings/pinchflat">
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Selected profile
-              <select name="pinchflat_media_profile_id" onchange="this.form.submit()">
+              <select name="pinchflat_media_profile_id" onchange="this.form.requestSubmit()">
                 {% for profile in profiles %}
                   <option value="{{ profile.id }}" {% if media_profile_id|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
                 {% endfor %}
@@ -6670,11 +6680,162 @@ function toggleLatestSection() {
   setLatestSectionMinimised(!content || !content.classList.contains("hidden"));
 }
 
+let settingsPageRefreshNeeded = false;
+
 function openSettings(tab="{{ 'general' if is_admin else 'security' }}") {
   showTab(tab);
   if (!settingsDialog.open) settingsDialog.showModal();
 }
-function closeSettings() { settingsDialog.close(); }
+
+function closeSettings() {
+  settingsDialog.close();
+
+  // Settings now save without navigating away from the modal. Changes which
+  // affect the dashboard are applied with one clean reload when the user has
+  // finished in Settings, rather than reloading after every Save button.
+  if (settingsPageRefreshNeeded) {
+    settingsPageRefreshNeeded = false;
+    const cleanUrl = `${window.location.pathname}${window.location.search}`;
+    window.location.assign(cleanUrl);
+  }
+}
+
+function settingsActionPath(form) {
+  try {
+    return new URL(form.action, window.location.href).pathname;
+  } catch (_) {
+    return "";
+  }
+}
+
+function settingsActionNeedsPageRefresh(path) {
+  return new Set([
+    "/settings/general",
+    "/settings/page-view",
+    "/settings/configuration",
+    "/settings/youtube",
+    "/settings/apis",
+    "/settings/pinchflat",
+    "/settings/pinchflat/advanced",
+    "/settings/pinchflat/profile/create",
+    "/settings/pinchflat/profile/delete",
+    "/settings/pinchflat/profile",
+    "/settings/single-download",
+    "/settings/history",
+    "/settings/download-paths",
+    "/settings/automation"
+  ]).has(path);
+}
+
+function settingsActionNeedsDialogRefresh(path) {
+  return new Set([
+    "/settings/pinchflat/profile/create",
+    "/settings/pinchflat/profile/delete"
+  ]).has(path);
+}
+
+function settingsResponseNotice(documentNode) {
+  const notices = Array.from(documentNode.querySelectorAll(".flash"));
+  if (!notices.length) return null;
+
+  const error = notices.find(node => node.classList.contains("error"));
+  const node = error || notices[notices.length - 1];
+  return {
+    message: (node.textContent || "").replace(/×\s*$/, "").trim(),
+    type: node.classList.contains("error") ? "error" : "success"
+  };
+}
+
+function bindSettingsDynamicListeners() {
+  const logTail = document.getElementById("pinchflat-log-tail");
+  if (logTail && logTail.dataset.listenerBound !== "1") {
+    logTail.dataset.listenerBound = "1";
+    logTail.addEventListener("change", () => {
+      pinchflatLogsLoaded = false;
+      loadPinchflatLogs(true);
+    });
+  }
+}
+
+async function submitSettingsFormWithoutReload(event) {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !settingsDialog.contains(form)) return;
+
+  const path = settingsActionPath(form);
+  if (!path.startsWith("/settings/")) return;
+  if (event.defaultPrevented) return;
+
+  event.preventDefault();
+  if (form.dataset.ajaxSaving === "1") return;
+
+  form.dataset.ajaxSaving = "1";
+  const submitter = event.submitter || null;
+  const originalSubmitterHtml = submitter ? submitter.innerHTML : "";
+  if (submitter) {
+    submitter.disabled = true;
+    submitter.setAttribute("aria-busy", "true");
+  }
+
+  const activeTab = settingsDialog.querySelector(".tab-btn.active")?.dataset.tab || "general";
+  const modalBody = settingsDialog.querySelector(".modal-body");
+  const modalScrollTop = modalBody?.scrollTop || 0;
+
+  try {
+    const body = new FormData(form);
+    if (submitter?.name && !body.has(submitter.name)) {
+      body.append(submitter.name, submitter.value || "");
+    }
+
+    const response = await fetch(form.action, {
+      method: (form.method || "POST").toUpperCase(),
+      body,
+      credentials: "same-origin",
+      headers: {
+        "Accept": "text/html",
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Settings save returned HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+    const responseDocument = new DOMParser().parseFromString(html, "text/html");
+    const notice = settingsResponseNotice(responseDocument);
+
+    if (settingsActionNeedsDialogRefresh(path)) {
+      const refreshedDialog = responseDocument.getElementById("settings-dialog");
+      if (refreshedDialog) {
+        settingsDialog.innerHTML = refreshedDialog.innerHTML;
+        showTab(activeTab);
+        const refreshedBody = settingsDialog.querySelector(".modal-body");
+        if (refreshedBody) refreshedBody.scrollTop = modalScrollTop;
+        initialisePageViewSettings();
+        toggleDefaultHistory();
+        toggleSponsorBlockCategories();
+        bindSettingsDynamicListeners();
+      }
+    }
+
+    if (settingsActionNeedsPageRefresh(path) && notice?.type !== "error") {
+      settingsPageRefreshNeeded = true;
+    }
+    showAjaxToast(notice?.message || "Settings saved.", notice?.type || "success");
+  } catch (error) {
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    // The form may have been replaced after profile creation/deletion.
+    if (document.body.contains(form)) form.dataset.ajaxSaving = "0";
+    if (submitter && document.body.contains(submitter)) {
+      submitter.disabled = false;
+      submitter.removeAttribute("aria-busy");
+      submitter.innerHTML = originalSubmitterHtml;
+    }
+  }
+}
+
+settingsDialog.addEventListener("submit", submitSettingsFormWithoutReload);
 function resetSingleDownloadDialog(url="") {
   const input = document.getElementById("single-download-url");
   const status = document.getElementById("single-download-status");
@@ -9629,13 +9790,7 @@ function showTab(name) {
   if (name === "logs") loadPinchflatLogs();
 }
 
-document.getElementById("pinchflat-log-tail")?.addEventListener(
-  "change",
-  () => {
-    pinchflatLogsLoaded = false;
-    loadPinchflatLogs(true);
-  }
-);
+bindSettingsDynamicListeners();
 
 function toggleDefaultHistory() {
   const mode = document.getElementById("default-history-mode")?.value;
@@ -11775,6 +11930,9 @@ const settingsHashTabs = new Set(["security", "pinchflat", "general", "pageview"
 const requestedSettingsTab = window.location.hash.replace("#", "");
 if (settingsHashTabs.has(requestedSettingsTab)) {
   openSettings(requestedSettingsTab);
+  // The hash is only a one-time deep link. Leaving it in the address bar
+  // caused later reloads to reopen Settings unexpectedly.
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
 }
 
 document.addEventListener("click", event => {
