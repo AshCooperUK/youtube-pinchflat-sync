@@ -157,10 +157,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.15.0.0"
+  version: "2.15.0.2"
   update_at: "2026-09-19"
   release_notes:
-    en_US: v2.15.0.0 adds age-based Video Retention with favourite, non-favourite and per-channel policies, cleanup preview, protection controls and safe Pinchflat deletion.
+    en_US: v2.15.0.2 fixes Settings navigation on shorter screens by giving the left navigation and right settings content independent scrolling.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

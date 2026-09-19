@@ -2,6 +2,19 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
+## Version 2.15.0.2
+
+### v2.15.0.2
+
+- Fixed the Settings sidebar being clipped when the modal is shorter than the full navigation.
+- The left Settings navigation and right settings panel now scroll independently.
+- Added a bounded mobile Settings navigation area so all sections remain reachable on smaller screens.
+
+- Adds a Pinchflat active tasks status tile for background Oban work such as source indexing and metadata jobs. Media-download jobs are excluded because they already appear in Pinchflat Downloads.
+- Adds the Pinchflat active tasks tile to Settings → Dashboard so it can be shown, hidden and reordered with the other status tiles.
+- Adds best-effort live download speed to active Pinchflat downloads. The app uses yt-dlp progress output when Pinchflat exposes it and otherwise estimates transfer rate from the growing media file.
+- Keeps the active-task tile refreshed even when the full Pinchflat Downloads dashboard section is disabled.
+
 ## Version 2.15.0.0
 
 ### v2.15.0.0

@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.15.0.0"
+VERSION = "2.15.0.2"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -306,6 +306,13 @@ download_worker_started = False
 storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
 storage_cache_lock = threading.Lock()
 retention_cleanup_lock = threading.Lock()
+
+# Rolling file-size samples used to estimate live Pinchflat download speed when
+# yt-dlp does not emit a progress line.  Pinchflat commonly runs yt-dlp with
+# --no-progress, so this gives the dashboard a useful best-effort speed without
+# changing Pinchflat's own downloader arguments.
+pinchflat_speed_samples = {}
+pinchflat_speed_samples_lock = threading.Lock()
 
 
 def db():
@@ -715,6 +722,7 @@ def init_db():
 
             "page_show_summary_google": "1",
             "page_show_summary_pinchflat": "1",
+            "page_show_summary_pinchflat_tasks": "1",
             "page_show_summary_subscriptions": "1",
             "page_show_summary_downloads": "1",
             "page_show_summary_errors": "1",
@@ -737,7 +745,7 @@ def init_db():
             "page_channel_control_retention": "1",
 
             "page_section_order": "summary,pinchflat,latest,subscriptions",
-            "page_summary_order": "google,pinchflat,latest_download,subscriptions,downloads,errors",
+            "page_summary_order": "google,pinchflat,pinchflat_tasks,latest_download,subscriptions,downloads,errors",
         }
         for key, value in defaults.items():
             if value:
@@ -8937,6 +8945,108 @@ def pinchflat_file_size(value):
     return 0
 
 
+def pinchflat_humanize_worker(worker):
+    """Return a short, readable label for a Pinchflat/Oban worker."""
+    raw = str(worker or "").strip()
+    if not raw:
+        return "Pinchflat task"
+
+    short = raw.rsplit(".", 1)[-1]
+    short = re.sub(r"Worker$", "", short)
+    short = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", short)
+    short = short.replace("YT DLP", "yt-dlp")
+    return short.strip() or "Pinchflat task"
+
+
+def pinchflat_active_file_size(media):
+    """Best-effort size of the file yt-dlp is currently writing."""
+    filepath = pinchflat_row_value(
+        media or {},
+        "media_filepath",
+        "filepath",
+        "file_path",
+    )
+    if not filepath:
+        return 0
+
+    path = pinchflat_shared_download_path(filepath)
+    if path is None:
+        return 0
+
+    candidates = [path, Path(str(path) + ".part")]
+
+    # yt-dlp normally appends .part to the final filename while downloading.
+    # Some post-processors use a temporary sibling file, so include matching
+    # part files from the same directory without recursively scanning storage.
+    try:
+        if path.parent.exists():
+            candidates.extend(path.parent.glob(path.name + "*.part"))
+    except Exception:
+        pass
+
+    largest = 0
+    seen = set()
+    for candidate in candidates:
+        try:
+            key = str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            if candidate.is_file():
+                largest = max(largest, int(candidate.stat().st_size or 0))
+        except Exception:
+            continue
+    return largest
+
+
+def pinchflat_estimated_file_speed(job_id, media):
+    """Estimate bytes/sec from the growing .part/final file between polls."""
+    try:
+        job_key = str(job_id)
+    except Exception:
+        return None
+
+    current_bytes = pinchflat_active_file_size(media)
+    now = time.monotonic()
+
+    with pinchflat_speed_samples_lock:
+        previous = pinchflat_speed_samples.get(job_key)
+        pinchflat_speed_samples[job_key] = {
+            "at": now,
+            "bytes": current_bytes,
+            "speed": (previous or {}).get("speed"),
+        }
+
+        # Drop old jobs so a long-running app does not accumulate stale IDs.
+        stale = [
+            key for key, value in pinchflat_speed_samples.items()
+            if now - float(value.get("at") or now) > 180
+        ]
+        for key in stale:
+            if key != job_key:
+                pinchflat_speed_samples.pop(key, None)
+
+        if not previous:
+            return None
+
+        elapsed = now - float(previous.get("at") or now)
+        previous_bytes = int(previous.get("bytes") or 0)
+        delta = current_bytes - previous_bytes
+
+        if elapsed >= 0.5 and delta > 0:
+            speed = delta / elapsed
+            pinchflat_speed_samples[job_key]["speed"] = speed
+            return speed
+
+        # Keep the previous estimate briefly when filesystem writes arrive in
+        # bursts between the four-second dashboard polls.
+        previous_speed = previous.get("speed")
+        if previous_speed and elapsed < 12:
+            return float(previous_speed)
+
+    return None
+
+
 def pinchflat_download_progress_from_logs(active_count):
     """
     Pinchflat normally runs yt-dlp with --no-progress, so percentage data is
@@ -8965,6 +9075,23 @@ def pinchflat_download_progress_from_logs(active_count):
         match = progress_re.search(line)
         if not match:
             continue
+
+        # Docker log lines are timestamped. Ignore old progress records so a
+        # previous download cannot make the current job appear to have a stale
+        # transfer speed.
+        stamp_match = re.match(
+            r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?Z\s+",
+            line,
+        )
+        if stamp_match:
+            try:
+                stamp = datetime.fromisoformat(
+                    stamp_match.group(1) + "+00:00"
+                )
+                if (datetime.now(timezone.utc) - stamp).total_seconds() > 30:
+                    continue
+            except Exception:
+                pass
 
         try:
             percent = max(
@@ -9122,6 +9249,68 @@ def pinchflat_download_overview(queue_limit=100):
                 "scheduled",
             )
         )
+
+        # The Pinchflat dashboard contains many Oban jobs besides media
+        # downloads, such as source indexing and metadata work.  Surface those
+        # separately so the home-page task tile does not duplicate the
+        # dedicated Pinchflat downloads section.
+        task_state_rows = conn.execute(
+            """
+            SELECT state, COUNT(*) AS count
+            FROM oban_jobs
+            WHERE worker != ?
+              AND state IN ('executing', 'available', 'scheduled')
+            GROUP BY state
+            """,
+            (media_worker,),
+        ).fetchall()
+
+        task_state_counts = {
+            str(row["state"]): int(row["count"] or 0)
+            for row in task_state_rows
+        }
+        total_task_active = task_state_counts.get("executing", 0)
+        total_task_waiting = sum(
+            task_state_counts.get(state, 0)
+            for state in ("available", "scheduled")
+        )
+
+        task_rows = conn.execute(
+            f"""
+            SELECT {", ".join(selected_job_columns)}
+            FROM oban_jobs
+            WHERE worker != ?
+              AND state IN ('executing', 'available', 'scheduled')
+            ORDER BY
+              CASE state
+                WHEN 'executing' THEN 0
+                WHEN 'available' THEN 1
+                WHEN 'scheduled' THEN 2
+                ELSE 9
+              END,
+              {order_time_expr} ASC,
+              id ASC
+            LIMIT 20
+            """,
+            (media_worker,),
+        ).fetchall()
+
+        pinchflat_tasks = [
+            {
+                "job_id": row["id"],
+                "worker": str(row["worker"] or ""),
+                "label": pinchflat_humanize_worker(row["worker"]),
+                "state": str(row["state"] or ""),
+                "status": {
+                    "executing": "Running",
+                    "available": "Waiting",
+                    "scheduled": "Scheduled",
+                }.get(str(row["state"] or ""), str(row["state"] or "").title()),
+                "started_at": (row["attempted_at"] if "attempted_at" in row.keys() else "") or "",
+                "scheduled_at": (row["scheduled_at"] if "scheduled_at" in row.keys() else "") or "",
+            }
+            for row in task_rows
+        ]
 
         job_rows = conn.execute(
             f"""
@@ -9420,6 +9609,39 @@ def pinchflat_download_overview(queue_limit=100):
             if job.get("state") == "executing"
         ]
 
+        # Add best-effort live transfer information.  File growth works even
+        # when Pinchflat starts yt-dlp with --no-progress.  If yt-dlp does emit
+        # a standard progress line, use its richer speed/ETA values instead.
+        for item in active:
+            media = media_map.get(
+                int(item.get("media_item_id"))
+                if item.get("media_item_id") is not None
+                else -1,
+                {},
+            )
+            current_bytes = pinchflat_active_file_size(media)
+            estimated_bps = pinchflat_estimated_file_speed(item.get("job_id"), media)
+            item["downloaded_bytes"] = current_bytes
+            item["downloaded_text"] = format_bytes(current_bytes) if current_bytes else ""
+            item["speed_bps"] = estimated_bps or 0
+            item["speed"] = (
+                f"{format_bytes(estimated_bps)}/s"
+                if estimated_bps
+                else ""
+            )
+            item["progress_percent"] = None
+            item["progress_total"] = ""
+            item["eta"] = ""
+
+        log_progress = pinchflat_download_progress_from_logs(len(active))
+        if len(active) == 1 and log_progress:
+            item = active[0]
+            if log_progress.get("speed"):
+                item["speed"] = str(log_progress["speed"])
+            item["progress_percent"] = log_progress.get("percent")
+            item["progress_total"] = str(log_progress.get("total") or "")
+            item["eta"] = str(log_progress.get("eta") or "")
+
         waiting_all = [
             job_view(job)
             for job in jobs
@@ -9672,7 +9894,10 @@ def pinchflat_download_overview(queue_limit=100):
             "summary": {
                 "active": total_active_count,
                 "waiting": total_waiting_count,
+                "tasks_active": total_task_active,
+                "tasks_waiting": total_task_waiting,
             },
+            "tasks": pinchflat_tasks,
             "last_downloaded": last_downloaded,
             "worker": media_worker,
             "schema": {
@@ -13483,6 +13708,10 @@ def index():
             "page_show_summary_pinchflat",
             True,
         ),
+        "show_summary_pinchflat_tasks": setting_bool(
+            "page_show_summary_pinchflat_tasks",
+            True,
+        ),
         "show_summary_subscriptions": setting_bool(
             "page_show_summary_subscriptions",
             True,
@@ -13572,6 +13801,7 @@ def index():
         (
             "google",
             "pinchflat",
+            "pinchflat_tasks",
             "latest_download",
             "subscriptions",
             "downloads",
@@ -13580,6 +13810,7 @@ def index():
         (
             "google",
             "pinchflat",
+            "pinchflat_tasks",
             "latest_download",
             "subscriptions",
             "downloads",
@@ -14503,6 +14734,7 @@ def save_page_view_settings():
 
         "page_show_summary_google",
         "page_show_summary_pinchflat",
+        "page_show_summary_pinchflat_tasks",
         "page_show_summary_subscriptions",
         "page_show_summary_downloads",
         "page_show_summary_errors",
@@ -14560,6 +14792,7 @@ def save_page_view_settings():
         in {
             "google",
             "pinchflat",
+            "pinchflat_tasks",
             "latest_download",
             "subscriptions",
             "downloads",
@@ -14587,6 +14820,7 @@ def save_page_view_settings():
     valid_summary = [
         "google",
         "pinchflat",
+        "pinchflat_tasks",
         "latest_download",
         "subscriptions",
         "downloads",
@@ -16360,7 +16594,10 @@ def pinchflat_download_overview_api():
                 "summary": {
                     "active": 0,
                     "waiting": 0,
+                    "tasks_active": 0,
+                    "tasks_waiting": 0,
                 },
+                "tasks": [],
                 "last_downloaded": None,
             }
         ), 503
