@@ -1599,6 +1599,13 @@
       overflow-y:auto;
       line-height:1.5;
     }
+    .latest-popup-description a {
+      color:#7db6ff;
+      text-decoration:underline;
+      text-underline-offset:2px;
+      overflow-wrap:anywhere;
+    }
+    .latest-popup-description a:hover { color:#b5d6ff; }
     .latest-popup-stats {
       color:var(--muted);
       font-size:13px;
@@ -2807,7 +2814,8 @@
       font-size:18px; font-weight:900; box-shadow:0 4px 14px rgba(0,0,0,.36); cursor:pointer; backdrop-filter:blur(4px);
     }
     .channel-video-download-action svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-    .channel-video-download-action:hover { transform:scale(1.06); background:#2563eb; }
+    .channel-video-download-action:hover:not(:disabled) { transform:scale(1.06); background:#2563eb; }
+    .channel-video-download-action:disabled { opacity:.42; cursor:not-allowed; transform:none; background:rgba(7,17,29,.88); }
     .subscription-channel-description a { color:#7db6ff; text-decoration:underline; text-underline-offset:2px; overflow-wrap:anywhere; }
     .subscription-channel-description a:hover { color:#b5d6ff; }
 
@@ -3096,7 +3104,7 @@
 
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}
-      <div class="flash {{ category }}">
+      <div class="flash {{ category }}" data-flash-message="1">
         <span>{{ message }}</span>
         <button
           class="flash-dismiss"
@@ -3772,6 +3780,7 @@
           <div class="debug-function-row" data-debug-search="auto refresh emby downloads"><div class="debug-function-name">Automatic Emby refresh</div><div class="debug-service-badge">Pinchflat + Emby</div><div class="debug-function-description">Detects a newly completed Pinchflat download, scans its channel in Emby and follows with a delayed metadata refresh automatically.</div></div>
           <div class="debug-function-row" data-debug-search="subscription sync schedule automation youtube"><div class="debug-function-name">YouTube subscription sync</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Controls the scheduled refresh of YouTube subscriptions.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat sync schedule automation"><div class="debug-function-name">Pinchflat sync schedule</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Controls scheduled reconciliation between local subscription settings and Pinchflat sources.</div></div>
+          <div class="debug-function-row" data-debug-search="scheduled force index favourites non favourites source scan"><div class="debug-function-name">Scheduled Force Index</div><div class="debug-service-badge">Pinchflat + YouTube</div><div class="debug-function-description">Force Indexes enabled Pinchflat sources automatically. Favourite and non-favourite channels have separate intervals, and scans are staggered source by source across each interval to avoid one large request burst.</div></div>
           <div class="debug-function-row" data-debug-search="emby download playlist automation"><div class="debug-function-name">Emby Download playlist</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Checks the private Emby Download playlist and sends requested videos through the automatic download workflow.</div></div>
           <div class="debug-function-row" data-debug-search="concurrent downloads workers yt-dlp docker"><div class="debug-function-name">Concurrent downloads</div><div class="debug-service-badge">Pinchflat + Docker</div><div class="debug-function-description">Changes Pinchflat's yt-dlp worker concurrency and recreates the container while preserving its configuration.</div></div>
           <div class="debug-function-row" data-debug-search="media profiles pinchflat settings"><div class="debug-function-name">Media Profiles</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Creates, edits and deletes Pinchflat media profiles including path, quality, metadata, artwork and SponsorBlock options.</div></div>
@@ -4960,6 +4969,61 @@
       <div class="setting-box">
         <div class="profile-editor-heading">
           <div>
+            <h3>Scheduled Force Index</h3>
+            <div class="muted small">Automatically ask Pinchflat to Force Index linked sources, with separate schedules for favourite and non-favourite channels.</div>
+          </div>
+        </div>
+
+        <form method="post" action="/settings/pinchflat/force-index" style="margin-top:14px">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+          <div class="settings-grid">
+            <label>Favourite channels
+              <select name="pinchflat_force_index_favourite_minutes">
+                {% for value, label in pinchflat_force_index_favourite_options %}
+                  <option value="{{ value }}" {% if pinchflat_force_index_favourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="muted small">Applies only to favourite channels which currently have an enabled Pinchflat source.</span>
+            </label>
+
+            <label>Non-favourite channels
+              <select name="pinchflat_force_index_nonfavourite_minutes">
+                {% for value, label in pinchflat_force_index_nonfavourite_options %}
+                  <option value="{{ value }}" {% if pinchflat_force_index_nonfavourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="muted small">Applies to the remaining enabled Pinchflat sources.</span>
+            </label>
+          </div>
+
+          <div class="mini-stat-grid" style="margin-top:14px">
+            <div>
+              <span class="muted small">Favourite sources</span>
+              <strong>{{ pinchflat_force_index_status.favourites.eligible }}</strong>
+            </div>
+            <div>
+              <span class="muted small">Non-favourite sources</span>
+              <strong>{{ pinchflat_force_index_status.non_favourites.eligible }}</strong>
+            </div>
+          </div>
+
+          <div class="profile-control-help" style="margin-top:12px">
+            The interval applies per channel. Pinchflat Sync spreads a full pass across the selected period and Force Indexes sources one at a time instead of sending every request together. Favourite and non-favourite schedules run independently.
+          </div>
+          <div class="profile-control-help" style="margin-top:8px">
+            Short intervals across hundreds of sources increase YouTube traffic and may contribute to HTTP 429 rate limiting. Longer intervals are recommended for non-favourite channels.
+          </div>
+
+          <div class="actions" style="margin-top:14px">
+            <button class="btn" type="submit">Save Force Index schedule</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="setting-box">
+        <div class="profile-editor-heading">
+          <div>
             <h3>Media Profile Manager</h3>
             <div class="muted small">Create, select, edit and delete Pinchflat Media Profiles without leaving this app.</div>
           </div>
@@ -5753,6 +5817,7 @@
       </div>
     </section>
   </div>
+  <div id="settings-ajax-toast" class="ajax-toast" role="status" aria-live="polite"></div>
 </dialog>
 
 
@@ -5789,6 +5854,7 @@ const googleWriteReady = {{ 'true' if google_write_ready else 'false' }};
 let returnToPinchflatQueueAfterPlayer = false;
 let pinchflatQueueReturnScrollTop = 0;
 let singleDownloadTimer = null;
+let singleDownloadedVideoIds = new Set();
 let latestSubscriptionVideos = [];
 let latestSubscriptionShorts = [];
 let latestPopupVideo = null;
@@ -6718,6 +6784,7 @@ function settingsActionNeedsPageRefresh(path) {
     "/settings/apis",
     "/settings/pinchflat",
     "/settings/pinchflat/advanced",
+    "/settings/pinchflat/force-index",
     "/settings/pinchflat/profile/create",
     "/settings/pinchflat/profile/delete",
     "/settings/pinchflat/profile",
@@ -6736,7 +6803,12 @@ function settingsActionNeedsDialogRefresh(path) {
 }
 
 function settingsResponseNotice(documentNode) {
-  const notices = Array.from(documentNode.querySelectorAll(".flash"));
+  // Only inspect messages created by Flask's flash() system. Persistent page
+  // warnings also use the .flash class and previously made successful Settings
+  // saves look like red errors when one of those warnings was present.
+  const notices = Array.from(
+    documentNode.querySelectorAll('.flash[data-flash-message="1"]')
+  );
   if (!notices.length) return null;
 
   const error = notices.find(node => node.classList.contains("error"));
@@ -6837,6 +6909,58 @@ async function submitSettingsFormWithoutReload(event) {
 }
 
 settingsDialog.addEventListener("submit", submitSettingsFormWithoutReload);
+
+function oneTimeDownloadVideoId(itemOrId) {
+  if (!itemOrId) return "";
+  if (typeof itemOrId === "string") return itemOrId.trim();
+  return String(itemOrId.video_id || itemOrId.youtube_video_id || "").trim();
+}
+
+function isOneTimeDownloaded(itemOrId) {
+  const videoId = oneTimeDownloadVideoId(itemOrId);
+  return !!videoId && singleDownloadedVideoIds.has(videoId);
+}
+
+function setOneTimeDownloadButtonState(button, itemOrId, fallbackEnabled=true) {
+  if (!button) return;
+  const videoId = oneTimeDownloadVideoId(itemOrId);
+  if (videoId) button.dataset.oneTimeDownloadVideoId = videoId;
+  else delete button.dataset.oneTimeDownloadVideoId;
+
+  const downloaded = !!videoId && singleDownloadedVideoIds.has(videoId);
+  button.classList.toggle("already-downloaded", downloaded);
+  button.disabled = downloaded || !fallbackEnabled;
+  if (downloaded) {
+    button.title = "Already downloaded with One-time Download";
+    button.setAttribute("aria-label", button.title);
+  }
+}
+
+function refreshOneTimeDownloadButtonStates() {
+  document.querySelectorAll("[data-one-time-download-video-id]").forEach(button => {
+    const videoId = button.dataset.oneTimeDownloadVideoId || "";
+    const downloaded = !!videoId && singleDownloadedVideoIds.has(videoId);
+    button.classList.toggle("already-downloaded", downloaded);
+    button.disabled = downloaded;
+    if (downloaded) {
+      button.title = "Already downloaded with One-time Download";
+      button.setAttribute("aria-label", button.title);
+    }
+  });
+}
+
+async function loadSingleDownloadedVideoIds() {
+  try {
+    const response = await fetch("/api/downloads/single-completed", {cache:"no-store"});
+    const data = await response.json();
+    if (!response.ok || !data.ok) return;
+    singleDownloadedVideoIds = new Set((data.video_ids || []).map(String));
+    refreshOneTimeDownloadButtonStates();
+  } catch (_) {
+    // Download controls remain available if this optional status lookup fails.
+  }
+}
+
 function resetSingleDownloadDialog(url="") {
   const input = document.getElementById("single-download-url");
   const status = document.getElementById("single-download-status");
@@ -7617,6 +7741,7 @@ function updateLatestPopupButtons() {
     download.innerHTML = discoverActionSvg("download");
     download.title = "Prepare one-time download";
     download.setAttribute("aria-label", download.title);
+    setOneTimeDownloadButtonState(download, latestPopupVideo, !!(latestPopupVideo.video_url || latestPopupVideo.shorts_url || latestPopupVideo.video_id));
   }
 
   if (youtubeLink) {
@@ -7705,7 +7830,10 @@ function renderLatestVideoDetails(item) {
 
   const bits = [formatLatestViewCount(item.view_count), formatLatestAge(item.published_at)].filter(Boolean);
   stats.textContent = bits.join(" · ");
-  description.textContent = item.description || "No description provided for this video.";
+  renderChannelDescriptionWithLinks(
+    description,
+    item.description || "No description provided for this video."
+  );
   youtubeLink.href = (item.is_short ? item.shorts_url : item.video_url) || item.video_url || "https://www.youtube.com";
 
   const values = {
@@ -7762,7 +7890,10 @@ async function loadLatestPopupChannelDetails(channelId, expectedVideoId) {
 
     document.getElementById("latest-popup-channel").textContent = yt.title || latestPopupVideo.channel_title || "YouTube channel";
     document.getElementById("latest-popup-channel-handle").textContent = yt.handle || yt.custom_url || "";
-    document.getElementById("latest-popup-channel-description").textContent = yt.description || "No channel description was returned.";
+    renderChannelDescriptionWithLinks(
+      document.getElementById("latest-popup-channel-description"),
+      yt.description || "No channel description was returned."
+    );
 
     const avatar = document.getElementById("latest-popup-channel-avatar");
     if (avatar && yt.thumbnail_url) avatar.src = yt.thumbnail_url;
@@ -8443,6 +8574,7 @@ function savedVideoCard(item, options={}) {
   download.className = "discover-action-icon favourite-video-download";
   download.innerHTML = discoverActionSvg("download");
   download.title = "Prepare one-time download";
+  setOneTimeDownloadButtonState(download, item, !!(item.video_url || item.video_id));
   download.onclick = event => {
     event.preventDefault();
     event.stopPropagation();
@@ -9103,8 +9235,8 @@ function makeDiscoverActionButton(kind, item) {
   } else if (kind === "download") {
     button.classList.add("discover-action-primary", "discover-action-download");
     button.innerHTML = discoverActionSvg("download");
-    button.disabled = !(item.video_url || item.video_id);
     button.title = `Prepare one-time download for ${item.title || "this video"}`;
+    setOneTimeDownloadButtonState(button, item, !!(item.video_url || item.video_id));
     button.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -10468,6 +10600,7 @@ function renderChannelVideos() {
       downloadButton.innerHTML = discoverActionSvg("download");
       downloadButton.title = "One-time download";
       downloadButton.setAttribute("aria-label", `One-time download ${video.title || "video"}`);
+      setOneTimeDownloadButtonState(downloadButton, video, !!(video.video_url || video.video_id));
       downloadButton.onclick = event => {
         event.preventDefault();
         event.stopPropagation();
@@ -11023,9 +11156,17 @@ function toggleSubscriptionsSection() {
 let ajaxToastTimer = null;
 
 function showAjaxToast(message, type="success") {
-  const toast = document.getElementById("ajax-toast");
+  const settingsToast = document.getElementById("settings-ajax-toast");
+  const pageToast = document.getElementById("ajax-toast");
+  // A native <dialog> is rendered in the browser's top layer. A toast outside
+  // that dialog stays visually behind it regardless of a large z-index, so
+  // Settings uses a toast that lives inside the open dialog instead.
+  const toast = settingsDialog?.open && settingsToast ? settingsToast : pageToast;
   if (!toast || !message) return;
 
+  document.querySelectorAll(".ajax-toast.show").forEach(
+    item => item.classList.remove("show")
+  );
   toast.textContent = message;
   toast.classList.remove(
     "error",
@@ -11731,6 +11872,12 @@ async function pollSingleDownload(jobId) {
     clearInterval(singleDownloadTimer);
     singleDownloadTimer = null;
     document.getElementById("single-download-start").disabled = false;
+    if (job.status === "completed" && job.source_type === "single" && job.video_id) {
+      singleDownloadedVideoIds.add(String(job.video_id));
+      refreshOneTimeDownloadButtonStates();
+      // Re-check the server so the grey state is tied to the file still existing.
+      setTimeout(loadSingleDownloadedVideoIds, 500);
+    }
   }
 }
 
@@ -11878,6 +12025,9 @@ applyConfiguredPageOrder();
 
 function startDeferredDashboardWork() {
   initialisePageViewSettings();
+  // This is a small local DB lookup. Load it early so one-time download icons
+  // are greyed out before Discover or Channel video grids are opened.
+  loadSingleDownloadedVideoIds();
 
   {% if page_view.load_pinchflat_downloads %}
   setPinchflatDownloadMinimised(

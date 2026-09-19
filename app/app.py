@@ -19,7 +19,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import qrcode
 import requests
@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.14.0.7"
+VERSION = "2.14.0.11"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -534,6 +534,15 @@ def init_db():
                 PRIMARY KEY (user_id, channel_id)
             );
 
+            CREATE TABLE IF NOT EXISTS pinchflat_force_index_state (
+                channel_id TEXT PRIMARY KEY,
+                source_id TEXT,
+                last_forced_at REAL NOT NULL DEFAULT 0,
+                last_status TEXT,
+                last_error TEXT,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS discovery_likes (
                 user_id INTEGER NOT NULL,
                 video_id TEXT NOT NULL,
@@ -620,6 +629,8 @@ def init_db():
             "sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "youtube_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "pinchflat_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
+            "pinchflat_force_index_favourite_minutes": "0",
+            "pinchflat_force_index_nonfavourite_minutes": "0",
             "auto_retry": "1",
             "auto_create_media_profile": "1",
             "emby_download_enabled": "1",
@@ -4932,6 +4943,108 @@ def download_job_row(job_id):
     return dict(row) if row else None
 
 
+def youtube_video_id_from_url(value):
+    """Extract a YouTube video ID from the common public URL formats."""
+    try:
+        parsed = urlparse(str(value or "").strip())
+    except Exception:
+        return ""
+
+    host = (parsed.hostname or "").casefold()
+    path_parts = [part for part in (parsed.path or "").split("/") if part]
+
+    if host == "youtu.be" and path_parts:
+        candidate = path_parts[0]
+    elif host == "youtube.com" or host.endswith(".youtube.com"):
+        if parsed.path == "/watch":
+            candidate = (parse_qs(parsed.query).get("v") or [""])[0]
+        elif path_parts and path_parts[0] in {"shorts", "embed", "live"} and len(path_parts) > 1:
+            candidate = path_parts[1]
+        else:
+            candidate = ""
+    else:
+        candidate = ""
+
+    candidate = str(candidate or "").strip()
+    return candidate if re.fullmatch(r"[A-Za-z0-9_-]{6,20}", candidate) else ""
+
+
+def single_download_file_exists(row):
+    """Return True only while a completed one-time download still exists on disk."""
+    if not row or str(row.get("status") or "") != "completed":
+        return False
+
+    raw_path = str(row.get("output_path") or "").strip()
+    if not raw_path:
+        return False
+
+    path = Path(raw_path)
+    if path.exists() and path.is_file():
+        return True
+
+    # Some yt-dlp post-processors change the final extension after the path was
+    # first reported. Search only the recorded parent folder, never all of
+    # /downloads, and match the YouTube ID embedded by the default template.
+    video_id = str(row.get("video_id") or "").strip()
+    parent = path.parent
+    if video_id and parent.exists() and parent.is_dir():
+        try:
+            return any(
+                child.is_file() and video_id in child.name
+                for child in parent.iterdir()
+            )
+        except OSError:
+            return False
+    return False
+
+
+def completed_single_download_rows():
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT job_id, video_id, output_path, status, finished_at
+            FROM downloads
+            WHERE source_type = 'single'
+              AND status = 'completed'
+              AND COALESCE(video_id, '') <> ''
+            ORDER BY id DESC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def completed_single_download_video_ids():
+    seen = set()
+    for row in completed_single_download_rows():
+        video_id = str(row.get("video_id") or "").strip()
+        if video_id and video_id not in seen and single_download_file_exists(row):
+            seen.add(video_id)
+    return seen
+
+
+def completed_single_download_for_video(video_id):
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        return None
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT job_id, video_id, output_path, status, finished_at
+            FROM downloads
+            WHERE source_type = 'single'
+              AND video_id = ?
+              AND status = 'completed'
+            ORDER BY id DESC
+            """,
+            (video_id,),
+        ).fetchall()
+    for row in rows:
+        item = dict(row)
+        if single_download_file_exists(item):
+            return item
+    return None
+
+
 def enqueue_download(
     youtube_url,
     source_type="single",
@@ -5789,6 +5902,205 @@ def current_pinchflat_sync_interval():
         5,
         1440,
     )
+
+
+PINCHFLAT_FORCE_INDEX_FAVOURITE_OPTIONS = (
+    (0, "Off"),
+    (15, "Every 15 minutes"),
+    (30, "Every 30 minutes"),
+    (60, "Every hour"),
+    (120, "Every 2 hours"),
+    (180, "Every 3 hours"),
+    (360, "Every 6 hours"),
+    (720, "Every 12 hours"),
+    (1440, "Every 24 hours"),
+)
+PINCHFLAT_FORCE_INDEX_NONFAVOURITE_OPTIONS = (
+    (0, "Off"),
+    (180, "Every 3 hours"),
+    (360, "Every 6 hours"),
+    (720, "Every 12 hours"),
+    (1440, "Every 24 hours"),
+    (2880, "Every 2 days"),
+    (4320, "Every 3 days"),
+    (10080, "Every 7 days"),
+)
+PINCHFLAT_FORCE_INDEX_FAVOURITE_VALUES = {value for value, _label in PINCHFLAT_FORCE_INDEX_FAVOURITE_OPTIONS}
+PINCHFLAT_FORCE_INDEX_NONFAVOURITE_VALUES = {value for value, _label in PINCHFLAT_FORCE_INDEX_NONFAVOURITE_OPTIONS}
+
+
+def current_pinchflat_force_index_interval(favourite=False):
+    key = (
+        "pinchflat_force_index_favourite_minutes"
+        if favourite
+        else "pinchflat_force_index_nonfavourite_minutes"
+    )
+    allowed = (
+        PINCHFLAT_FORCE_INDEX_FAVOURITE_VALUES
+        if favourite
+        else PINCHFLAT_FORCE_INDEX_NONFAVOURITE_VALUES
+    )
+    try:
+        value = int(get_setting(key, "0") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return value if value in allowed else 0
+
+
+def _pinchflat_force_index_group_rows(favourite=False):
+    favourite_clause = "f.channel_id IS NOT NULL" if favourite else "f.channel_id IS NULL"
+    with db() as conn:
+        return [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                SELECT
+                    s.channel_id,
+                    s.title,
+                    s.pinchflat_source_id,
+                    COALESCE(fi.last_forced_at, 0) AS last_forced_at,
+                    fi.last_status,
+                    fi.last_error
+                FROM subscriptions s
+                LEFT JOIN (
+                    SELECT DISTINCT channel_id
+                    FROM favourite_channels
+                ) f ON f.channel_id = s.channel_id
+                LEFT JOIN pinchflat_force_index_state fi
+                    ON fi.channel_id = s.channel_id
+                WHERE s.active = 1
+                  AND s.download_enabled = 1
+                  AND s.pinchflat_added = 1
+                  AND s.pinchflat_source_id IS NOT NULL
+                  AND TRIM(s.pinchflat_source_id) != ''
+                  AND {favourite_clause}
+                ORDER BY
+                    COALESCE(fi.last_forced_at, 0) ASC,
+                    LOWER(COALESCE(s.title, '')) ASC
+                """
+            ).fetchall()
+        ]
+
+
+def pinchflat_force_index_status():
+    favourite_rows = _pinchflat_force_index_group_rows(True)
+    other_rows = _pinchflat_force_index_group_rows(False)
+
+    def summarise(rows):
+        completed = [float(row.get("last_forced_at") or 0) for row in rows if float(row.get("last_forced_at") or 0) > 0]
+        last_ts = max(completed) if completed else 0
+        return {
+            "eligible": len(rows),
+            "last_forced_at": (
+                datetime.fromtimestamp(last_ts, timezone.utc).isoformat()
+                if last_ts
+                else ""
+            ),
+        }
+
+    return {
+        "favourites": summarise(favourite_rows),
+        "non_favourites": summarise(other_rows),
+    }
+
+
+def _record_pinchflat_force_index_result(row, ok, error=""):
+    now_ts = time.time()
+    with db() as conn:
+        conn.execute(
+            """
+            INSERT INTO pinchflat_force_index_state (
+                channel_id, source_id, last_forced_at, last_status, last_error, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                source_id = excluded.source_id,
+                last_forced_at = excluded.last_forced_at,
+                last_status = excluded.last_status,
+                last_error = excluded.last_error,
+                updated_at = excluded.updated_at
+            """,
+            (
+                row.get("channel_id", ""),
+                str(row.get("pinchflat_source_id") or ""),
+                now_ts,
+                "ok" if ok else "error",
+                "" if ok else str(error)[:1000],
+                now_iso(),
+            ),
+        )
+
+
+def _scheduled_pinchflat_force_index_group(favourite=False):
+    interval_minutes = current_pinchflat_force_index_interval(favourite)
+    if interval_minutes <= 0:
+        return {"enabled": False, "eligible": 0, "processed": 0, "errors": 0}
+
+    rows = _pinchflat_force_index_group_rows(favourite)
+    total = len(rows)
+    if not total:
+        return {"enabled": True, "eligible": 0, "processed": 0, "errors": 0}
+
+    now_ts = time.time()
+    due_before = now_ts - (interval_minutes * 60)
+    due_rows = [
+        row
+        for row in rows
+        if float(row.get("last_forced_at") or 0) <= due_before
+    ]
+    if not due_rows:
+        return {"enabled": True, "eligible": total, "processed": 0, "errors": 0}
+
+    # Spread a complete sweep across the requested interval instead of firing
+    # every source together. The cap keeps a large library from causing a
+    # sudden burst of Pinchflat/YouTube requests.
+    target_per_minute = max(1, (total + interval_minutes - 1) // interval_minutes)
+    target_per_minute = min(target_per_minute, 8)
+    batch = due_rows[:target_per_minute]
+
+    processed = 0
+    errors = 0
+    for index, row in enumerate(batch):
+        try:
+            with pinchflat_source_action_lock:
+                execute_pinchflat_source_action(
+                    row.get("pinchflat_source_id"),
+                    "force_scan",
+                )
+            _record_pinchflat_force_index_result(row, True)
+            processed += 1
+        except Exception as exc:
+            _record_pinchflat_force_index_result(row, False, str(exc))
+            errors += 1
+            log_activity(
+                "pinchflat",
+                "Scheduled Force Index failed",
+                f"{row.get('title') or row.get('channel_id')}: {exc}",
+                "error",
+            )
+
+        if index < len(batch) - 1:
+            time.sleep(2)
+
+    return {
+        "enabled": True,
+        "eligible": total,
+        "processed": processed,
+        "errors": errors,
+    }
+
+
+def scheduled_pinchflat_force_index():
+    if (
+        current_pinchflat_force_index_interval(True) <= 0
+        and current_pinchflat_force_index_interval(False) <= 0
+    ):
+        return
+
+    if not pinchflat_health():
+        return
+
+    _scheduled_pinchflat_force_index_group(True)
+    _scheduled_pinchflat_force_index_group(False)
 
 
 def current_sync_interval():
@@ -12681,6 +12993,11 @@ def index():
         dry_run=DRY_RUN,
         youtube_sync_interval=current_youtube_sync_interval(),
         pinchflat_sync_interval=current_pinchflat_sync_interval(),
+        pinchflat_force_index_favourite_minutes=current_pinchflat_force_index_interval(True),
+        pinchflat_force_index_nonfavourite_minutes=current_pinchflat_force_index_interval(False),
+        pinchflat_force_index_favourite_options=PINCHFLAT_FORCE_INDEX_FAVOURITE_OPTIONS,
+        pinchflat_force_index_nonfavourite_options=PINCHFLAT_FORCE_INDEX_NONFAVOURITE_OPTIONS,
+        pinchflat_force_index_status=pinchflat_force_index_status(),
         emby_download_poll_minutes=current_emby_poll_interval(),
         next_youtube_sync=next_youtube_sync,
         next_pinchflat_sync=next_pinchflat_sync,
@@ -13779,6 +14096,62 @@ def save_pinchflat_advanced_settings():
     )
 
 
+@app.post("/settings/pinchflat/force-index")
+def save_pinchflat_force_index_settings():
+    def parse_interval(name, allowed):
+        raw = str(request.form.get(name, "0") or "0").strip()
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = 0
+        return value if value in allowed else 0
+
+    favourite_minutes = parse_interval(
+        "pinchflat_force_index_favourite_minutes",
+        PINCHFLAT_FORCE_INDEX_FAVOURITE_VALUES,
+    )
+    nonfavourite_minutes = parse_interval(
+        "pinchflat_force_index_nonfavourite_minutes",
+        PINCHFLAT_FORCE_INDEX_NONFAVOURITE_VALUES,
+    )
+
+    set_setting(
+        "pinchflat_force_index_favourite_minutes",
+        str(favourite_minutes),
+    )
+    set_setting(
+        "pinchflat_force_index_nonfavourite_minutes",
+        str(nonfavourite_minutes),
+    )
+
+    def interval_text(value):
+        if not value:
+            return "Off"
+        if value < 60:
+            return f"every {value} minutes"
+        if value == 60:
+            return "every hour"
+        if value % 1440 == 0:
+            days = value // 1440
+            return f"every {days} day" + ("" if days == 1 else "s")
+        if value % 60 == 0:
+            hours = value // 60
+            return f"every {hours} hours"
+        return f"every {value} minutes"
+
+    log_activity(
+        "settings",
+        "Scheduled Force Index updated",
+        (
+            f"Favourite channels: {interval_text(favourite_minutes)}. "
+            f"Non-favourite channels: {interval_text(nonfavourite_minutes)}."
+        ),
+        "success",
+    )
+    flash("Scheduled Pinchflat Force Index settings saved.", "success")
+    return redirect(url_for("index") + "#pinchflat")
+
+
 @app.post("/settings/pinchflat/profile/create")
 def create_pinchflat_profile_from_settings():
     name = request.form.get("profile_name", "").strip()
@@ -14848,19 +15221,66 @@ def single_download_start():
     youtube_url = str(payload.get("youtube_url") or "").strip()
 
     try:
+        video_id = youtube_video_id_from_url(youtube_url)
+        if video_id:
+            existing = completed_single_download_for_video(video_id)
+            if existing:
+                return jsonify({
+                    "ok": False,
+                    "already_downloaded": True,
+                    "video_id": video_id,
+                    "error": "This video has already been downloaded with One-time Download and the file is still present.",
+                }), 409
+
+            with db() as conn:
+                active = conn.execute(
+                    """
+                    SELECT job_id, status
+                    FROM downloads
+                    WHERE source_type = 'single'
+                      AND video_id = ?
+                      AND status IN ('queued', 'downloading')
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (video_id,),
+                ).fetchone()
+            if active:
+                return jsonify({
+                    "ok": True,
+                    "job_id": active["job_id"],
+                    "created": False,
+                    "video_id": video_id,
+                })
+
         job_id, created = enqueue_download(
             youtube_url,
             source_type="single",
+            video_id=video_id or None,
         )
         return jsonify(
             {
                 "ok": True,
                 "job_id": job_id,
                 "created": created,
+                "video_id": video_id or None,
             }
         )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get("/api/downloads/single-completed")
+def single_download_completed_api():
+    try:
+        video_ids = sorted(completed_single_download_video_ids())
+        return jsonify({
+            "ok": True,
+            "video_ids": video_ids,
+            "count": len(video_ids),
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc), "video_ids": []}), 500
 
 
 @app.get("/api/pinchflat/download-overview")
@@ -15811,5 +16231,13 @@ scheduler.add_job(
     minutes=1,
     id="emby-library-refresh-monitor",
     max_instances=1,
+)
+scheduler.add_job(
+    scheduled_pinchflat_force_index,
+    "interval",
+    minutes=1,
+    id="pinchflat-scheduled-force-index",
+    max_instances=1,
+    coalesce=True,
 )
 scheduler.start()

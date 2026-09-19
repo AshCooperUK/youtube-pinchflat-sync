@@ -2,7 +2,39 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 2.14.0.7
+## Version 2.14.0.11
+
+### v2.14.0.11
+
+- One-time Download controls now detect completed direct downloads which still exist on disk.
+- Download icons are disabled and greyed out for videos already present from One-time Download.
+- The state is shared across Channel videos, Discover, Favourites and the media player.
+- Manual Single Download requests also refuse to duplicate a completed video while its file remains present.
+- Removing the downloaded file makes the video eligible for One-time Download again after the next status lookup/page load.
+
+
+Settings notification correction.
+
+- Keeps Settings save notifications above the open Settings dialog instead of hiding them behind the modal.
+- Stops persistent dashboard warnings from being mistaken for the result of a Settings save.
+- Successful Settings saves now show the normal green success notification. Genuine save failures remain red.
+
+## Version 2.14.0.9
+
+Scheduled Pinchflat indexing update.
+
+- Adds Settings → Pinchflat → Scheduled Force Index.
+- Gives favourite and non-favourite channels independent Force Index intervals.
+- Defaults both schedules to Off so existing installs do not create extra YouTube traffic until enabled.
+- Applies the schedule only to active, download-enabled subscriptions which currently have a linked Pinchflat source.
+- Spreads each full source pass across the chosen interval and processes sources sequentially instead of sending one large burst to Pinchflat.
+- Caps scheduled work per minute and spaces actions to reduce the chance of contributing to YouTube HTTP 429 rate limiting.
+- Stores the last scheduled Force Index result per channel so restarts continue from the least recently scanned sources.
+
+## Version 2.14.0.8
+
+- Makes web addresses and email addresses in media-player video descriptions clickable and opens web links in a new tab.
+- Applies the same link handling to the channel description shown inside the media player.
 
 Channel video icon consistency update.
 
