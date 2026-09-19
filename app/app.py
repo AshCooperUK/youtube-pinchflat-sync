@@ -37,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.15.0.5"
+VERSION = "2.15.0.6"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -315,6 +315,14 @@ pinchflat_task_drain_lock = threading.Lock()
 # changing Pinchflat's own downloader arguments.
 pinchflat_speed_samples = {}
 pinchflat_speed_samples_lock = threading.Lock()
+
+# Fallback samples for One-time Download status. yt-dlp progress hooks are the
+# primary source of transfer data, but there is a preparation window before
+# the first hook fires and some download methods expose sparse hook updates.
+# Keeping a tiny rolling sample lets the status endpoint report movement from
+# the current output file without changing yt-dlp behaviour.
+direct_download_speed_samples = {}
+direct_download_speed_samples_lock = threading.Lock()
 
 
 def db():
@@ -5420,6 +5428,7 @@ def _download_progress_hook(job_id):
                 eta=str(eta).strip(),
                 downloaded_bytes=downloaded,
                 total_bytes=total,
+                output_path=data.get("filename") or "",
             )
         elif status == "finished":
             update_download_job(
@@ -5691,10 +5700,14 @@ def run_download_job(job_id):
 
     update_download_job(
         job_id,
-        status="downloading",
+        status="preparing",
         started_at=now_iso(),
         error=None,
         progress=0,
+        speed="",
+        eta="",
+        downloaded_bytes=0,
+        total_bytes=0,
     )
 
     relative_template = (
@@ -5746,6 +5759,14 @@ def run_download_job(job_id):
 
         if job.get("source_type") == "single" and get_setting("single_download_format", "best") != "audio":
             try:
+                update_download_job(
+                    job_id,
+                    status="converting",
+                    progress=100.0,
+                    speed="",
+                    eta="",
+                    output_path=output_path,
+                )
                 compatible_path = ensure_single_download_emby_compatibility(output_path)
                 if compatible_path and compatible_path != output_path:
                     log_activity(
@@ -5880,7 +5901,7 @@ def start_download_worker():
             """
             UPDATE downloads
             SET status = 'queued', started_at = NULL
-            WHERE status IN ('downloading', 'processing')
+            WHERE status IN ('preparing', 'downloading', 'processing', 'converting')
             """
         )
         queued = conn.execute(
@@ -16876,7 +16897,7 @@ def single_download_start():
                     FROM downloads
                     WHERE source_type = 'single'
                       AND video_id = ?
-                      AND status IN ('queued', 'downloading')
+                      AND status IN ('queued', 'preparing', 'downloading', 'processing', 'converting')
                     ORDER BY id DESC
                     LIMIT 1
                     """,
@@ -16993,11 +17014,58 @@ def pinchflat_logs_api():
         ), 503
 
 
+def enrich_direct_download_live_status(job):
+    """Add best-effort live file movement to a direct-download status row."""
+    if not job or job.get("status") not in {"preparing", "downloading", "processing", "converting"}:
+        return job
+
+    candidate = str(job.get("output_path") or "").strip()
+    if not candidate:
+        return job
+
+    paths = []
+    base = Path(candidate)
+    paths.append(base)
+    if not candidate.endswith(".part"):
+        paths.append(Path(candidate + ".part"))
+
+    path = next((item for item in paths if item.exists() and item.is_file()), None)
+    if path is None:
+        return job
+
+    try:
+        size = int(path.stat().st_size)
+    except OSError:
+        return job
+
+    if size > int(job.get("downloaded_bytes") or 0):
+        job["downloaded_bytes"] = size
+
+    now = time.monotonic()
+    with direct_download_speed_samples_lock:
+        previous = direct_download_speed_samples.get(job["job_id"])
+        direct_download_speed_samples[job["job_id"]] = (now, size)
+
+    if previous:
+        previous_time, previous_size = previous
+        elapsed = max(0.001, now - previous_time)
+        delta = size - previous_size
+        if delta > 0:
+            job["speed"] = f"{format_bytes(delta / elapsed)}/s"
+
+    return job
+
+
 @app.get("/api/downloads/<job_id>")
 def download_status(job_id):
     job = download_job_row(job_id)
     if not job:
         return jsonify({"ok": False, "error": "Download job not found."}), 404
+
+    job = enrich_direct_download_live_status(job)
+    if job.get("status") in {"completed", "failed"}:
+        with direct_download_speed_samples_lock:
+            direct_download_speed_samples.pop(job_id, None)
 
     job["downloaded_text"] = format_bytes(job.get("downloaded_bytes"))
     job["total_text"] = format_bytes(job.get("total_bytes"))

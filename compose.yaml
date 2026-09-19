@@ -157,10 +157,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "2.15.0.5"
+  version: "2.15.0.6"
   update_at: "2026-09-19"
   release_notes:
-    en_US: v2.15.0.5 adds persistent Pinchflat task deletion mode to cancel current and future Oban jobs.
+    en_US: v2.15.0.6 fixes One-time Download live status and includes persistent Pinchflat task deletion mode.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

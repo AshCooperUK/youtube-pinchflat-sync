@@ -12984,31 +12984,60 @@ async function startSingleDownload(event) {
 }
 
 async function pollSingleDownload(jobId) {
-  const response = await fetch(`/api/downloads/${jobId}`);
-  const data = await response.json();
-  if (!data.ok) return;
-
-  const job = data.job;
-  const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
-  document.getElementById("single-download-progress").value = progress;
-  document.getElementById("single-download-percent").textContent = `${progress.toFixed(0)}%`;
-  document.getElementById("single-download-title").textContent = job.title || job.status || "Download";
-  document.getElementById("single-download-speed").textContent = job.speed || "";
-  document.getElementById("single-download-eta").textContent = job.eta ? `ETA ${job.eta}` : "";
-  document.getElementById("single-download-bytes").textContent =
-    `${job.downloaded_text || "0 B"}${job.total_bytes ? " / " + job.total_text : ""} · ${job.status}`;
-  document.getElementById("single-download-error").textContent = job.error || "";
-
-  if (["completed","failed"].includes(job.status)) {
-    clearInterval(singleDownloadTimer);
-    singleDownloadTimer = null;
-    document.getElementById("single-download-start").disabled = false;
-    if (job.status === "completed" && job.source_type === "single" && job.video_id) {
-      singleDownloadedVideoIds.add(String(job.video_id));
-      refreshOneTimeDownloadButtonStates();
-      // Re-check the server so the grey state is tied to the file still existing.
-      setTimeout(loadSingleDownloadedVideoIds, 500);
+  try {
+    const response = await fetch(`/api/downloads/${jobId}`, {cache:"no-store"});
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
     }
+
+    const job = data.job;
+    const progressElement = document.getElementById("single-download-progress");
+    const percentElement = document.getElementById("single-download-percent");
+    const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+    const labels = {
+      queued: "Queued",
+      preparing: "Preparing YouTube download",
+      downloading: "Downloading",
+      processing: "Processing media",
+      converting: "Converting for Emby",
+      completed: "Completed",
+      failed: "Failed"
+    };
+    const statusLabel = labels[job.status] || job.status || "Download";
+    const hasMeasuredProgress = job.status === "downloading" && Number(job.total_bytes || 0) > 0;
+
+    if (hasMeasuredProgress || ["completed","failed"].includes(job.status)) {
+      progressElement.value = job.status === "completed" ? 100 : progress;
+      percentElement.textContent = job.status === "completed" ? "100%" : `${progress.toFixed(0)}%`;
+    } else {
+      progressElement.removeAttribute("value");
+      percentElement.textContent = statusLabel;
+    }
+
+    document.getElementById("single-download-title").textContent = job.title || statusLabel;
+    document.getElementById("single-download-speed").textContent = job.speed || "";
+    document.getElementById("single-download-eta").textContent = job.eta ? `ETA ${job.eta}` : "";
+
+    const bytesText = job.downloaded_bytes
+      ? `${job.downloaded_text || "0 B"}${job.total_bytes ? " / " + job.total_text : ""} · ${statusLabel}`
+      : statusLabel;
+    document.getElementById("single-download-bytes").textContent = bytesText;
+    document.getElementById("single-download-error").textContent = job.error || "";
+
+    if (["completed","failed"].includes(job.status)) {
+      clearInterval(singleDownloadTimer);
+      singleDownloadTimer = null;
+      document.getElementById("single-download-start").disabled = false;
+      if (job.status === "completed" && job.source_type === "single" && job.video_id) {
+        singleDownloadedVideoIds.add(String(job.video_id));
+        refreshOneTimeDownloadButtonStates();
+        // Re-check the server so the grey state is tied to the file still existing.
+        setTimeout(loadSingleDownloadedVideoIds, 500);
+      }
+    }
+  } catch (error) {
+    document.getElementById("single-download-error").textContent = `Status check failed: ${error.message || error}`;
   }
 }
 
