@@ -160,7 +160,7 @@ x-casaos:
   version: "2.13.0b"
   update_at: "2026-09-19"
   release_notes:
-    en_US: v2.13.0b restores the separate channel Actions menu, adds Emby API refresh integration, Featured channels, and refines the Channel insights UI.
+    en_US: v2.13.0b restores the compact channel Actions menu, adds Emby API refresh integration, Featured channels, interactive channel-image controls, and refines Channel insights.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

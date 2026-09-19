@@ -2388,7 +2388,8 @@ def youtube_latest_subscription_videos(limit=36, force=False):
     with db() as conn:
         rows = conn.execute(
             """
-            SELECT channel_id, title, channel_url, thumbnail_url
+            SELECT channel_id, title, channel_url, thumbnail_url,
+                   download_enabled, pinchflat_source_id
             FROM subscriptions
             WHERE active = 1
             """
@@ -2401,6 +2402,8 @@ def youtube_latest_subscription_videos(limit=36, force=False):
                 f"https://www.youtube.com/channel/{row['channel_id']}"
             ),
             "channel_thumbnail_url": row["thumbnail_url"] or "",
+            "download_enabled": bool(row["download_enabled"]),
+            "pinchflat_source_id": str(row["pinchflat_source_id"] or ""),
         }
         for row in rows
         if row["channel_id"]
@@ -2587,6 +2590,8 @@ def youtube_latest_subscription_videos(limit=36, force=False):
             "channel_thumbnail_url": (
                 channel["channel_thumbnail_url"]
             ),
+            "download_enabled": bool(channel.get("download_enabled")),
+            "pinchflat_source_id": str(channel.get("pinchflat_source_id") or ""),
             "thumbnail_url": (
                 details.get("thumbnail_url")
                 or candidate.get("thumbnail_url")
@@ -4164,6 +4169,19 @@ def storage_snapshot(force=False):
 def channel_disk_usage(title, snapshot=None):
     snapshot = snapshot or storage_snapshot()
     return int(snapshot["by_name"].get(normalise_storage_name(title), 0))
+
+
+def download_filesystem_snapshot():
+    """Return capacity information for the filesystem backing /downloads."""
+    try:
+        usage = shutil.disk_usage(DOWNLOAD_ROOT)
+        return {
+            "total": int(usage.total or 0),
+            "used": int(usage.used or 0),
+            "free": int(usage.free or 0),
+        }
+    except OSError:
+        return {"total": 0, "used": 0, "free": 0}
 
 
 def valid_youtube_url(value):
@@ -9991,6 +10009,100 @@ def youtube_channel_popular_videos(creds, channel_id, limit=5):
         return [], str(exc)
 
 
+def youtube_public_featured_channel_ids(channel_id, limit=10):
+    """Best-effort fallback for public Featured Channels shown on YouTube.
+
+    YouTube's channelSections API does not return every public shelf consistently.
+    This fallback reads the public channel page and only keeps channel renderers
+    found below a section whose heading contains "featured".
+    """
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return []
+
+    try:
+        response = requests.get(
+            f"https://www.youtube.com/channel/{quote(channel_id)}/featured",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/142.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-GB,en;q=0.9",
+            },
+            timeout=12,
+        )
+        response.raise_for_status()
+        html = response.text
+    except Exception:
+        return []
+
+    initial_data = None
+    patterns = (
+        r"var\s+ytInitialData\s*=\s*(\{.*?\});\s*</script>",
+        r"ytInitialData\s*=\s*(\{.*?\});\s*</script>",
+        r'"ytInitialData"\s*:\s*(\{.*?\})\s*,\s*"',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, re.DOTALL)
+        if not match:
+            continue
+        try:
+            initial_data = json.loads(match.group(1))
+            break
+        except Exception:
+            continue
+
+    if not initial_data:
+        return []
+
+    found = []
+
+    def text_value(value):
+        if isinstance(value, str):
+            return value
+        if not isinstance(value, dict):
+            return ""
+        if value.get("simpleText"):
+            return str(value.get("simpleText") or "")
+        runs = value.get("runs") or []
+        if isinstance(runs, list):
+            return "".join(str(run.get("text") or "") for run in runs if isinstance(run, dict))
+        return ""
+
+    def visit(node, featured_context=False):
+        if len(found) >= max(1, min(int(limit or 10), 25)):
+            return
+        if isinstance(node, list):
+            for item in node:
+                visit(item, featured_context)
+            return
+        if not isinstance(node, dict):
+            return
+
+        headings = []
+        for key in ("title", "headline", "header", "label"):
+            if key in node:
+                value = text_value(node.get(key))
+                if value:
+                    headings.append(value)
+        local_featured = featured_context or any("featured" in value.casefold() for value in headings)
+
+        renderer = node.get("channelRenderer")
+        if local_featured and isinstance(renderer, dict):
+            candidate = str(renderer.get("channelId") or "").strip()
+            if candidate and candidate != channel_id and candidate not in found:
+                found.append(candidate)
+
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                visit(value, local_featured)
+
+    visit(initial_data)
+    return found[:max(1, min(int(limit or 10), 25))]
+
+
 def youtube_channel_featured_channels(creds, channel_id, branding_channel=None, limit=10):
     channel_id = str(channel_id or "").strip()
     if not channel_id:
@@ -10038,6 +10150,12 @@ def youtube_channel_featured_channels(creds, channel_id, branding_channel=None, 
             featured_ids.append(featured_id)
         section_titles.setdefault(featured_id, "Featured channels")
 
+    if not featured_ids:
+        for featured_id in youtube_public_featured_channel_ids(channel_id, limit=limit):
+            if featured_id not in featured_ids:
+                featured_ids.append(featured_id)
+            section_titles.setdefault(featured_id, "Featured channels")
+
     featured_ids = featured_ids[:max(1, min(int(limit or 10), 25))]
     if not featured_ids:
         return []
@@ -10065,20 +10183,20 @@ def youtube_channel_featured_channels(creds, channel_id, branding_channel=None, 
 
     with db() as conn:
         placeholders = ",".join("?" for _ in featured_ids)
-        subscribed = set()
+        subscription_states = {}
         if placeholders:
-            subscribed = {
-                str(row["channel_id"])
+            subscription_states = {
+                str(row["channel_id"]): dict(row)
                 for row in conn.execute(
                     f"""
-                    SELECT channel_id
+                    SELECT channel_id, active, download_enabled, pinchflat_added, pinchflat_source_id
                     FROM subscriptions
-                    WHERE active = 1
-                      AND channel_id IN ({placeholders})
+                    WHERE channel_id IN ({placeholders})
                     """,
                     featured_ids,
                 ).fetchall()
             }
+    favourite_ids = favourite_channel_ids()
 
     results = []
     for featured_id in featured_ids:
@@ -10105,7 +10223,10 @@ def youtube_channel_featured_channels(creds, channel_id, branding_channel=None, 
                 "subscriber_count": int(statistics.get("subscriberCount") or 0),
                 "hidden_subscriber_count": bool(statistics.get("hiddenSubscriberCount")),
                 "channel_url": f"https://www.youtube.com/channel/{featured_id}",
-                "subscribed": featured_id in subscribed,
+                "subscribed": bool(subscription_states.get(featured_id, {}).get("active")),
+                "favourite": featured_id in favourite_ids,
+                "download_enabled": bool(subscription_states.get(featured_id, {}).get("download_enabled")),
+                "pinchflat_source_id": str(subscription_states.get(featured_id, {}).get("pinchflat_source_id") or ""),
                 "section_title": section_titles.get(featured_id, "Featured channels"),
             }
         )
@@ -11666,6 +11787,12 @@ def index():
         profile_settings
     )
     storage = storage_snapshot()
+    storage_filesystem = download_filesystem_snapshot()
+    storage_capacity = int(storage_filesystem.get("total") or 0)
+    storage_content_percent = round(
+        min(100.0, (storage["total"] / storage_capacity) * 100.0),
+        2,
+    ) if storage_capacity else 0.0
     pinchflat_stats = pinchflat_stats_summary(profiles, storage)
     for sub in subs:
         sub["disk_bytes"] = channel_disk_usage(sub.get("title"), storage)
@@ -11799,6 +11926,10 @@ def index():
         youtube_account_stats=youtube_account,
         storage_total_bytes=storage["total"],
         storage_total=format_bytes(storage["total"]),
+        storage_capacity_bytes=storage_capacity,
+        storage_capacity=format_bytes(storage_capacity) if storage_capacity else "Unavailable",
+        storage_free=format_bytes(storage_filesystem.get("free") or 0) if storage_capacity else "Unavailable",
+        storage_content_percent=storage_content_percent,
         download_counts=download_counts,
         recent_downloads=recent_downloads,
         emby_download_enabled=setting_bool("emby_download_enabled", True),
@@ -13434,6 +13565,7 @@ def channel_details_api(channel_id):
     return jsonify({
         "ok": True,
         "subscription": subscription,
+        "favourite": channel_id in favourite_channel_ids(),
         "youtube": youtube,
     })
 
@@ -13877,11 +14009,12 @@ def get_favourites():
             for row in conn.execute(
                 """
                 SELECT fc.*,
-                       CASE WHEN EXISTS (
-                           SELECT 1 FROM subscriptions s
-                           WHERE s.channel_id = fc.channel_id AND s.active = 1
-                       ) THEN 1 ELSE 0 END AS subscribed
+                       COALESCE(s.active, 0) AS subscribed,
+                       COALESCE(s.download_enabled, 0) AS download_enabled,
+                       COALESCE(s.pinchflat_added, 0) AS pinchflat_added,
+                       COALESCE(s.pinchflat_source_id, '') AS pinchflat_source_id
                 FROM favourite_channels fc
+                LEFT JOIN subscriptions s ON s.channel_id = fc.channel_id
                 WHERE fc.user_id = ?
                 ORDER BY fc.channel_title COLLATE NOCASE
                 """,

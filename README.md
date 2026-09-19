@@ -6,9 +6,9 @@ A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates an
 
 Channel-actions correction, Emby integration and Channel UI refinement.
 
-- Restores the separate per-channel Actions popup. Clicking a channel name opens Channel insights, while Actions only opens management controls.
+- Restores a compact per-channel Actions menu. Clicking a channel name opens Channel insights, while Actions opens management commands beside the row.
 - Mirrors every per-channel Actions command in Subscription tools bulk actions, including Pinchflat actions, Emby refresh, unsubscribe and destructive removal options.
-- Adds Settings → API → Emby with Server URL, API key, automatic post-download refresh, connection test and manual refresh controls.
+- Adds Settings → API → Emby with Server URL, API key, automatic post-download refresh, connection test and an Emby Scan Library Files control.
 - Adds automatic Emby library scans after newly completed Pinchflat downloads are detected.
 - Adds Refresh Emby to individual channel Actions and bulk actions.
 - Adds YouTube Featured channels to Channel insights using YouTube channel sections where available.
@@ -17,6 +17,10 @@ Channel-actions correction, Emby integration and Channel UI refinement.
 - Adds visual status overlays to the channel image for Favourite, Downloads enabled and Force Scan.
 - Groups Channel statistics into clearer overview, recent performance, channel details and Pinchflat sections while keeping the existing information.
 - Removes the explanatory daily-snapshot text from the growth-history panel.
+- Makes Favourite, Downloads enabled and Force Scan overlays interactive wherever channel artwork is shown in the main channel interfaces.
+- Moves About and channel tags into the Channel identity panel, uses a YouTube service icon and keeps long descriptions naturally expanding without an inner scrollbar.
+- Adds filesystem capacity and a usage progress indicator to Settings → Downloads.
+- Adds a Favourites overview with live counters and image-only favourite-channel tiles.
 
 ## Version 2.13.0
 
