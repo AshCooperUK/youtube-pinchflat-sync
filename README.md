@@ -2,21 +2,14 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 2.15.0.6
-
-### v2.15.0.6
-
-- Fixes the One-time Download popup appearing stuck at 0% while yt-dlp is still preparing the YouTube request.
-- Adds explicit Queued, Preparing, Downloading, Processing and Converting for Emby stages.
-- Uses an indeterminate progress bar until yt-dlp exposes a real total, then switches to measured percentage progress.
-- Persists the active output filename from yt-dlp and uses file growth as a fallback for transferred bytes and speed when hook updates are sparse.
-- Keeps the v2.15.0.5 persistent Delete all tasks toggle for Pinchflat Oban work.
-
 ## Version 2.15.0.5
 
 ### v2.15.0.5
 
-- Added a persistent Delete all tasks toggle to the Pinchflat status tile. It pauses Pinchflat Oban queues, cancels current jobs and continues cancelling newly created jobs until disabled.
+- Fixes One-time Download status so the popup shows clear preparation, YouTube download, post-processing and H.264/AAC compatibility-conversion phases instead of appearing stuck at 0%.
+- Keeps live byte, speed and ETA updates from yt-dlp and adds conversion progress while ffmpeg prepares the Emby / Smart TV file.
+- Adds a persistent Delete all tasks toggle to the Pinchflat tasks tile. Enabling it pauses Pinchflat Oban queues, cancels executing jobs, deletes queued non-completed jobs and continues removing newly created tasks until switched off.
+- Switching Delete all tasks off resumes the Pinchflat queues.
 
 ## Version 2.15.0.4
 

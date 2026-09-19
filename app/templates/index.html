@@ -441,6 +441,13 @@
     .power-toggle-wrap { display:flex; align-items:center; gap:9px; margin-top:8px; }
     .power-toggle-wrap form { margin:0; }
     .power-toggle-label { color:var(--muted); font-size:13px; }
+    .pinchflat-task-block-wrap { margin-top:10px; padding-top:9px; border-top:1px solid var(--line); }
+    .pinchflat-task-block-wrap .source-toggle { align-items:center; }
+    .pinchflat-task-block-wrap .source-toggle-text { min-width:0; color:var(--muted); font-size:12px; }
+    .pinchflat-task-block-wrap input:checked + .toggle-track { background:var(--red); border-color:var(--red); }
+    .pinchflat-task-block-wrap input:checked + .toggle-track::after { background:#fff; }
+    .pinchflat-task-block-status { margin-top:5px; color:var(--muted); font-size:11px; line-height:1.35; }
+    .pinchflat-task-block-status.active { color:#ff9aa7; }
     .source-save-actions { min-width:96px; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
     .source-save-actions .btn { width:104px; min-width:104px; height:var(--control-height); min-height:var(--control-height); padding:0 10px; font-size:12px; }
     .source-save-btn[hidden] { display:none !important; }
@@ -3412,23 +3419,6 @@
             </label>
           </form>
         </div>
-        <div class="power-toggle-wrap" style="margin-top:8px">
-          <label class="source-toggle" title="Cancel all current Pinchflat background jobs and keep cancelling any new jobs while this switch remains enabled">
-            <input
-              type="checkbox"
-              id="pinchflat-delete-all-tasks-toggle"
-              {% if pinchflat_delete_all_tasks %}checked{% endif %}
-              onchange="togglePinchflatTaskDrain(this)"
-            >
-            <span class="toggle-track"></span>
-            <span class="source-toggle-text" id="pinchflat-delete-all-tasks-label">
-              Delete all tasks
-            </span>
-          </label>
-          <div class="muted small" id="pinchflat-delete-all-tasks-status" style="margin-top:4px">
-            {% if pinchflat_delete_all_tasks %}Persistent task deletion is ON{% else %}Persistent task deletion is off{% endif %}
-          </div>
-        </div>
       {% elif is_admin %}
         <div class="muted small">Docker power control unavailable</div>
       {% endif %}
@@ -3442,6 +3432,16 @@
       <div class="muted small" id="pinchflat-tasks-status">No active non-download tasks</div>
       <div class="warn small hidden" id="pinchflat-tasks-membership-errors"></div>
       <div class="muted small" id="pinchflat-tasks-current"></div>
+      {% if is_admin %}
+      <div class="pinchflat-task-block-wrap">
+        <label class="source-toggle" title="When enabled, stop and delete all current Pinchflat Oban tasks and automatically cancel any new tasks until switched off.">
+          <input id="pinchflat-task-block-toggle" type="checkbox" onchange="setPinchflatTaskBlock(this.checked)">
+          <span class="toggle-track"></span>
+          <span class="source-toggle-text">Delete all tasks</span>
+        </label>
+        <div id="pinchflat-task-block-status" class="pinchflat-task-block-status"></div>
+      </div>
+      {% endif %}
     </div>
     {% endif %}
 
@@ -3976,7 +3976,7 @@
           <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Opens the complete list of waiting Pinchflat jobs and refreshes the queue while the popup remains open.</div></div>
           <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Immediately reloads current Pinchflat workers, waiting count and recent completed download data.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background membership members only join this channel"><div class="debug-function-name">Pinchflat tasks tile</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Shows active and waiting Pinchflat background work other than media downloads, such as source indexing or metadata jobs. It also counts non-completed download jobs whose stored yt-dlp error contains “Join this channel”, shown as membership errors. Download jobs remain in the dedicated Pinchflat Downloads section.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat delete all tasks task drain cancel queue persistent oban"><div class="debug-function-name">Delete all tasks</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Persistent task-drain mode. Pauses Pinchflat's Oban queues, cancels current executing, waiting, scheduled and retryable jobs, then keeps cancelling newly created jobs until you switch the mode off. The setting survives app restarts.</div></div>
+          <div class="debug-function-row" data-debug-search="delete all tasks block cancel stop persistent oban"><div class="debug-function-name">Delete all Pinchflat tasks</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Cancels running Pinchflat jobs, deletes queued non-completed jobs and pauses Pinchflat queues. While the toggle stays enabled the app removes any new tasks which are created. Switching it off resumes Pinchflat queues.</div></div>
           <div class="debug-function-row" data-debug-search="download speed live transfer yt-dlp"><div class="debug-function-name">Pinchflat download speed</div><div class="debug-service-badge">Pinchflat / yt-dlp</div><div class="debug-function-description">Shows a best-effort live transfer rate for active Pinchflat downloads. The app uses yt-dlp progress output when available and otherwise estimates speed from the growing download file.</div></div>
         </div>
       </section>
@@ -4630,6 +4630,7 @@
     </form>
     <div id="single-download-status" class="progress-wrap hidden">
       <strong id="single-download-title">Queued</strong>
+      <div id="single-download-phase" class="muted small" style="margin-top:3px">Waiting for the download worker…</div>
       <progress id="single-download-progress" max="100" value="0"></progress>
       <div class="progress-meta">
         <span id="single-download-percent">0%</span>
@@ -6654,6 +6655,8 @@ function renderPinchflatTasks(data) {
   const statusTarget = document.getElementById("pinchflat-tasks-status");
   const membershipTarget = document.getElementById("pinchflat-tasks-membership-errors");
   const currentTarget = document.getElementById("pinchflat-tasks-current");
+  const blockToggle = document.getElementById("pinchflat-task-block-toggle");
+  const blockStatus = document.getElementById("pinchflat-task-block-status");
 
   if (!activeTarget || !statusTarget || !currentTarget) return;
 
@@ -6662,11 +6665,17 @@ function renderPinchflatTasks(data) {
   const membershipErrors = Number(data.summary?.membership_errors || 0);
   const tasks = Array.isArray(data.tasks) ? data.tasks : [];
   const running = tasks.filter(item => item.state === "executing");
+  const blockEnabled = !!data.task_block?.enabled;
 
   activeTarget.textContent = String(activeCount);
-  activeTarget.classList.toggle("ok", activeCount > 0);
+  activeTarget.classList.toggle("ok", activeCount > 0 && !blockEnabled);
+  activeTarget.classList.toggle("bad", blockEnabled);
 
-  if (activeCount > 0) {
+  if (blockEnabled) {
+    statusTarget.textContent = activeCount || waitingCount
+      ? `Stopping · ${activeCount} active · ${waitingCount} waiting`
+      : "All Pinchflat tasks blocked";
+  } else if (activeCount > 0) {
     statusTarget.textContent = `${activeCount} active · ${waitingCount} waiting`;
   } else if (waitingCount > 0) {
     statusTarget.textContent = `Idle · ${waitingCount} waiting`;
@@ -6691,6 +6700,66 @@ function renderPinchflatTasks(data) {
     ? labels.slice(0, 2).join(" · ")
     : "";
   currentTarget.title = labels.join(" · ");
+
+  if (blockToggle) {
+    blockToggle.checked = blockEnabled;
+    blockToggle.disabled = false;
+  }
+  if (blockStatus) {
+    blockStatus.classList.toggle("active", blockEnabled);
+    if (blockEnabled) {
+      const last = data.task_block?.last || {};
+      if (last.error) {
+        blockStatus.textContent = `Blocking enabled · last cleanup error: ${last.error}`;
+      } else if (Number(last.cancelled || 0) || Number(last.deleted || 0)) {
+        blockStatus.textContent = `Blocking enabled · last pass cancelled ${Number(last.cancelled || 0)}, deleted ${Number(last.deleted || 0)}`;
+      } else {
+        blockStatus.textContent = "Blocking enabled · new Pinchflat tasks are cancelled automatically";
+      }
+    } else {
+      blockStatus.textContent = "";
+    }
+  }
+}
+
+async function setPinchflatTaskBlock(enabled) {
+  const toggle = document.getElementById("pinchflat-task-block-toggle");
+  const status = document.getElementById("pinchflat-task-block-status");
+  const previous = !enabled;
+  if (toggle) toggle.disabled = true;
+  if (status) {
+    status.textContent = enabled
+      ? "Stopping and deleting all Pinchflat tasks…"
+      : "Resuming Pinchflat queues…";
+    status.classList.toggle("active", enabled);
+  }
+
+  try {
+    const response = await fetch("/api/pinchflat/task-block", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content
+      },
+      body: JSON.stringify({enabled})
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || `Pinchflat task control returned HTTP ${response.status}`);
+    }
+    if (toggle) toggle.checked = !!data.enabled;
+    showAjaxToast(data.message || (data.enabled ? "Pinchflat task blocking enabled." : "Pinchflat task blocking disabled."), "success");
+    await loadPinchflatDownloadOverview(true);
+  } catch (error) {
+    if (toggle) toggle.checked = previous;
+    if (status) {
+      status.textContent = error.message || String(error);
+      status.classList.add("active");
+    }
+    showAjaxToast(error.message || String(error), "error");
+  } finally {
+    if (toggle) toggle.disabled = false;
+  }
 }
 
 
@@ -7610,34 +7679,6 @@ async function apiPost(url, payload={}) {
   const data = await response.json().catch(() => ({ok:false, error:`HTTP ${response.status}`}));
   if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
   return data;
-}
-
-
-async function togglePinchflatTaskDrain(input) {
-  const enabled = Boolean(input?.checked);
-  const previous = !enabled;
-  const status = document.getElementById("pinchflat-delete-all-tasks-status");
-  input.disabled = true;
-  if (status) status.textContent = enabled ? "Enabling persistent task deletion…" : "Resuming Pinchflat task queues…";
-
-  try {
-    const data = await apiPost("/api/pinchflat/task-drain", {enabled});
-    if (status) {
-      status.textContent = enabled
-        ? "Persistent task deletion is ON"
-        : "Persistent task deletion is off";
-    }
-    showAjaxToast(data.message || (enabled ? "Delete all tasks enabled." : "Delete all tasks disabled."), enabled ? "warning" : "success");
-    if (typeof refreshPinchflatDownloads === "function") {
-      setTimeout(() => refreshPinchflatDownloads(true), 500);
-    }
-  } catch (error) {
-    input.checked = previous;
-    if (status) status.textContent = previous ? "Persistent task deletion is ON" : "Persistent task deletion is off";
-    showAjaxToast(error.message || String(error), "error");
-  } finally {
-    input.disabled = false;
-  }
 }
 
 function getChannelControlState(channelId, fallback={}) {
@@ -12978,6 +13019,11 @@ async function startSingleDownload(event) {
 
   document.getElementById("single-download-status").classList.remove("hidden");
   document.getElementById("single-download-error").textContent = "";
+  document.getElementById("single-download-title").textContent = "Preparing download";
+  document.getElementById("single-download-phase").textContent = "Waiting for yt-dlp to start…";
+  document.getElementById("single-download-progress").removeAttribute("value");
+  document.getElementById("single-download-percent").textContent = "Preparing";
+  document.getElementById("single-download-bytes").textContent = "";
   pollSingleDownload(data.job_id);
   if (singleDownloadTimer) clearInterval(singleDownloadTimer);
   singleDownloadTimer = setInterval(() => pollSingleDownload(data.job_id), 1000);
@@ -12988,41 +13034,36 @@ async function pollSingleDownload(jobId) {
     const response = await fetch(`/api/downloads/${jobId}`, {cache:"no-store"});
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || `HTTP ${response.status}`);
+      throw new Error(data.error || `Download status returned HTTP ${response.status}`);
     }
 
     const job = data.job;
-    const progressElement = document.getElementById("single-download-progress");
-    const percentElement = document.getElementById("single-download-percent");
     const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
-    const labels = {
-      queued: "Queued",
-      preparing: "Preparing YouTube download",
-      downloading: "Downloading",
-      processing: "Processing media",
-      converting: "Converting for Emby",
-      completed: "Completed",
-      failed: "Failed"
-    };
-    const statusLabel = labels[job.status] || job.status || "Download";
-    const hasMeasuredProgress = job.status === "downloading" && Number(job.total_bytes || 0) > 0;
-
-    if (hasMeasuredProgress || ["completed","failed"].includes(job.status)) {
-      progressElement.value = job.status === "completed" ? 100 : progress;
-      percentElement.textContent = job.status === "completed" ? "100%" : `${progress.toFixed(0)}%`;
+    const progressEl = document.getElementById("single-download-progress");
+    const hasMeasuredProgress = progress > 0 || Number(job.total_bytes || 0) > 0 || ["processing","completed","failed"].includes(job.status);
+    if (hasMeasuredProgress) {
+      progressEl.value = progress;
     } else {
-      progressElement.removeAttribute("value");
-      percentElement.textContent = statusLabel;
+      progressEl.removeAttribute("value");
     }
 
-    document.getElementById("single-download-title").textContent = job.title || statusLabel;
+    document.getElementById("single-download-percent").textContent = hasMeasuredProgress
+      ? `${progress.toFixed(0)}%`
+      : "Working…";
+    document.getElementById("single-download-title").textContent = job.title || "Single Download";
+    document.getElementById("single-download-phase").textContent = job.phase || ({
+      queued: "Queued",
+      downloading: "Downloading from YouTube",
+      processing: "Processing media",
+      completed: "Completed",
+      failed: "Failed"
+    }[job.status] || job.status || "Working…");
     document.getElementById("single-download-speed").textContent = job.speed || "";
     document.getElementById("single-download-eta").textContent = job.eta ? `ETA ${job.eta}` : "";
-
-    const bytesText = job.downloaded_bytes
-      ? `${job.downloaded_text || "0 B"}${job.total_bytes ? " / " + job.total_text : ""} · ${statusLabel}`
-      : statusLabel;
-    document.getElementById("single-download-bytes").textContent = bytesText;
+    document.getElementById("single-download-bytes").textContent =
+      Number(job.downloaded_bytes || 0) > 0
+        ? `${job.downloaded_text || "0 B"}${job.total_bytes ? " / " + job.total_text : ""}`
+        : "";
     document.getElementById("single-download-error").textContent = job.error || "";
 
     if (["completed","failed"].includes(job.status)) {
@@ -13032,14 +13073,15 @@ async function pollSingleDownload(jobId) {
       if (job.status === "completed" && job.source_type === "single" && job.video_id) {
         singleDownloadedVideoIds.add(String(job.video_id));
         refreshOneTimeDownloadButtonStates();
-        // Re-check the server so the grey state is tied to the file still existing.
         setTimeout(loadSingleDownloadedVideoIds, 500);
       }
     }
   } catch (error) {
-    document.getElementById("single-download-error").textContent = `Status check failed: ${error.message || error}`;
+    document.getElementById("single-download-phase").textContent = "Download status unavailable";
+    document.getElementById("single-download-error").textContent = error.message || String(error);
   }
 }
+
 
 const search = document.getElementById("source-search");
 const statusFilter = document.getElementById("status-filter");

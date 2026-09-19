@@ -37,7 +37,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.15.0.6"
+VERSION = "2.15.0.5"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -304,10 +304,12 @@ sync_lock = threading.Lock()
 pinchflat_source_action_lock = threading.Lock()
 download_queue = queue.Queue()
 download_worker_started = False
+pinchflat_task_blocker_started = False
+pinchflat_task_block_lock = threading.Lock()
+pinchflat_task_block_last = {"at": "", "cancelled": 0, "deleted": 0, "error": ""}
 storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
 storage_cache_lock = threading.Lock()
 retention_cleanup_lock = threading.Lock()
-pinchflat_task_drain_lock = threading.Lock()
 
 # Rolling file-size samples used to estimate live Pinchflat download speed when
 # yt-dlp does not emit a progress line.  Pinchflat commonly runs yt-dlp with
@@ -315,14 +317,6 @@ pinchflat_task_drain_lock = threading.Lock()
 # changing Pinchflat's own downloader arguments.
 pinchflat_speed_samples = {}
 pinchflat_speed_samples_lock = threading.Lock()
-
-# Fallback samples for One-time Download status. yt-dlp progress hooks are the
-# primary source of transfer data, but there is a preparation window before
-# the first hook fires and some download methods expose sparse hook updates.
-# Keeping a tiny rolling sample lets the status endpoint report movement from
-# the current output file without changing yt-dlp behaviour.
-direct_download_speed_samples = {}
-direct_download_speed_samples_lock = threading.Lock()
 
 
 def db():
@@ -486,6 +480,7 @@ def init_db():
                 channel_title TEXT,
                 playlist_item_id TEXT,
                 status TEXT NOT NULL DEFAULT 'queued',
+                phase TEXT,
                 progress REAL NOT NULL DEFAULT 0,
                 speed TEXT,
                 eta TEXT,
@@ -667,6 +662,12 @@ def init_db():
             "source_deleted",
             "INTEGER NOT NULL DEFAULT 0",
         )
+        ensure_column(
+            conn,
+            "downloads",
+            "phase",
+            "TEXT",
+        )
 
         defaults = {
             "history_mode": DEFAULT_HISTORY_MODE,
@@ -687,6 +688,7 @@ def init_db():
             "pinchflat_sync_interval_minutes": str(SYNC_INTERVAL_MINUTES),
             "pinchflat_force_index_favourite_minutes": "0",
             "pinchflat_force_index_nonfavourite_minutes": "0",
+            "pinchflat_task_block_enabled": "0",
             "retention_enabled": "0",
             "retention_favourite_days": "365",
             "retention_favourite_min_videos": "20",
@@ -5374,7 +5376,7 @@ def update_download_job(job_id, **values):
     if not values:
         return
     allowed = {
-        "video_id", "title", "channel_title", "status", "progress", "speed",
+        "video_id", "title", "channel_title", "status", "phase", "progress", "speed",
         "eta", "downloaded_bytes", "total_bytes", "output_path", "error",
         "started_at", "finished_at",
     }
@@ -5407,13 +5409,16 @@ def remove_playlist_item_from_youtube(playlist_item_id):
     return True
 
 
-def _download_progress_hook(job_id):
+def _download_progress_hook(job_id, progress_ceiling=100.0):
+    ceiling = max(1.0, min(100.0, float(progress_ceiling or 100.0)))
+
     def hook(data):
         status = data.get("status")
         if status == "downloading":
             downloaded = int(data.get("downloaded_bytes") or 0)
             total = int(data.get("total_bytes") or data.get("total_bytes_estimate") or 0)
-            progress = (downloaded / total * 100.0) if total else 0.0
+            raw_progress = (downloaded / total * 100.0) if total else 0.0
+            progress = raw_progress * ceiling / 100.0
             speed = data.get("_speed_str") or (
                 f"{format_bytes(data.get('speed'))}/s" if data.get("speed") else ""
             )
@@ -5423,19 +5428,52 @@ def _download_progress_hook(job_id):
             update_download_job(
                 job_id,
                 status="downloading",
+                phase="Downloading from YouTube",
                 progress=round(progress, 2),
                 speed=str(speed).strip(),
                 eta=str(eta).strip(),
                 downloaded_bytes=downloaded,
                 total_bytes=total,
-                output_path=data.get("filename") or "",
             )
         elif status == "finished":
             update_download_job(
                 job_id,
                 status="processing",
-                progress=100.0,
+                phase="Merging and processing media",
+                progress=ceiling,
+                speed="",
+                eta="",
                 output_path=data.get("filename") or "",
+            )
+    return hook
+
+
+def _download_postprocessor_hook(job_id, progress_ceiling=100.0):
+    ceiling = max(1.0, min(100.0, float(progress_ceiling or 100.0)))
+
+    def hook(data):
+        status = str(data.get("status") or "").lower()
+        postprocessor = str(data.get("postprocessor") or "").strip()
+        if status in {"started", "processing"}:
+            label = "Processing downloaded media"
+            if postprocessor:
+                label = f"Processing media · {postprocessor}"
+            update_download_job(
+                job_id,
+                status="processing",
+                phase=label,
+                progress=ceiling,
+                speed="",
+                eta="",
+            )
+        elif status == "finished":
+            update_download_job(
+                job_id,
+                status="processing",
+                phase="Checking final media",
+                progress=ceiling,
+                speed="",
+                eta="",
             )
     return hook
 
@@ -5580,11 +5618,12 @@ def single_download_ydl_settings():
     }
 
 
-def _probe_single_download_codecs(path):
+def _probe_single_download_media(path):
     result = subprocess.run(
         [
-            "ffprobe", "-v", "error", "-show_entries",
-            "stream=codec_type,codec_name", "-of", "json", str(path),
+            "ffprobe", "-v", "error",
+            "-show_entries", "stream=codec_type,codec_name:format=duration",
+            "-of", "json", str(path),
         ],
         capture_output=True, text=True, timeout=30, check=True,
     )
@@ -5598,6 +5637,15 @@ def _probe_single_download_codecs(path):
             video = codec
         elif kind == "audio" and not audio:
             audio = codec
+    try:
+        duration = float((payload.get("format") or {}).get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return video, audio, duration
+
+
+def _probe_single_download_codecs(path):
+    video, audio, _duration = _probe_single_download_media(path)
     return video, audio
 
 
@@ -5640,22 +5688,34 @@ def resolve_direct_download_output_path(info, ydl, output_dir, current_path=""):
     return str(current_path or "")
 
 
-def ensure_single_download_emby_compatibility(output_path):
+def ensure_single_download_emby_compatibility(output_path, job_id=None):
     """Guarantee H.264 + AAC in MP4 for One-time Download video jobs only."""
     path = Path(str(output_path or ""))
     if not path.exists() or single_download_compatibility_profile() != "emby_tv":
         return str(path)
 
-    video_codec, audio_codec = _probe_single_download_codecs(path)
+    video_codec, audio_codec, duration = _probe_single_download_media(path)
     video_ok = video_codec == "h264"
     audio_ok = (not audio_codec) or audio_codec == "aac"
     container_ok = path.suffix.lower() == ".mp4"
     if video_ok and audio_ok and container_ok:
+        if job_id:
+            update_download_job(
+                job_id,
+                status="processing",
+                phase="Direct Play compatible · finalising",
+                progress=99.0,
+                speed="",
+                eta="",
+            )
         return str(path)
 
     final_path = path.with_suffix(".mp4")
     temp_path = final_path.with_name(f".{final_path.stem}.compat-{secrets.token_hex(4)}.mp4")
-    command = ["ffmpeg", "-y", "-i", str(path), "-map", "0:v:0", "-map", "0:a?"]
+    command = [
+        "ffmpeg", "-y", "-i", str(path),
+        "-map", "0:v:0", "-map", "0:a?",
+    ]
 
     if video_ok:
         command += ["-c:v", "copy"]
@@ -5670,16 +5730,77 @@ def ensure_single_download_emby_compatibility(output_path):
     else:
         command += ["-c:a", "aac", "-b:a", "192k"]
 
-    command += ["-map_metadata", "0", "-movflags", "+faststart", str(temp_path)]
+    command += [
+        "-map_metadata", "0", "-movflags", "+faststart",
+        "-progress", "pipe:1", "-nostats", str(temp_path),
+    ]
+
+    if job_id:
+        update_download_job(
+            job_id,
+            status="processing",
+            phase="Converting for Emby / Smart TV",
+            progress=90.0,
+            speed="",
+            eta="",
+        )
+
+    process = None
     try:
-        subprocess.run(command, capture_output=True, text=True, timeout=7200, check=True)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        if process.stdout is not None:
+            for raw_line in process.stdout:
+                line = raw_line.strip()
+                if not line or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key not in {"out_time_us", "out_time_ms"} or not job_id or duration <= 0:
+                    continue
+                try:
+                    elapsed_us = float(value or 0)
+                    # ffmpeg currently reports both out_time_us and out_time_ms
+                    # in microseconds on supported builds.  Clamp aggressively so
+                    # an unexpected unit cannot push the UI beyond the conversion band.
+                    elapsed_seconds = elapsed_us / 1_000_000.0
+                    ratio = max(0.0, min(1.0, elapsed_seconds / duration))
+                    update_download_job(
+                        job_id,
+                        status="processing",
+                        phase="Converting for Emby / Smart TV",
+                        progress=round(90.0 + ratio * 9.0, 2),
+                    )
+                except (TypeError, ValueError):
+                    pass
+        stderr = process.stderr.read() if process.stderr is not None else ""
+        return_code = process.wait(timeout=7200)
+        if return_code != 0:
+            raise RuntimeError((stderr or f"ffmpeg exited with code {return_code}")[-1800:])
+
         if final_path != path and final_path.exists():
             final_path.unlink()
         os.replace(temp_path, final_path)
         if path != final_path and path.exists():
             path.unlink()
+        if job_id:
+            update_download_job(
+                job_id,
+                status="processing",
+                phase="Compatibility conversion complete",
+                progress=99.0,
+            )
         return str(final_path)
     finally:
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except Exception:
+                pass
         if temp_path.exists():
             temp_path.unlink(missing_ok=True)
 
@@ -5700,14 +5821,11 @@ def run_download_job(job_id):
 
     update_download_job(
         job_id,
-        status="preparing",
+        status="downloading",
+        phase="Preparing YouTube download",
         started_at=now_iso(),
         error=None,
         progress=0,
-        speed="",
-        eta="",
-        downloaded_bytes=0,
-        total_bytes=0,
     )
 
     relative_template = (
@@ -5720,6 +5838,13 @@ def run_download_job(job_id):
     )
     output_template = str(output_dir / relative_template)
 
+    compatibility_video = (
+        job.get("source_type") == "single"
+        and get_setting("single_download_format", "best") != "audio"
+        and single_download_compatibility_profile() == "emby_tv"
+    )
+    download_progress_ceiling = 85.0 if compatibility_video else 100.0
+
     ydl_opts = {
         "outtmpl": output_template,
         "noplaylist": True,
@@ -5729,7 +5854,8 @@ def run_download_job(job_id):
         "writeinfojson": True,
         "embedmetadata": True,
         "embedthumbnail": True,
-        "progress_hooks": [_download_progress_hook(job_id)],
+        "progress_hooks": [_download_progress_hook(job_id, download_progress_ceiling)],
+        "postprocessor_hooks": [_download_postprocessor_hook(job_id, download_progress_ceiling)],
         "quiet": True,
         "no_warnings": True,
     }
@@ -5761,13 +5887,13 @@ def run_download_job(job_id):
             try:
                 update_download_job(
                     job_id,
-                    status="converting",
-                    progress=100.0,
+                    status="processing",
+                    phase="Checking Emby / Smart TV compatibility",
+                    progress=max(download_progress_ceiling, 88.0),
                     speed="",
                     eta="",
-                    output_path=output_path,
                 )
-                compatible_path = ensure_single_download_emby_compatibility(output_path)
+                compatible_path = ensure_single_download_emby_compatibility(output_path, job_id=job_id)
                 if compatible_path and compatible_path != output_path:
                     log_activity(
                         "download",
@@ -5789,6 +5915,7 @@ def run_download_job(job_id):
                 or job.get("channel_title")
             ),
             status="completed",
+            phase="Completed",
             progress=100.0,
             output_path=output_path,
             finished_at=now_iso(),
@@ -5870,6 +5997,7 @@ def run_download_job(job_id):
         update_download_job(
             job_id,
             status="failed",
+            phase="Failed",
             error=str(exc)[:1500],
             finished_at=now_iso(),
         )
@@ -5900,8 +6028,8 @@ def start_download_worker():
         conn.execute(
             """
             UPDATE downloads
-            SET status = 'queued', started_at = NULL
-            WHERE status IN ('preparing', 'downloading', 'processing', 'converting')
+            SET status = 'queued', phase = 'Queued', started_at = NULL
+            WHERE status IN ('downloading', 'processing')
             """
         )
         queued = conn.execute(
@@ -6529,9 +6657,6 @@ def _scheduled_pinchflat_force_index_group(favourite=False):
 
 
 def scheduled_pinchflat_force_index():
-    if pinchflat_task_drain_enabled():
-        return
-
     if (
         current_pinchflat_force_index_interval(True) <= 0
         and current_pinchflat_force_index_interval(False) <= 0
@@ -8539,141 +8664,6 @@ def pinchflat_recreate_with_worker_concurrency(
 
 
 
-
-def pinchflat_task_drain_enabled():
-    """Return whether persistent Pinchflat task deletion mode is enabled."""
-    return setting_bool("pinchflat_delete_all_tasks", False)
-
-
-def _pinchflat_pause_and_cancel_all_tasks():
-    """
-    Pause all Pinchflat Oban queues and cancel every job which could still run.
-
-    Pausing first closes the small race where Pinchflat could start a newly
-    inserted job between the query and cancellation. Cancelled jobs are left
-    for Oban's normal pruner rather than deleting history directly from the
-    Pinchflat database.
-    """
-    expression = (
-        'pause_result = Oban.pause_all_queues()\n'
-        'query = Oban.Job.query(state: ~w(executing available scheduled retryable))\n'
-        'case Oban.cancel_all_jobs(query) do\n'
-        '  {:ok, count} -> IO.puts("TASKS_CANCELLED=" <> Integer.to_string(count))\n'
-        '  other -> IO.puts("TASKS_CANCEL_ERROR=" <> inspect(other))\n'
-        'end\n'
-        'IO.puts("QUEUES_PAUSED=" <> inspect(pause_result))\n'
-    )
-    output = docker_exec_in_pinchflat(
-        ["bin/pinchflat", "rpc", expression],
-        timeout=90,
-    )
-    if "TASKS_CANCEL_ERROR=" in output:
-        raise RuntimeError(
-            "Pinchflat could not cancel its queued tasks. "
-            + output.split("TASKS_CANCEL_ERROR=", 1)[1][:500]
-        )
-    match = re.search(r"TASKS_CANCELLED=(\d+)", output)
-    return int(match.group(1)) if match else 0
-
-
-def _pinchflat_resume_all_task_queues():
-    expression = (
-        'case Oban.resume_all_queues() do\n'
-        '  result -> IO.puts("QUEUES_RESUMED=" <> inspect(result))\n'
-        'end\n'
-    )
-    output = docker_exec_in_pinchflat(
-        ["bin/pinchflat", "rpc", expression],
-        timeout=60,
-    )
-    if "QUEUES_RESUMED=" not in output:
-        raise RuntimeError(
-            "Pinchflat did not confirm that its task queues were resumed."
-        )
-    return True
-
-
-def pinchflat_task_drain_once():
-    """Apply persistent task deletion mode once, if enabled."""
-    if not pinchflat_task_drain_enabled():
-        return {"enabled": False, "cancelled": 0}
-
-    if not pinchflat_task_drain_lock.acquire(blocking=False):
-        return {"enabled": True, "cancelled": 0, "busy": True}
-
-    try:
-        cancelled = _pinchflat_pause_and_cancel_all_tasks()
-        if cancelled:
-            log_activity(
-                "pinchflat",
-                "Pinchflat task deletion",
-                f"Cancelled {cancelled} Pinchflat task(s) while persistent task deletion was enabled.",
-                "warning",
-            )
-        return {"enabled": True, "cancelled": cancelled}
-    finally:
-        pinchflat_task_drain_lock.release()
-
-
-def pinchflat_task_drain_monitor():
-    """Keep the Pinchflat queue empty while persistent task deletion is on."""
-    if pinchflat_task_drain_enabled():
-        try:
-            pinchflat_task_drain_once()
-        except Exception:
-            # Pinchflat may simply be stopped. Keep the persistent setting and
-            # quietly try again on the next pass rather than filling the log.
-            pass
-        return
-
-    if setting_bool("pinchflat_task_drain_resume_pending", False):
-        try:
-            _pinchflat_resume_all_task_queues()
-            set_setting("pinchflat_task_drain_resume_pending", "0")
-        except Exception:
-            # Leave the pending marker set so a stopped/restarting Pinchflat
-            # instance is resumed as soon as it becomes reachable again.
-            pass
-
-
-def set_pinchflat_task_drain(enabled):
-    """Persist task deletion mode and immediately apply the requested state."""
-    enabled = bool(enabled)
-    set_setting("pinchflat_delete_all_tasks", "1" if enabled else "0")
-
-    if enabled:
-        set_setting("pinchflat_task_drain_resume_pending", "0")
-        try:
-            result = pinchflat_task_drain_once()
-            return {
-                "enabled": True,
-                "cancelled": int(result.get("cancelled") or 0),
-                "applied": True,
-            }
-        except Exception as exc:
-            # The mode is still persisted. This is useful when Pinchflat is
-            # currently stopped because the monitor will enforce it later.
-            return {
-                "enabled": True,
-                "cancelled": 0,
-                "applied": False,
-                "warning": str(exc),
-            }
-
-    try:
-        _pinchflat_resume_all_task_queues()
-        set_setting("pinchflat_task_drain_resume_pending", "0")
-        return {"enabled": False, "cancelled": 0, "applied": True}
-    except Exception as exc:
-        set_setting("pinchflat_task_drain_resume_pending", "1")
-        return {
-            "enabled": False,
-            "cancelled": 0,
-            "applied": False,
-            "warning": str(exc),
-        }
-
-
 def pinchflat_container_logs(tail=250):
     if not DOCKER_SOCKET_PATH.exists():
         raise RuntimeError(
@@ -8910,6 +8900,174 @@ def docker_exec_in_pinchflat(command, timeout=180):
         )
 
     return decoded
+
+
+
+def pinchflat_task_block_enabled():
+    return setting_bool("pinchflat_task_block_enabled", False)
+
+
+def pinchflat_pending_task_count():
+    conn = pinchflat_db_readonly()
+    if conn is None:
+        return 0
+    try:
+        tables = pinchflat_table_names(conn)
+        if "oban_jobs" not in tables:
+            return 0
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM oban_jobs
+            WHERE state IN ('executing', 'available', 'scheduled', 'retryable')
+            """
+        ).fetchone()
+        return int(row["count"] or 0) if row else 0
+    except Exception:
+        return 0
+    finally:
+        conn.close()
+
+
+def pinchflat_delete_all_tasks():
+    """Cancel running Oban work and remove every non-completed queued task."""
+    global pinchflat_task_block_last
+    with pinchflat_task_block_lock:
+        expression = r'''
+import Ecto.Query
+
+pause_result =
+  if function_exported?(Oban, :pause_all_queues, 0) do
+    Oban.pause_all_queues()
+  else
+    :unsupported
+  end
+
+query = from j in Oban.Job, where: j.state in ["executing", "available", "scheduled", "retryable"]
+
+cancelled =
+  case Oban.cancel_all_jobs(query) do
+    {:ok, count} -> count
+    other ->
+      IO.inspect(other, label: "CANCEL_RESULT")
+      0
+  end
+
+Process.sleep(350)
+
+delete_query = from j in Oban.Job, where: j.state in ["cancelled", "discarded", "available", "scheduled", "retryable"]
+
+deleted =
+  case Oban.delete_all_jobs(delete_query) do
+    {:ok, count} -> count
+    other ->
+      IO.inspect(other, label: "DELETE_RESULT")
+      0
+  end
+
+remaining = Pinchflat.Repo.aggregate(query, :count, :id)
+IO.puts("TASKS_CANCELLED=" <> Integer.to_string(cancelled))
+IO.puts("TASKS_DELETED=" <> Integer.to_string(deleted))
+IO.puts("TASKS_REMAINING=" <> Integer.to_string(remaining))
+IO.puts("QUEUES_PAUSED=" <> if(pause_result == :unsupported, do: "0", else: "1"))
+'''
+        output = docker_exec_in_pinchflat(
+            ["bin/pinchflat", "rpc", expression],
+            timeout=120,
+        )
+        cancelled_match = re.search(r"TASKS_CANCELLED=(\d+)", output)
+        deleted_match = re.search(r"TASKS_DELETED=(\d+)", output)
+        remaining_match = re.search(r"TASKS_REMAINING=(\d+)", output)
+        paused_match = re.search(r"QUEUES_PAUSED=(\d+)", output)
+        if not cancelled_match or not deleted_match or not remaining_match:
+            raise RuntimeError(
+                "Pinchflat did not return task cancellation verification markers. "
+                f"Output: {output[:1200] or 'No output'}"
+            )
+        result = {
+            "cancelled": int(cancelled_match.group(1)),
+            "deleted": int(deleted_match.group(1)),
+            "remaining": int(remaining_match.group(1)),
+            "queues_paused": bool(int(paused_match.group(1))) if paused_match else False,
+            "output": output,
+        }
+        pinchflat_task_block_last = {
+            "at": now_iso(),
+            "cancelled": result["cancelled"],
+            "deleted": result["deleted"],
+            "remaining": result["remaining"],
+            "error": "",
+        }
+        return result
+
+
+def pinchflat_resume_all_tasks():
+    expression = r'''
+result =
+  if function_exported?(Oban, :resume_all_queues, 0) do
+    Oban.resume_all_queues()
+  else
+    :unsupported
+  end
+IO.puts("QUEUES_RESUMED=" <> if(result == :unsupported, do: "0", else: "1"))
+'''
+    output = docker_exec_in_pinchflat(
+        ["bin/pinchflat", "rpc", expression],
+        timeout=60,
+    )
+    match = re.search(r"QUEUES_RESUMED=(\d+)", output)
+    return {
+        "resumed": bool(int(match.group(1))) if match else False,
+        "output": output,
+    }
+
+
+def pinchflat_task_blocker_loop():
+    global pinchflat_task_block_last
+    last_pause_refresh = 0.0
+    while True:
+        if not pinchflat_task_block_enabled():
+            last_pause_refresh = 0.0
+            time.sleep(5)
+            continue
+        try:
+            pending = pinchflat_pending_task_count()
+            now_ts = time.time()
+            # Re-assert the queue pause periodically. This matters after a
+            # Pinchflat container restart because the app setting persists but
+            # Oban's in-memory paused state does not.
+            if pending > 0 or now_ts - last_pause_refresh >= 15:
+                result = pinchflat_delete_all_tasks()
+                last_pause_refresh = now_ts
+                if result.get("cancelled") or result.get("deleted"):
+                    log_activity(
+                        "pinchflat",
+                        "Pinchflat tasks blocked",
+                        f"Cancelled {result.get('cancelled', 0)} and deleted {result.get('deleted', 0)} Pinchflat tasks.",
+                        "warning",
+                    )
+        except Exception as exc:
+            pinchflat_task_block_last = {
+                "at": now_iso(),
+                "cancelled": 0,
+                "deleted": 0,
+                "remaining": 0,
+                "error": str(exc)[:1000],
+            }
+        time.sleep(2)
+
+
+def start_pinchflat_task_blocker():
+    global pinchflat_task_blocker_started
+    if pinchflat_task_blocker_started:
+        return
+    pinchflat_task_blocker_started = True
+    thread = threading.Thread(
+        target=pinchflat_task_blocker_loop,
+        name="pinchflat-task-blocker",
+        daemon=True,
+    )
+    thread.start()
 
 
 
@@ -10230,6 +10388,10 @@ def pinchflat_download_overview(queue_limit=100):
                 "membership_errors": membership_error_count,
             },
             "tasks": pinchflat_tasks,
+            "task_block": {
+                "enabled": pinchflat_task_block_enabled(),
+                "last": dict(pinchflat_task_block_last),
+            },
             "last_downloaded": last_downloaded,
             "worker": media_worker,
             "schema": {
@@ -14325,7 +14487,6 @@ def index():
         sponsorblock_common_categories=SPONSORBLOCK_COMMON_CATEGORIES,
         pinchflat_online=pinchflat_online,
         pinchflat_container=pinchflat_container,
-        pinchflat_delete_all_tasks=pinchflat_task_drain_enabled(),
         pinchflat_worker_concurrency=(
             pinchflat_container.get(
                 "worker_concurrency"
@@ -15353,52 +15514,6 @@ def save_single_download_settings():
     except Exception as exc:
         flash(f"One-time download settings could not be saved: {exc}", "error")
     return redirect(url_for("index") + "#downloads")
-
-
-
-@app.post("/api/pinchflat/task-drain")
-def pinchflat_task_drain_api():
-    payload = request.get_json(silent=True) or {}
-    enabled = bool(payload.get("enabled"))
-
-    try:
-        result = set_pinchflat_task_drain(enabled)
-        if enabled:
-            if result.get("applied"):
-                message = (
-                    "Delete all tasks is enabled. "
-                    f"Cancelled {int(result.get('cancelled') or 0)} current Pinchflat task(s). "
-                    "New tasks will be cancelled while this remains enabled."
-                )
-            else:
-                message = (
-                    "Delete all tasks is enabled and saved. Pinchflat is not currently reachable, "
-                    "so the app will enforce it as soon as Pinchflat is available."
-                )
-        else:
-            if result.get("applied"):
-                message = "Delete all tasks is disabled. Pinchflat task queues have been resumed."
-            else:
-                message = (
-                    "Delete all tasks is disabled and saved. The app will resume Pinchflat queues "
-                    "when Pinchflat becomes available."
-                )
-
-        log_activity(
-            "pinchflat",
-            "Delete all tasks toggled",
-            message,
-            "warning" if enabled else "success",
-        )
-        return jsonify({"ok": True, "message": message, **result})
-    except Exception as exc:
-        log_activity(
-            "pinchflat",
-            "Delete all tasks failed",
-            str(exc),
-            "error",
-        )
-        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.post("/pinchflat/power")
@@ -16897,7 +17012,7 @@ def single_download_start():
                     FROM downloads
                     WHERE source_type = 'single'
                       AND video_id = ?
-                      AND status IN ('queued', 'preparing', 'downloading', 'processing', 'converting')
+                      AND status IN ('queued', 'downloading')
                     ORDER BY id DESC
                     LIMIT 1
                     """,
@@ -16987,6 +17102,64 @@ def pinchflat_download_overview_api():
         ), 503
 
 
+@app.get("/api/pinchflat/task-block")
+def pinchflat_task_block_status_api():
+    return jsonify({
+        "ok": True,
+        "enabled": pinchflat_task_block_enabled(),
+        "last": dict(pinchflat_task_block_last),
+        "pending": pinchflat_pending_task_count(),
+    })
+
+
+@app.post("/api/pinchflat/task-block")
+def pinchflat_task_block_api():
+    payload = request.get_json(silent=True) or {}
+    enabled = bool(payload.get("enabled"))
+    previous = pinchflat_task_block_enabled()
+    try:
+        if enabled:
+            set_setting("pinchflat_task_block_enabled", "1")
+            result = pinchflat_delete_all_tasks()
+            log_activity(
+                "pinchflat",
+                "Delete all Pinchflat tasks enabled",
+                f"Persistent task blocking enabled. Cancelled {result.get('cancelled', 0)} and deleted {result.get('deleted', 0)} tasks immediately.",
+                "warning",
+            )
+            return jsonify({
+                "ok": True,
+                "enabled": True,
+                "message": (
+                    f"Task blocking enabled. Cancelled {result.get('cancelled', 0)} and "
+                    f"deleted {result.get('deleted', 0)} Pinchflat tasks. New tasks will be cancelled automatically."
+                ),
+                "result": result,
+            })
+
+        set_setting("pinchflat_task_block_enabled", "0")
+        resume = pinchflat_resume_all_tasks()
+        log_activity(
+            "pinchflat",
+            "Delete all Pinchflat tasks disabled",
+            "Persistent task blocking disabled and Pinchflat queues resumed.",
+            "success",
+        )
+        return jsonify({
+            "ok": True,
+            "enabled": False,
+            "message": "Task blocking disabled. Pinchflat queues have resumed.",
+            "result": resume,
+        })
+    except Exception as exc:
+        set_setting("pinchflat_task_block_enabled", "1" if previous else "0")
+        return jsonify({
+            "ok": False,
+            "enabled": previous,
+            "error": str(exc),
+        }), 500
+
+
 @app.get("/api/pinchflat/logs")
 def pinchflat_logs_api():
     try:
@@ -17014,58 +17187,11 @@ def pinchflat_logs_api():
         ), 503
 
 
-def enrich_direct_download_live_status(job):
-    """Add best-effort live file movement to a direct-download status row."""
-    if not job or job.get("status") not in {"preparing", "downloading", "processing", "converting"}:
-        return job
-
-    candidate = str(job.get("output_path") or "").strip()
-    if not candidate:
-        return job
-
-    paths = []
-    base = Path(candidate)
-    paths.append(base)
-    if not candidate.endswith(".part"):
-        paths.append(Path(candidate + ".part"))
-
-    path = next((item for item in paths if item.exists() and item.is_file()), None)
-    if path is None:
-        return job
-
-    try:
-        size = int(path.stat().st_size)
-    except OSError:
-        return job
-
-    if size > int(job.get("downloaded_bytes") or 0):
-        job["downloaded_bytes"] = size
-
-    now = time.monotonic()
-    with direct_download_speed_samples_lock:
-        previous = direct_download_speed_samples.get(job["job_id"])
-        direct_download_speed_samples[job["job_id"]] = (now, size)
-
-    if previous:
-        previous_time, previous_size = previous
-        elapsed = max(0.001, now - previous_time)
-        delta = size - previous_size
-        if delta > 0:
-            job["speed"] = f"{format_bytes(delta / elapsed)}/s"
-
-    return job
-
-
 @app.get("/api/downloads/<job_id>")
 def download_status(job_id):
     job = download_job_row(job_id)
     if not job:
         return jsonify({"ok": False, "error": "Download job not found."}), 404
-
-    job = enrich_direct_download_live_status(job)
-    if job.get("status") in {"completed", "failed"}:
-        with direct_download_speed_samples_lock:
-            direct_download_speed_samples.pop(job_id, None)
 
     job["downloaded_text"] = format_bytes(job.get("downloaded_bytes"))
     job["total_text"] = format_bytes(job.get("total_bytes"))
@@ -17934,6 +18060,7 @@ def health():
 
 init_db()
 start_download_worker()
+start_pinchflat_task_blocker()
 
 scheduler = BackgroundScheduler(
     timezone=os.getenv("TZ", "Europe/London")
@@ -17978,14 +18105,6 @@ scheduler.add_job(
     "interval",
     minutes=1,
     id="pinchflat-scheduled-force-index",
-    max_instances=1,
-    coalesce=True,
-)
-scheduler.add_job(
-    pinchflat_task_drain_monitor,
-    "interval",
-    seconds=5,
-    id="pinchflat-task-drain-monitor",
     max_instances=1,
     coalesce=True,
 )
