@@ -36,7 +36,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.14.0.1"
+VERSION = "2.14.0.2"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -232,6 +232,14 @@ YOUTUBE_LIKED_VIDEOS_CACHE = {
     "retrieved_at": "",
 }
 YOUTUBE_LIKED_VIDEOS_LOCK = threading.Lock()
+
+YOUTUBE_DISLIKED_VIDEOS_CACHE_SECONDS = 600
+YOUTUBE_DISLIKED_VIDEOS_CACHE = {
+    "expires_at": 0.0,
+    "results": [],
+    "retrieved_at": "",
+}
+YOUTUBE_DISLIKED_VIDEOS_LOCK = threading.Lock()
 
 YOUTUBE_CHANNEL_DETAILS_CACHE_SECONDS = 21600
 YOUTUBE_CHANNEL_DETAILS_CACHE = {}
@@ -2186,6 +2194,285 @@ def youtube_liked_videos(force=False):
         ),
         "retrieved_at": retrieved_at,
         "source": "YouTube liked videos",
+    }
+
+
+
+def youtube_disliked_videos(force=False):
+    now_ts = time.time()
+
+    with YOUTUBE_DISLIKED_VIDEOS_LOCK:
+        cached_results = list(
+            YOUTUBE_DISLIKED_VIDEOS_CACHE.get(
+                "results",
+                [],
+            )
+        )
+        expires_at = float(
+            YOUTUBE_DISLIKED_VIDEOS_CACHE.get(
+                "expires_at",
+                0,
+            )
+            or 0
+        )
+        retrieved_at = str(
+            YOUTUBE_DISLIKED_VIDEOS_CACHE.get(
+                "retrieved_at",
+                "",
+            )
+            or ""
+        )
+
+    if (
+        cached_results
+        and not force
+        and expires_at > now_ts
+    ):
+        return {
+            "kind": "disliked",
+            "results": annotate_favourites(
+                cached_results
+            ),
+            "retrieved_at": retrieved_at,
+            "source": "YouTube disliked videos",
+        }
+
+    creds = load_credentials()
+    if not creds:
+        raise RuntimeError(
+            "Google account is not connected."
+        )
+
+    results = []
+    channel_ids = []
+    page_token = None
+    seen_video_ids = set()
+
+    while True:
+        params = {
+            "part": "snippet,statistics,contentDetails",
+            "myRating": "dislike",
+            "maxResults": 50,
+        }
+
+        if page_token:
+            params["pageToken"] = page_token
+
+        response = youtube_api_request(
+            creds,
+            "GET",
+            "videos",
+            "videos.list",
+            1,
+            params=params,
+        )
+
+        payload = response.json()
+
+        for video in payload.get("items", []):
+            video_id = str(
+                video.get("id")
+                or ""
+            ).strip()
+
+            if (
+                not video_id
+                or video_id in seen_video_ids
+            ):
+                continue
+
+            seen_video_ids.add(video_id)
+
+            snippet = video.get("snippet") or {}
+            statistics = video.get("statistics") or {}
+            content_details = (
+                video.get("contentDetails")
+                or {}
+            )
+            thumbnails = snippet.get("thumbnails") or {}
+
+            thumbnail = (
+                thumbnails.get("maxres")
+                or thumbnails.get("standard")
+                or thumbnails.get("high")
+                or thumbnails.get("medium")
+                or thumbnails.get("default")
+                or {}
+            )
+
+            channel_id = str(
+                snippet.get("channelId")
+                or ""
+            ).strip()
+
+            channel_title = str(
+                snippet.get("channelTitle")
+                or "YouTube"
+            ).strip()
+
+            duration_raw = str(
+                content_details.get("duration")
+                or ""
+            )
+
+            duration_seconds = youtube_duration_seconds(
+                duration_raw
+            )
+
+            results.append(
+                {
+                    "video_id": video_id,
+                    "channel_id": channel_id,
+                    "title": (
+                        snippet.get("title")
+                        or "YouTube video"
+                    ),
+                    "channel_title": channel_title,
+                    "published_at": (
+                        snippet.get("publishedAt")
+                        or ""
+                    ),
+                    "description": (
+                        snippet.get("description")
+                        or ""
+                    ),
+                    "video_url": (
+                        f"https://www.youtube.com/watch?v={video_id}"
+                    ),
+                    "shorts_url": (
+                        f"https://www.youtube.com/shorts/{video_id}"
+                    ),
+                    "channel_url": (
+                        f"https://www.youtube.com/channel/{channel_id}"
+                        if channel_id
+                        else "https://www.youtube.com"
+                    ),
+                    "thumbnail_url": (
+                        thumbnail.get("url")
+                        or ""
+                    ),
+                    "channel_avatar_url": "",
+                    "channel_thumbnail_url": "",
+                    "view_count": int(
+                        statistics.get("viewCount")
+                        or 0
+                    ),
+                    "duration": youtube_duration_label(
+                        duration_raw
+                    ),
+                    "duration_seconds": duration_seconds,
+                    "is_short": youtube_video_is_short(
+                        snippet.get("title") or "",
+                        snippet.get("description") or "",
+                        duration_seconds,
+                    ),
+                    "is_youtube_disliked": True,
+                    "metadata_complete": True,
+                }
+            )
+
+            if channel_id:
+                channel_ids.append(channel_id)
+
+        page_token = str(
+            payload.get("nextPageToken")
+            or ""
+        ).strip()
+
+        if not page_token:
+            break
+
+    # Add channel avatars so opening a Disliked Videos tile gets the same rich
+    # player information as Random Videos.
+    avatar_by_channel = {}
+    unique_channel_ids = list(
+        dict.fromkeys(channel_ids)
+    )
+
+    for chunk_start in range(
+        0,
+        len(unique_channel_ids),
+        50,
+    ):
+        chunk = unique_channel_ids[
+            chunk_start:chunk_start + 50
+        ]
+
+        if not chunk:
+            continue
+
+        try:
+            response = youtube_api_request(
+                creds,
+                "GET",
+                "channels",
+                "channels.list",
+                1,
+                params={
+                    "part": "snippet",
+                    "id": ",".join(chunk),
+                    "maxResults": 50,
+                },
+            )
+
+            for channel in response.json().get(
+                "items",
+                [],
+            ):
+                snippet = channel.get("snippet") or {}
+                thumbnails = (
+                    snippet.get("thumbnails")
+                    or {}
+                )
+                image = (
+                    thumbnails.get("high")
+                    or thumbnails.get("medium")
+                    or thumbnails.get("default")
+                    or {}
+                )
+
+                avatar_by_channel[
+                    channel.get("id")
+                ] = image.get("url") or ""
+
+        except Exception:
+            # Disliked videos themselves remain usable if a channel-avatar lookup
+            # fails.
+            continue
+
+    for item in results:
+        avatar = avatar_by_channel.get(
+            item.get("channel_id"),
+            "",
+        )
+
+        item["channel_avatar_url"] = avatar
+        item["channel_thumbnail_url"] = avatar
+
+    retrieved_at = now_iso()
+
+    with YOUTUBE_DISLIKED_VIDEOS_LOCK:
+        YOUTUBE_DISLIKED_VIDEOS_CACHE.update(
+            {
+                "expires_at": (
+                    now_ts
+                    + YOUTUBE_DISLIKED_VIDEOS_CACHE_SECONDS
+                ),
+                "results": [
+                    dict(item)
+                    for item in results
+                ],
+                "retrieved_at": retrieved_at,
+            }
+        )
+
+    return {
+        "kind": "disliked",
+        "results": annotate_favourites(
+            results
+        ),
+        "retrieved_at": retrieved_at,
+        "source": "YouTube disliked videos",
     }
 
 
@@ -13789,6 +14076,12 @@ def bulk_subscription_action():
             elif action == "unsubscribe":
                 unsubscribe_subscription(row["channel_id"])
 
+            elif action in {"delete_local", "delete_local_pinchflat"}:
+                delete_subscription_from_pinchflat_sync(
+                    row["channel_id"],
+                    remove_pinchflat=(action == "delete_local_pinchflat"),
+                )
+
             elif action in {"delete_unsubscribe", "delete_unsubscribe_media"}:
                 delete_and_unsubscribe_subscription(
                     row["channel_id"],
@@ -13846,7 +14139,12 @@ def bulk_subscription_action():
     deleted_ids = [
         channel_id
         for channel_id in channel_ids
-        if action in {"delete_unsubscribe", "delete_unsubscribe_media"}
+        if action in {
+            "delete_local",
+            "delete_local_pinchflat",
+            "delete_unsubscribe",
+            "delete_unsubscribe_media",
+        }
         and not subscription_ajax_payload(channel_id)
     ]
 
@@ -13880,6 +14178,14 @@ def channel_details_api(channel_id):
             "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
             (channel_id,),
         ).fetchone()
+        deleted_marker = conn.execute(
+            "SELECT absence_confirmed FROM manually_deleted_channels WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+
+    youtube_subscribed = bool(row is not None and row_value(row, "active", 0))
+    if row is None and deleted_marker is not None:
+        youtube_subscribed = not bool(row_value(deleted_marker, "absence_confirmed", 0))
 
     subscription = None
     if row is not None:
@@ -13926,6 +14232,7 @@ def channel_details_api(channel_id):
     return jsonify({
         "ok": True,
         "subscription": subscription,
+        "subscribed": youtube_subscribed,
         "favourite": channel_id in favourite_channel_ids(),
         "youtube": youtube,
     })
@@ -14034,8 +14341,25 @@ def unsubscribe_subscription(channel_id):
             "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
             (channel_id,),
         ).fetchone()
+
+    # A channel can still be subscribed on YouTube after the user deliberately
+    # removes its local Pinchflat Sync record. Keep the global channel-image
+    # unsubscribe control useful in that state too.
     if row is None:
-        raise RuntimeError("Subscription was not found.")
+        youtube_unsubscribe(channel_id)
+        with db() as conn:
+            conn.execute(
+                "UPDATE manually_deleted_channels SET absence_confirmed = 1 WHERE channel_id = ?",
+                (channel_id,),
+            )
+        message = "Unsubscribed from the channel on YouTube."
+        log_activity("youtube", "YouTube subscription removed", message, "success", channel_id)
+        return {
+            "ok": True,
+            "message": message,
+            "channel_id": channel_id,
+            "subscription": None,
+        }
 
     row_dict = dict(row)
     youtube_unsubscribe(channel_id, row_value(row, "youtube_subscription_id", None))
@@ -14216,6 +14540,126 @@ def delete_and_unsubscribe_subscription(channel_id, delete_media=False):
     }
 
 
+def delete_subscription_from_pinchflat_sync(channel_id, remove_pinchflat=False):
+    """
+    Remove a channel from this application without changing the user's
+    YouTube subscription. Optionally remove the matching Pinchflat source
+    while keeping downloaded media.
+    """
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
+            (channel_id,),
+        ).fetchone()
+
+    if row is None:
+        raise RuntimeError("Channel is not currently stored in Pinchflat Sync.")
+
+    item = dict(row)
+    title = item.get("title") or channel_id
+    source_id = resolve_pinchflat_source_id(item)
+    source_gone = not source_id
+
+    if remove_pinchflat and source_id:
+        profile_id = subscription_media_profile_id(item)
+        output_template = media_profile_settings(profile_id).get(
+            "output_path_template", EMBY_OUTPUT_PATH_TEMPLATE
+        )
+        removal_row = dict(item)
+        removal_row["pinchflat_source_id"] = str(source_id)
+        removal_row["pinchflat_added"] = 1
+
+        with pinchflat_source_action_lock:
+            prepare_pinchflat_source_for_removal(removal_row)
+            source_gone = delete_pinchflat_source(
+                source_id,
+                delete_files=False,
+                subscription=removal_row,
+            )
+
+        if not source_gone:
+            schedule_unsubscribe_cleanup(
+                channel_id,
+                title,
+                output_template,
+                source_id=source_id,
+                delete_files=False,
+                delay_seconds=300,
+                checks=6,
+            )
+
+    with db() as conn:
+        # Keep the channel suppressed while it remains subscribed on YouTube.
+        # If it later disappears from YouTube and is genuinely re-subscribed,
+        # refresh_subscriptions() will clear this marker and add it again.
+        conn.execute(
+            """
+            INSERT INTO manually_deleted_channels (channel_id, title, deleted_at, absence_confirmed)
+            VALUES (?, ?, ?, 0)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                title = excluded.title,
+                deleted_at = excluded.deleted_at,
+                absence_confirmed = 0
+            """,
+            (channel_id, title, now_iso()),
+        )
+        conn.execute(
+            "DELETE FROM subscriptions WHERE channel_id = ?",
+            (channel_id,),
+        )
+
+    if remove_pinchflat:
+        source_text = (
+            " Pinchflat source removal is still being reconciled in the background."
+            if source_id and not source_gone
+            else " The Pinchflat source was removed." if source_id
+            else " No Pinchflat source existed."
+        )
+    else:
+        source_text = " The Pinchflat source and downloaded media were left unchanged."
+
+    message = f"{title} was removed from Pinchflat Sync.{source_text}"
+    log_activity(
+        "subscriptions",
+        "Channel removed from Pinchflat Sync",
+        message,
+        "success",
+        channel_id,
+    )
+    return {
+        "ok": True,
+        "message": message,
+        "deleted_from_app": True,
+        "youtube_unsubscribed": False,
+        "pinchflat_source_removed": bool(remove_pinchflat and source_gone),
+        "pinchflat_source_pending": bool(remove_pinchflat and source_id and not source_gone),
+        "media_delete_requested": False,
+        "channel_id": channel_id,
+    }
+
+
+@app.post("/api/subscriptions/<channel_id>/delete-local")
+def delete_subscription_from_pinchflat_sync_api(channel_id):
+    payload = request.get_json(silent=True) or {}
+    remove_pinchflat = bool(payload.get("remove_pinchflat"))
+    try:
+        return jsonify(
+            delete_subscription_from_pinchflat_sync(
+                channel_id,
+                remove_pinchflat=remove_pinchflat,
+            )
+        )
+    except Exception as exc:
+        log_activity(
+            "subscriptions",
+            "Local channel delete failed",
+            str(exc),
+            "error",
+            channel_id,
+        )
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
 @app.post("/api/subscriptions/<channel_id>/delete-unsubscribe")
 def delete_and_unsubscribe_subscription_api(channel_id):
     payload = request.get_json(silent=True) or {}
@@ -14370,12 +14814,18 @@ def get_favourites():
             for row in conn.execute(
                 """
                 SELECT fc.*,
-                       COALESCE(s.active, 0) AS subscribed,
+                       CASE WHEN s.channel_id IS NOT NULL THEN 1 ELSE 0 END AS in_app,
+                       CASE
+                         WHEN s.channel_id IS NOT NULL THEN COALESCE(s.active, 0)
+                         WHEN md.channel_id IS NOT NULL AND COALESCE(md.absence_confirmed, 0) = 0 THEN 1
+                         ELSE 0
+                       END AS subscribed,
                        COALESCE(s.download_enabled, 0) AS download_enabled,
                        COALESCE(s.pinchflat_added, 0) AS pinchflat_added,
                        COALESCE(s.pinchflat_source_id, '') AS pinchflat_source_id
                 FROM favourite_channels fc
                 LEFT JOIN subscriptions s ON s.channel_id = fc.channel_id
+                LEFT JOIN manually_deleted_channels md ON md.channel_id = fc.channel_id
                 WHERE fc.user_id = ?
                 ORDER BY fc.channel_title COLLATE NOCASE
                 """,
@@ -14771,6 +15221,14 @@ def like_youtube_video():
                     "retrieved_at": "",
                 }
             )
+        with YOUTUBE_DISLIKED_VIDEOS_LOCK:
+            YOUTUBE_DISLIKED_VIDEOS_CACHE.update(
+                {
+                    "expires_at": 0.0,
+                    "results": [],
+                    "retrieved_at": "",
+                }
+            )
 
         log_activity(
             "youtube",
@@ -14825,6 +15283,7 @@ def discover_videos():
     if kind not in {
         "downloaded",
         "liked",
+        "disliked",
         "videos",
         "shorts",
         "top100",
@@ -14847,6 +15306,22 @@ def discover_videos():
 
         if kind == "liked":
             result = youtube_liked_videos(
+                force=refresh
+            )
+            stats = api_usage_stats()
+
+            return jsonify(
+                {
+                    "ok": True,
+                    **result,
+                    "search_remaining": (
+                        stats["search_remaining"]
+                    ),
+                }
+            )
+
+        if kind == "disliked":
+            result = youtube_disliked_videos(
                 force=refresh
             )
             stats = api_usage_stats()

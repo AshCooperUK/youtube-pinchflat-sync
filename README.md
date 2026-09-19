@@ -2,7 +2,11 @@
 
 A Docker dashboard for ZimaOS which reads your YouTube subscriptions, creates and manages Pinchflat sources, and adds direct-download automation for an Emby YouTube library.
 
-## Version 2.14.0.1
+## Version 2.14.0.2
+
+- Adds a consistent channel removal icon to channel artwork, with choices matching the Actions menu for YouTube, Pinchflat Sync, Pinchflat and media cleanup.
+- Redesigns the Favourites popup around compact channel/video tiles and the same channel-image controls used elsewhere in the app.
+- Adds Discover > Disliked Videos using the connected YouTube account's rating data.
 
 Dashboard layout and built-in function reference update.
 
