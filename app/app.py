@@ -15145,6 +15145,9 @@ def pinchflat_download_overview(queue_limit=100):
         membership_errors = conn.execute(
             "SELECT COUNT(*) AS c FROM downloads WHERE failure_code='membership_required'"
         ).fetchone()["c"]
+        completed_total = conn.execute(
+            "SELECT COUNT(*) AS c FROM downloads WHERE status='completed'"
+        ).fetchone()["c"]
 
     def item(row):
         video_id = str(row.get("video_id") or "")
@@ -15204,6 +15207,7 @@ def pinchflat_download_overview(queue_limit=100):
             "tasks_active": sum(1 for row in scan_rows if row["status"] == "running"),
             "tasks_waiting": sum(1 for row in scan_rows if row["status"] == "queued"),
             "membership_errors": int(membership_errors or 0),
+            "completed": int(completed_total or 0),
         },
         "tasks": tasks,
         "task_block": {
