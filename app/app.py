@@ -5988,6 +5988,7 @@ def run_download_job(job_id):
 
     source_type = str(job.get("source_type") or "")
     subscription_job = source_type.startswith("subscription")
+    subscription_redownload = source_type == "subscription_redownload"
 
     if subscription_job:
         output_dir = DOWNLOAD_ROOT / "shows"
@@ -6034,7 +6035,8 @@ def run_download_job(job_id):
         "outtmpl": output_template,
         "noplaylist": True,
         "continuedl": True,
-        "overwrites": False,
+        "overwrites": bool(subscription_redownload),
+        "force_overwrites": bool(subscription_redownload),
         "writethumbnail": True,
         "writeinfojson": True,
         "embedmetadata": True,
@@ -14336,7 +14338,7 @@ def _v3_queue_entry(sub, entry, redownload=False):
     published_at = entry_date.isoformat() if entry_date else str((entry or {}).get("published_at") or "")
     _job_id, created = enqueue_download(
         video_url,
-        source_type="subscription",
+        source_type=("subscription_redownload" if redownload else "subscription"),
         video_id=video_id,
         title=str((entry or {}).get("title") or "YouTube video"),
         channel_title=str((entry or {}).get("channel") or (entry or {}).get("uploader") or sub.get("title") or ""),
