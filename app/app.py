@@ -6102,14 +6102,12 @@ def ensure_download_emby_compatibility(
             "-preset", "medium",
             "-crf", "20",
             "-pix_fmt", "yuv420p",
-            "-profile:v", "high",
-            "-level", "4.1",
         ]
 
     if audio_ok:
         command += ["-c:a", "copy"]
     else:
-        command += ["-c:a", "aac", "-b:a", "192k", "-ac", "2"]
+        command += ["-c:a", "aac", "-b:a", "192k"]
 
     command += [
         "-map_metadata", "0",
