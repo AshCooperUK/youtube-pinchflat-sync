@@ -47,7 +47,7 @@ from downloader_auth import (
     test_cookie_authentication,
 )
 
-VERSION = "3.0.1"
+VERSION = "3.0.2"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -849,6 +849,7 @@ def init_db():
             "pinchflat_force_index_nonfavourite_minutes": "0",
             "pinchflat_task_block_enabled": "0",
             "downloader_default_profile": "1080p",
+            "downloader_compatibility_profile": "emby_tv",
             "downloader_worker_concurrency": "1",
             "downloader_scan_workers": "4",
             "downloader_deep_scan_limit": "500",
@@ -5931,6 +5932,11 @@ def single_download_compatibility_profile():
     return value if value in {"emby_tv", "automatic"} else "emby_tv"
 
 
+def subscription_download_compatibility_profile():
+    value = get_setting("downloader_compatibility_profile", "emby_tv").strip().lower()
+    return value if value in {"emby_tv", "automatic"} else "emby_tv"
+
+
 def single_download_ydl_settings():
     mode = get_setting("single_download_format", "best").strip()
     audio_format = get_setting("single_download_audio_format", "m4a").strip().lower()
@@ -6052,10 +6058,15 @@ def resolve_direct_download_output_path(info, ydl, output_dir, current_path=""):
     return str(current_path or "")
 
 
-def ensure_single_download_emby_compatibility(output_path, job_id=None):
-    """Guarantee H.264 + AAC in MP4 for One-time Download video jobs only."""
+def ensure_download_emby_compatibility(
+    output_path,
+    job_id=None,
+    compatibility_profile="emby_tv",
+    phase_prefix="",
+):
+    """Guarantee H.264 + AAC in MP4 when Direct Play compatibility is selected."""
     path = Path(str(output_path or ""))
-    if not path.exists() or single_download_compatibility_profile() != "emby_tv":
+    if not path.exists() or str(compatibility_profile or "").strip().lower() != "emby_tv":
         return str(path)
 
     video_codec, audio_codec, duration = _probe_single_download_media(path)
@@ -6067,7 +6078,7 @@ def ensure_single_download_emby_compatibility(output_path, job_id=None):
             update_download_job(
                 job_id,
                 status="processing",
-                phase="Direct Play compatible · finalising",
+                phase=(phase_prefix + "Direct Play compatible · finalising").strip(),
                 progress=99.0,
                 speed="",
                 eta="",
@@ -6075,7 +6086,9 @@ def ensure_single_download_emby_compatibility(output_path, job_id=None):
         return str(path)
 
     final_path = path.with_suffix(".mp4")
-    temp_path = final_path.with_name(f".{final_path.stem}.compat-{secrets.token_hex(4)}.mp4")
+    temp_path = final_path.with_name(
+        f".{final_path.stem}.compat-{secrets.token_hex(4)}.mp4"
+    )
     command = [
         "ffmpeg", "-y", "-i", str(path),
         "-map", "0:v:0", "-map", "0:a?",
@@ -6085,25 +6098,33 @@ def ensure_single_download_emby_compatibility(output_path, job_id=None):
         command += ["-c:v", "copy"]
     else:
         command += [
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "20",
             "-pix_fmt", "yuv420p",
+            "-profile:v", "high",
+            "-level", "4.1",
         ]
 
     if audio_ok:
         command += ["-c:a", "copy"]
     else:
-        command += ["-c:a", "aac", "-b:a", "192k"]
+        command += ["-c:a", "aac", "-b:a", "192k", "-ac", "2"]
 
     command += [
-        "-map_metadata", "0", "-movflags", "+faststart",
-        "-progress", "pipe:1", "-nostats", str(temp_path),
+        "-map_metadata", "0",
+        "-movflags", "+faststart",
+        "-progress", "pipe:1",
+        "-nostats",
+        str(temp_path),
     ]
 
+    converting_phase = (phase_prefix + "Converting for Emby / Smart TV").strip()
     if job_id:
         update_download_job(
             job_id,
             status="processing",
-            phase="Converting for Emby / Smart TV",
+            phase=converting_phase,
             progress=90.0,
             speed="",
             eta="",
@@ -6128,34 +6149,41 @@ def ensure_single_download_emby_compatibility(output_path, job_id=None):
                     continue
                 try:
                     elapsed_us = float(value or 0)
-                    # ffmpeg currently reports both out_time_us and out_time_ms
-                    # in microseconds on supported builds.  Clamp aggressively so
-                    # an unexpected unit cannot push the UI beyond the conversion band.
                     elapsed_seconds = elapsed_us / 1_000_000.0
                     ratio = max(0.0, min(1.0, elapsed_seconds / duration))
                     update_download_job(
                         job_id,
                         status="processing",
-                        phase="Converting for Emby / Smart TV",
+                        phase=converting_phase,
                         progress=round(90.0 + ratio * 9.0, 2),
                     )
                 except (TypeError, ValueError):
                     pass
+
         stderr = process.stderr.read() if process.stderr is not None else ""
         return_code = process.wait(timeout=7200)
         if return_code != 0:
-            raise RuntimeError((stderr or f"ffmpeg exited with code {return_code}")[-1800:])
+            raise RuntimeError(
+                (stderr or f"ffmpeg exited with code {return_code}")[-1800:]
+            )
 
-        if final_path != path and final_path.exists():
-            final_path.unlink()
+        # Verify the produced file before replacing the source. This prevents a
+        # successful ffmpeg exit from leaving an unexpected codec/container.
+        new_video_codec, new_audio_codec, _ = _probe_single_download_media(temp_path)
+        if new_video_codec != "h264" or (new_audio_codec and new_audio_codec != "aac"):
+            raise RuntimeError(
+                "Compatibility conversion completed but the output is not H.264/AAC."
+            )
+
         os.replace(temp_path, final_path)
         if path != final_path and path.exists():
             path.unlink()
+
         if job_id:
             update_download_job(
                 job_id,
                 status="processing",
-                phase="Compatibility conversion complete",
+                phase=(phase_prefix + "Compatibility conversion complete").strip(),
                 progress=99.0,
             )
         return str(final_path)
@@ -6166,21 +6194,18 @@ def ensure_single_download_emby_compatibility(output_path, job_id=None):
             except Exception:
                 pass
         if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
-def _v3_subscription_info_date(info, fallback=""):
-    upload_date = str((info or {}).get("upload_date") or "").strip()
-    if re.fullmatch(r"\d{8}", upload_date):
-        return f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
-    timestamp = (info or {}).get("timestamp") or (info or {}).get("release_timestamp")
-    if timestamp:
-        try:
-            return datetime.fromtimestamp(float(timestamp), tz=timezone.utc).date().isoformat()
-        except (TypeError, ValueError, OSError):
-            pass
-    return str(fallback or "")
-
+def ensure_single_download_emby_compatibility(output_path, job_id=None):
+    return ensure_download_emby_compatibility(
+        output_path,
+        job_id=job_id,
+        compatibility_profile=single_download_compatibility_profile(),
+    )
 
 def _v3_download_with_auth_retry(job, ydl_opts):
     """Run yt-dlp anonymously first and retry with configured auth only when useful."""
@@ -6252,11 +6277,17 @@ def run_download_job(job_id):
         auth_mode="anonymous",
     )
 
-    compatibility_video = (
+    single_compatibility_video = (
         source_type == "single"
         and get_setting("single_download_format", "best") != "audio"
         and single_download_compatibility_profile() == "emby_tv"
     )
+    subscription_compatibility_video = (
+        subscription_job
+        and v3_profile_id(job.get("profile_id")) != "audio"
+        and subscription_download_compatibility_profile() == "emby_tv"
+    )
+    compatibility_video = single_compatibility_video or subscription_compatibility_video
     download_progress_ceiling = 85.0 if compatibility_video else 100.0
 
     ydl_opts = {
@@ -6314,7 +6345,7 @@ def run_download_job(job_id):
 
         output_path = resolve_direct_download_output_path(info, ydl, output_dir, output_path)
 
-        if source_type == "single" and get_setting("single_download_format", "best") != "audio":
+        if compatibility_video:
             try:
                 update_download_job(
                     job_id,
@@ -6324,13 +6355,27 @@ def run_download_job(job_id):
                     speed="",
                     eta="",
                 )
-                compatible_path = ensure_single_download_emby_compatibility(output_path, job_id=job_id)
+                compatibility_profile = (
+                    subscription_download_compatibility_profile()
+                    if subscription_job
+                    else single_download_compatibility_profile()
+                )
+                compatible_path = ensure_download_emby_compatibility(
+                    output_path,
+                    job_id=job_id,
+                    compatibility_profile=compatibility_profile,
+                )
                 if compatible_path and compatible_path != output_path:
                     log_activity(
                         "download",
-                        "One-time Download converted for Emby",
+                        (
+                            "Subscription Download converted for Emby"
+                            if subscription_job
+                            else "One-time Download converted for Emby"
+                        ),
                         f"{info.get('title') or job['youtube_url']} converted to H.264 + AAC in MP4.",
                         "success",
+                        job.get("channel_id"),
                     )
                 output_path = compatible_path or output_path
             except Exception as exc:
@@ -14458,10 +14503,20 @@ def _v3_profile_ydl_options(profile_id):
         })
     else:
         height = int(profile_id[:-1]) if profile_id.endswith("p") else 1080
-        options.update({
-            "format": f"bestvideo*[height<={height}]+bestaudio/best[height<={height}]/best",
-            "merge_output_format": "mp4",
-        })
+        if subscription_download_compatibility_profile() == "emby_tv":
+            options.update({
+                "format": (
+                    f"bv*[vcodec^=avc1][height<={height}]+ba[acodec^=mp4a]/"
+                    f"b[vcodec^=avc1][acodec^=mp4a][height<={height}]/"
+                    f"bv*[height<={height}]+ba/b[height<={height}]/best"
+                ),
+                "merge_output_format": "mp4",
+            })
+        else:
+            options.update({
+                "format": f"bestvideo*[height<={height}]+bestaudio/best[height<={height}]/best",
+                "merge_output_format": "mp4",
+            })
 
     download_subs = setting_bool("downloader_download_subtitles", True)
     embed_subs = setting_bool("downloader_embed_subtitles", True)
@@ -15618,7 +15673,15 @@ def save_downloader_advanced():
     deep_limit = max(25, min(5000, int(request.form.get("downloader_deep_scan_limit", "500") or 500)))
     custom = str(request.form.get("downloader_custom_yt_dlp_options", "{}") or "{}").strip()
     parse_custom_yt_dlp_options(custom)
+    compatibility_profile = str(
+        request.form.get("downloader_compatibility_profile", "emby_tv")
+        or "emby_tv"
+    ).strip().lower()
+    if compatibility_profile not in {"emby_tv", "automatic"}:
+        compatibility_profile = "emby_tv"
+
     set_setting("downloader_default_profile", profile_id)
+    set_setting("downloader_compatibility_profile", compatibility_profile)
     set_setting("downloader_worker_concurrency", str(concurrency))
     set_setting("downloader_scan_workers", str(scan_workers))
     set_setting("downloader_deep_scan_limit", str(deep_limit))
@@ -16526,6 +16589,7 @@ def index():
         downloader_custom_options=get_setting("downloader_custom_yt_dlp_options", "{}"),
         downloader_auth_retry=setting_bool("downloader_auth_retry", True),
         downloader_default_profile=effective_media_profile_id(),
+        downloader_compatibility_profile=subscription_download_compatibility_profile(),
         downloader_worker_concurrency=setting_int("downloader_worker_concurrency", 1, 1, 8),
         downloader_scan_workers=setting_int("downloader_scan_workers", 4, 1, 12),
         downloader_deep_scan_limit=setting_int("downloader_deep_scan_limit", 500, 25, 5000),
