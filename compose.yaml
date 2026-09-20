@@ -95,10 +95,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "3.0.4"
+  version: "3.0.5"
   update_at: "2026-09-20"
   release_notes:
-    en_US: v3.0.4 fixes subtitle-only failures and false FFmpeg status. Adds portable filenames, channel folder repair, early artwork and episode NFO, with visible download errors.
+    en_US: v3.0.5 fixes Shorts filtering and import enabling, adds media-profile sorting and search across subscription columns, and shows waiting jobs and recent download outcomes. Includes the metadata and portable filename fixes.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

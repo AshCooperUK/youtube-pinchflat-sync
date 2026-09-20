@@ -49,7 +49,7 @@ from downloader_auth import (
 )
 from downloader_media import MediaYoutubeDL, SUBTITLE_EXTENSIONS, safe_media_component
 
-VERSION = "3.0.4"
+VERSION = "3.0.5"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -5602,7 +5602,7 @@ def enqueue_download(
         with db() as conn:
             existing = conn.execute(
                 """
-                SELECT job_id, status, output_path
+                SELECT job_id, status, output_path, failure_code
                 FROM downloads
                 WHERE video_id = ?
                   AND (
@@ -5616,6 +5616,13 @@ def enqueue_download(
             ).fetchone()
         if existing and existing["status"] in {"queued", "downloading", "processing"}:
             return existing["job_id"], False
+        if existing and existing["status"] == "skipped" and source_type.startswith("subscription"):
+            excluded_setting = {
+                "shorts_excluded": "downloader_include_shorts",
+                "livestream_excluded": "downloader_include_livestreams",
+            }.get(existing["failure_code"])
+            if excluded_setting and not setting_bool(excluded_setting, excluded_setting.endswith("livestreams")):
+                return existing["job_id"], False
         if existing and existing["status"] == "retention_deleted" and not redownload:
             # Retention deletions are intentional tombstones. Normal channel
             # scans must not immediately download the same old item again.
@@ -6399,6 +6406,8 @@ def _v3_download_with_auth_retry(job, ydl_opts):
                             sidecar_notice=lambda message: record_download_notice(job["job_id"], message)) as ydl:
             info = ydl.extract_info(job["youtube_url"], download=True)
             return info, ydl, "anonymous"
+    except SubscriptionMediaExcluded:
+        raise
     except Exception as anonymous_error:
         if not setting_bool("downloader_auth_retry", True):
             raise
@@ -6704,6 +6713,11 @@ def run_download_job(job_id):
                     resolved_channel_id or None,
                 )
 
+    except SubscriptionMediaExcluded as exc:
+        update_download_job(job_id, status="skipped", phase=str(exc), failure_code=exc.code,
+                            error=None, progress=0, speed="", eta="", finished_at=now_iso())
+        log_activity("download", "Download skipped", f"{job.get('title') or job['youtube_url']}: {exc}",
+                     "info", job.get("channel_id"))
     except Exception as exc:
         failure_code = classify_yt_dlp_error(exc)
         update_download_job(
@@ -14000,12 +14014,14 @@ def sync_once():
             retry = {"attempted": 0, "fixed": 0, "errors": 0}
 
         emby = sync_emby_download_playlist()
+        outcomes = scan_download_outcomes(scan)
 
         total_errors = (
             refresh["policy_errors"]
             + authority["errors"]
             + result["errors"]
             + scan["errors"]
+            + outcomes["failed"]
             + retry["errors"]
             + (1 if emby.get("error") else 0)
         )
@@ -14022,7 +14038,8 @@ def sync_once():
             f"Removed {refresh['removed']}. "
             f"Monitoring changes {authority['changed']}. "
             f"Registered {result['added']} new channel(s). "
-            f"Scanned {scan['checked']} enabled channel(s); queued {scan['queued']} download(s). "
+            f"Scanned {scan['checked']} enabled channel(s). "
+            f"{outcomes['message']}"
             f"Retry fixes {retry['fixed']}. "
             f"Emby Download queued {emby.get('queued', 0)}. "
             f"Errors {total_errors}."
@@ -14491,6 +14508,29 @@ def _v3_authenticated_options(base):
     )
 
 
+class SubscriptionMediaExcluded(RuntimeError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+def subscription_media_exclusion(info, include_shorts=None, include_livestreams=None):
+    """Use YouTube's media classification, not the length of a normal video."""
+    info = info or {}
+    if include_shorts is None:
+        include_shorts = setting_bool("downloader_include_shorts", False)
+    if include_livestreams is None:
+        include_livestreams = setting_bool("downloader_include_livestreams", True)
+    media_type = str(info.get("media_type") or "").casefold()
+    shorts_url = any("/shorts/" in str(info.get(key) or "") for key in ("webpage_url", "original_url", "url"))
+    if not include_shorts and (media_type == "short" or info.get("is_short") is True or shorts_url):
+        return "shorts_excluded", "Skipped: Shorts are switched off"
+    if not include_livestreams and (media_type == "livestream" or info.get("is_live")
+            or str(info.get("live_status") or "") in {"is_live", "was_live", "post_live", "is_upcoming"}):
+        return "livestream_excluded", "Skipped: livestreams are switched off"
+    return None
+
+
 def _v3_profile_ydl_options(profile_id):
     profile_id = v3_profile_id(profile_id)
     options = {}
@@ -14573,20 +14613,12 @@ def _v3_profile_ydl_options(profile_id):
     include_livestreams = setting_bool("downloader_include_livestreams", True)
 
     def match_filter(info, incomplete=False):
-        live_status = str((info or {}).get("live_status") or "")
-        if not include_livestreams and (
-            (info or {}).get("is_live")
-            or live_status in {"is_live", "was_live", "post_live"}
-        ):
-            return "Livestream excluded by Downloader profile"
-        if not include_shorts:
-            url = str((info or {}).get("webpage_url") or (info or {}).get("original_url") or "")
-            duration = (info or {}).get("duration")
-            # YouTube does not expose a durable "is_short" flag through every
-            # extractor client. A /shorts/ URL is authoritative; very short
-            # normal videos are not rejected solely because of duration.
-            if "/shorts/" in url:
-                return "Short excluded by Downloader profile"
+        excluded = subscription_media_exclusion(info, include_shorts, include_livestreams)
+        if excluded:
+            # Stop before sidecars/media are written and retain the reason in
+            # our job record. A plain filter string otherwise looks like a
+            # missing output file and gets retried on every scan.
+            raise SubscriptionMediaExcluded(*excluded)
         return None
 
     options["match_filter"] = match_filter
@@ -14630,13 +14662,15 @@ def _v3_subscription_info_date(info, fallback=""):
     return published.isoformat() if published else ""
 
 
-def _v3_queue_entry(sub, entry, redownload=False):
+def _v3_queue_entry(sub, entry, redownload=False, job_ids=None):
     video_id = str((entry or {}).get("id") or (entry or {}).get("video_id") or "").strip()
     if not video_id:
         return False
     cutoff = date.fromisoformat(subscription_cutoff(sub))
     entry_date = _v3_parse_entry_date(entry)
     if entry_date and entry_date < cutoff:
+        return False
+    if subscription_media_exclusion(entry):
         return False
     video_url = str((entry or {}).get("webpage_url") or (entry or {}).get("url") or "").strip()
     if not video_url.startswith("http"):
@@ -14653,6 +14687,8 @@ def _v3_queue_entry(sub, entry, redownload=False):
         profile_id=subscription_media_profile_id(sub),
         redownload=redownload,
     )
+    if created and job_ids is not None:
+        job_ids.append(_job_id)
     return bool(created)
 
 
@@ -14691,7 +14727,7 @@ def _v3_enrich_flat_entry(entry):
     merged = dict(entry)
     for key in (
         "id", "title", "webpage_url", "url", "upload_date", "timestamp",
-        "release_timestamp", "channel", "channel_id", "uploader",
+        "release_timestamp", "channel", "channel_id", "uploader", "media_type", "is_short", "is_live", "live_status",
     ):
         if resolved.get(key) not in (None, ""):
             merged[key] = resolved.get(key)
@@ -14753,6 +14789,7 @@ def v3_scan_subscription(channel_id, deep=False, redownload=False):
         entries = list((info or {}).get("entries") or [])
 
     queued = 0
+    job_ids = []
     cutoff = date.fromisoformat(subscription_cutoff(sub))
     for entry in entries:
         if deep and not _v3_parse_entry_date(entry):
@@ -14767,9 +14804,9 @@ def v3_scan_subscription(channel_id, deep=False, redownload=False):
         # bypassing a "Today" or "This week" cutoff.
         if deep and not entry_date:
             continue
-        if _v3_queue_entry(sub, entry, redownload=redownload):
+        if _v3_queue_entry(sub, entry, redownload=redownload, job_ids=job_ids):
             queued += 1
-    return {"found": len(entries), "queued": queued}
+    return {"found": len(entries), "queued": queued, "job_ids": job_ids}
 
 
 def enqueue_subscription_scan(channel_id, deep=False, redownload=False):
@@ -14886,6 +14923,7 @@ def v3_scan_all_enabled():
         ]
     workers = setting_int("downloader_scan_workers", 4, 1, 12)
     found = queued = errors = 0
+    job_ids = []
 
     def scan(row):
         return v3_scan_subscription(row["channel_id"], deep=False, redownload=False)
@@ -14897,9 +14935,29 @@ def v3_scan_all_enabled():
                 result = future.result()
                 found += int(result.get("found") or 0)
                 queued += int(result.get("queued") or 0)
+                job_ids.extend(result.get("job_ids") or [])
             except Exception:
                 errors += 1
-    return {"checked": len(rows), "found": found, "queued": queued, "errors": errors}
+    return {"checked": len(rows), "found": found, "queued": queued, "errors": errors, "job_ids": job_ids}
+
+
+def scan_download_outcomes(scan):
+    """Describe the exact jobs this scan added, as they stand at scan completion."""
+    counts = {key: 0 for key in ("waiting", "active", "completed", "skipped", "failed", "cancelled")}
+    job_ids = list(dict.fromkeys(scan.get("job_ids") or []))
+    with db() as conn:
+        for offset in range(0, len(job_ids), 200):
+            batch = job_ids[offset:offset + 200]
+            rows = conn.execute(f"SELECT status,COUNT(*) AS n FROM downloads WHERE job_id IN ({','.join('?' for _ in batch)}) GROUP BY status", batch).fetchall()
+            for row in rows:
+                key = {"queued": "waiting", "downloading": "active", "processing": "active"}.get(row["status"], row["status"])
+                if key in counts:
+                    counts[key] += int(row["n"])
+    details = ", ".join(f"{value} {key}" for key, value in counts.items() if value)
+    total = int(scan.get("queued") or 0)
+    message = f"Added {total} download job(s) during this scan"
+    message += f"; at scan completion: {details}. " if details else ". "
+    return {"message": message, **counts}
 
 
 def add_pending_sources():
@@ -15006,14 +15064,9 @@ def reconcile_active_source_authority():
 
 
 def retry_failed_source_updates():
-    with db() as conn:
-        rows = conn.execute(
-            "SELECT channel_id FROM subscriptions WHERE active=1 AND COALESCE(last_error,'')!=''"
-        ).fetchall()
-        conn.execute(
-            "UPDATE subscriptions SET last_error=NULL, retry_count=0 WHERE active=1"
-        )
-    return {"attempted": len(rows), "fixed": len(rows), "errors": 0}
+    # Native source registration is synchronous. A video failure is not a
+    # source update and must remain visible until an actual retry succeeds.
+    return {"attempted": 0, "fixed": 0, "errors": 0}
 
 
 def execute_pinchflat_source_action(source_id, action):
@@ -15042,9 +15095,11 @@ def pinchflat_sync_once():
     try:
         add_pending_sources()
         result = v3_scan_all_enabled()
+        outcomes = scan_download_outcomes(result)
+        result["errors"] += outcomes["failed"]
         message = (
             f"Downloader scanned {result['checked']} enabled channel(s), "
-            f"found {result['found']} recent item(s), queued {result['queued']} download(s). "
+            f"found {result['found']} recent item(s). {outcomes['message']}"
             f"Errors {result['errors']}."
         )
         log_activity(
@@ -15223,6 +15278,14 @@ def pinchflat_download_overview(queue_limit=100):
         ).fetchone()["c"]
         waiting_total = conn.execute("SELECT COUNT(*) AS c FROM downloads WHERE status='queued'").fetchone()["c"]
         failed = conn.execute("SELECT * FROM downloads WHERE status='failed' ORDER BY finished_at DESC,id DESC LIMIT 1").fetchone()
+        recent_rows = [dict(row) for row in conn.execute(
+            """SELECT * FROM downloads
+               WHERE status IN ('completed','failed','skipped','cancelled')
+                 AND source_type != 'subscription_import'
+                 AND finished_at >= ?
+               ORDER BY finished_at DESC,id DESC LIMIT 8""",
+            ((datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(),),
+        ).fetchall()]
     inventory = completed_video_inventory()
     last = inventory["rows"][0] if inventory["rows"] else None
     processing = [row for row in active_rows if row.get("status") == "processing"]
@@ -15285,6 +15348,7 @@ def pinchflat_download_overview(queue_limit=100):
     return {
         "active": [item(row) for row in active_rows],
         "waiting": [item(row) for row in waiting_rows],
+        "recent": [item(row) for row in recent_rows],
         "summary": {
             "active": len(active_rows),
             "waiting": int(waiting_total),
@@ -15399,7 +15463,7 @@ def _library_channel_from_path(media_path):
     return str(media_path.parent.name or "YouTube")
 
 
-def reconcile_existing_library(force=False):
+def reconcile_existing_library(force=False, enable_channels=False):
     """Import pre-V3 media into the native downloads database."""
     if not force and setting_bool("v3_library_import_complete", False):
         return {
@@ -15407,24 +15471,50 @@ def reconcile_existing_library(force=False):
             "imported": 0,
             "known": setting_int("v3_library_last_known", 0, 0, 100000000),
             "unmatched": setting_int("v3_library_last_unmatched", 0, 0, 100000000),
+            "enabled": 0,
         }
 
     shows_root = DOWNLOAD_ROOT / "shows"
     roots = [shows_root] if shows_root.exists() else [DOWNLOAD_ROOT]
     scanned = imported = known = unmatched = 0
+    matched_channels = set()
 
     with db() as conn:
         subscriptions = [
             dict(row)
             for row in conn.execute(
-                "SELECT channel_id,title FROM subscriptions WHERE COALESCE(title,'')!=''"
+                "SELECT channel_id,title,download_folder FROM subscriptions WHERE COALESCE(title,'')!=''"
             ).fetchall()
         ]
-    channel_by_title = {
-        normalise_storage_name(row["title"]): row["channel_id"]
-        for row in subscriptions
-        if row.get("title") and row.get("channel_id")
-    }
+    channel_by_title = {}
+    channel_by_folder = {}
+    for sub in subscriptions:
+        for name in (sub["title"], safe_media_component(sub["title"], 80)):
+            channel_by_title.setdefault(normalise_storage_name(name), set()).add(sub["channel_id"])
+        if sub.get("download_folder"):
+            channel_by_folder.setdefault(sub["download_folder"], set()).add(sub["channel_id"])
+    known_channels = {sub["channel_id"] for sub in subscriptions}
+    folder_metadata = {}
+
+    def identify_channel(media_path, info, existing, root):
+        parts = media_path.relative_to(root).parts
+        folder = root / parts[0] if len(parts) > 1 else media_path.parent
+        if folder not in folder_metadata:
+            try:
+                folder_metadata[folder] = str(ET.parse(folder / "tvshow.nfo").findtext("uniqueid[@type='youtube']") or "").strip()
+            except (OSError, ET.ParseError):
+                folder_metadata[folder] = ""
+        explicit_id = str(info.get("channel_id") or folder_metadata[folder]
+                          or (existing["channel_id"] if existing else "") or "").strip()
+        title = str(info.get("channel") or info.get("uploader") or _library_channel_from_path(media_path)).strip()
+        if explicit_id:
+            # An explicit ID must never fall back to another channel with the
+            # same display name. Unknown channels need a subscription match.
+            return explicit_id, title
+        candidates = channel_by_folder.get(folder.name, set())
+        if not candidates:
+            candidates = channel_by_title.get(normalise_storage_name(title), set())
+        return (next(iter(candidates)) if len(candidates) == 1 else ""), title
 
     for root in roots:
         try:
@@ -15444,14 +15534,19 @@ def reconcile_existing_library(force=False):
 
             with db() as conn:
                 existing = conn.execute(
-                    "SELECT id FROM downloads WHERE output_path=? AND status='completed' LIMIT 1",
+                    "SELECT id,channel_id FROM downloads WHERE output_path=? AND status='completed' LIMIT 1",
                     (media_path_text,),
                 ).fetchone()
+            info = _read_media_info_sidecar(media_path)
+            channel_id, channel_title = identify_channel(media_path, info, existing, root)
+            if channel_id in known_channels:
+                matched_channels.add(channel_id)
             if existing:
+                if channel_id and not existing["channel_id"]:
+                    with db() as conn:
+                        conn.execute("UPDATE downloads SET channel_id=? WHERE id=?", (channel_id, existing["id"]))
                 known += 1
                 continue
-
-            info = _read_media_info_sidecar(media_path)
             video_id = str(info.get("id") or "").strip()
             if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
                 video_id = ""
@@ -15472,7 +15567,7 @@ def reconcile_existing_library(force=False):
                 with db() as conn:
                     duplicate = conn.execute(
                         """
-                        SELECT id FROM downloads
+                        SELECT id,channel_id FROM downloads
                         WHERE video_id=? AND status='completed'
                           AND source_type LIKE 'subscription%'
                         LIMIT 1
@@ -15480,20 +15575,12 @@ def reconcile_existing_library(force=False):
                         (video_id,),
                     ).fetchone()
                 if duplicate:
+                    if not channel_id and duplicate["channel_id"] in known_channels:
+                        matched_channels.add(duplicate["channel_id"])
                     known += 1
                     continue
             else:
                 unmatched += 1
-
-            channel_title = str(
-                info.get("channel")
-                or info.get("uploader")
-                or _library_channel_from_path(media_path)
-                or "YouTube"
-            ).strip()
-            channel_id = str(info.get("channel_id") or "").strip()
-            if not channel_id:
-                channel_id = str(channel_by_title.get(normalise_storage_name(channel_title)) or "")
 
             title = str(info.get("title") or media_path.stem).strip()
             if video_id:
@@ -15550,6 +15637,19 @@ def reconcile_existing_library(force=False):
             except Exception:
                 unmatched += 1
 
+    enabled = 0
+    if enable_channels:
+        # Only the explicit import action enables channels. Startup inventory
+        # reconciliation must not undo switches the user has turned off.
+        with db() as conn:
+            for channel_id in sorted(matched_channels):
+                enabled += conn.execute(
+                    """UPDATE subscriptions
+                       SET download_enabled=1, source_authorised=1, needs_review=0,
+                           pinchflat_added=1, pinchflat_source_id=channel_id
+                       WHERE channel_id=? AND active=1 AND download_enabled=0""",
+                    (channel_id,),
+                ).rowcount
     invalidate_video_inventory()
     set_setting("v3_library_import_complete", "1")
     set_setting("v3_library_last_scanned", str(scanned))
@@ -15558,7 +15658,7 @@ def reconcile_existing_library(force=False):
     set_setting("v3_library_last_imported", str(imported))
     set_setting("v3_library_last_import_at", now_iso())
     storage_snapshot(force=True)
-    return {"scanned": scanned, "imported": imported, "known": known, "unmatched": unmatched}
+    return {"scanned": scanned, "imported": imported, "known": known, "unmatched": unmatched, "enabled": enabled}
 
 
 def _v3_import_existing_library():
@@ -15635,7 +15735,7 @@ def library_import_status():
 @app.post("/settings/downloader/library/import")
 def downloader_library_import():
     try:
-        result = reconcile_existing_library(force=True)
+        result = reconcile_existing_library(force=True, enable_channels=True)
         threading.Thread(
             target=refresh_existing_channel_artwork,
             name="channel-artwork-refresh",
@@ -15645,7 +15745,7 @@ def downloader_library_import():
             (
                 f"Library import complete: scanned {result['scanned']} media file(s), "
                 f"imported {result['imported']}, already known {result['known']}, "
-                f"without a YouTube ID {result['unmatched']}."
+                f"without a YouTube ID {result['unmatched']}. Enabled {result['enabled']} matched channel(s)."
             ),
             "success",
         )
@@ -20057,14 +20157,7 @@ def add_pending():
 def sync_now():
     result = sync_once()
 
-    category = (
-        "success"
-        if result["status"] in (
-            "ok",
-            "completed_with_errors",
-        )
-        else "error"
-    )
+    category = "success" if result["status"] == "ok" else "error"
 
     flash(
         result["message"],

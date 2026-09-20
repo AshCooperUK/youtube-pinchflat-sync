@@ -170,6 +170,8 @@ def parse_custom_yt_dlp_options(raw):
         "paths",
         "windowsfilenames",
         "restrictfilenames",
+        "match_filter",
+        "ignoreerrors",
     }
     return {key: val for key, val in value.items() if key not in blocked}
 
