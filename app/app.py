@@ -11,6 +11,7 @@ import re
 import secrets
 import shutil
 import socket
+import sys
 import subprocess
 import sqlite3
 import struct
@@ -48,8 +49,10 @@ from downloader_auth import (
     test_cookie_authentication,
 )
 from downloader_media import MediaYoutubeDL, SUBTITLE_EXTENSIONS, safe_media_component
+from publication_metadata import publication_value, write_video_nfo
+from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.6"
+VERSION = "3.0.7"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -1038,6 +1041,7 @@ def init_v3_db():
             """
         )
 
+    init_guide_db(db)
 
 def init_v303_defaults():
     with db() as conn:
@@ -3410,7 +3414,6 @@ def youtube_video_metadata(video_id, force=False):
         params={
             "part": "snippet,statistics,contentDetails,status,topicDetails,liveStreamingDetails",
             "id": video_id,
-            "maxResults": 1,
         },
     )
 
@@ -6143,23 +6146,10 @@ def write_direct_download_series_metadata(
             xml_declaration=True,
         )
 
-    if write_nfo and channel_root and Path(output_path).is_file():
-        episode = ET.Element("episodedetails")
-        published = _v3_parse_entry_date(info)
-        for key, value in {
-            "title": info.get("title") or Path(output_path).stem,
-            "showtitle": channel_title,
-            "plot": video_description,
-            "season": str(published.year) if published else "",
-            "episode": published.strftime("%m%d") + "00" if published else "",
-            "aired": published.isoformat() if published else "",
-        }.items():
-            if value:
-                ET.SubElement(episode, key).text = str(value)
-        if info.get("id"):
-            ET.SubElement(episode, "uniqueid", {"type": "youtube", "default": "true"}).text = str(info["id"])
-        ET.indent(episode, space="  ")
-        ET.ElementTree(episode).write(Path(output_path).with_suffix(".nfo"), encoding="utf-8", xml_declaration=True)
+    if write_nfo and Path(output_path).is_file():
+        info = publication_metadata_info(info)
+        write_video_nfo(info, output_path, episode=channel_root,
+                        tz_name=get_setting("guide_timezone", "Europe/London"))
 
     if not write_images or (not force and all((channel_dir / name).is_file() and (channel_dir / name).stat().st_size
                                              for name in ("fanart.jpg", "poster.jpg", "banner.jpg"))):
@@ -6688,7 +6678,10 @@ def run_download_job(job_id):
             str(info.get("channel_id") or "").strip()
             or str(job.get("channel_id") or "").strip()
         )
+        info = publication_metadata_info(info)
         published_at = _v3_subscription_info_date(info, job.get("published_at"))
+        if published_at:
+            info["published_at"] = published_at
 
         if source_type in {"single", "emby_download"} or subscription_job:
             try:
@@ -14756,8 +14749,7 @@ def _v3_parse_entry_date(entry):
 
 def _v3_subscription_info_date(info, fallback=""):
     """Resolve the publication date without failing a completed transfer."""
-    published = _v3_parse_entry_date(info) or _v3_parse_entry_date({"published_at": fallback})
-    return published.isoformat() if published else ""
+    return publication_value(publication_metadata_info(info), fallback)
 
 
 def _v3_queue_entry(sub, entry, redownload=False, job_ids=None):
@@ -14773,7 +14765,7 @@ def _v3_queue_entry(sub, entry, redownload=False, job_ids=None):
     video_url = str((entry or {}).get("webpage_url") or (entry or {}).get("url") or "").strip()
     if not video_url.startswith("http"):
         video_url = f"https://www.youtube.com/watch?v={video_id}"
-    published_at = entry_date.isoformat() if entry_date else str((entry or {}).get("published_at") or "")
+    published_at = publication_value(entry)
     _job_id, created = enqueue_download(
         video_url,
         source_type=("subscription_redownload" if redownload else "subscription"),
@@ -15680,12 +15672,7 @@ def reconcile_existing_library(force=False, enable_channels=False):
             if video_id:
                 title = re.sub(rf"\s*\[{re.escape(video_id)}\]\s*$", "", title).strip() or title
 
-            upload_date = str(info.get("upload_date") or "").strip()
-            published = (
-                f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
-                if re.fullmatch(r"\d{8}", upload_date)
-                else ""
-            )
+            published = publication_value(publication_metadata_info(info))
             try:
                 file_time = datetime.fromtimestamp(media_path.stat().st_mtime, tz=timezone.utc).isoformat()
             except OSError:
@@ -15773,6 +15760,7 @@ def _v3_import_existing_library():
 
 def refresh_existing_channel_artwork():
     """Repair known channel folders and metadata, including subtitle-only folders."""
+    repair_publication_dates()
     try:
         with db() as conn:
             channels = {row["channel_id"]: dict(row) for row in conn.execute("SELECT channel_id,title,download_folder FROM subscriptions").fetchall()}
@@ -16695,6 +16683,10 @@ def index():
     return render_template(
         "index.html",
         version=VERSION,
+        guide_view=request.path == "/guide",
+        guide_timezone=get_setting("guide_timezone", "Europe/London"),
+        guide_history=get_setting("guide_history", "all"),
+        guide_daily_budget=setting_int("guide_daily_budget", 1000, 50, 10000),
         google_configured=google_configured(),
         google_connected=google_connected,
         google_write_ready=google_write_ready,
@@ -20268,6 +20260,128 @@ def health():
     return jsonify({"status": "ok", "version": VERSION})
 
 
+def publication_metadata_info(info):
+    """Prefer the public release timestamp already indexed by the guide."""
+    result = dict(info or {})
+    video_id = result.get("id") or result.get("video_id")
+    if video_id:
+        with db() as conn:
+            row = conn.execute("SELECT published_at FROM guide_videos WHERE video_id=? AND metadata_checked_at>?",
+                               (video_id, (datetime.now(timezone.utc)-timedelta(days=30)).isoformat())).fetchone()
+        if row and row["published_at"]:
+            result["youtube_published_at"] = row["published_at"]
+    return result
+
+
+publication_repair_lock = threading.Lock()
+
+
+def repair_publication_dates(video_ids=None, quiet=False):
+    """Repair completed media NFO dates without re-downloading or rewriting video."""
+    with publication_repair_lock:
+        with db() as conn:
+            query = "SELECT * FROM downloads WHERE status='completed' AND COALESCE(output_path,'')!=''"
+            params = ()
+            if video_ids is not None:
+                if not video_ids:
+                    return {"updated": 0, "missing": 0, "errors": 0}
+                query += " AND video_id IN (" + ",".join("?" for _ in video_ids) + ")"
+                params = tuple(video_ids)
+            rows = [dict(row) for row in conn.execute(query, params)]
+        updated = missing = errors = 0
+        seen = set()
+        for row in rows:
+            path = Path(row['output_path'])
+            if str(path) in seen or not is_finished_media_file(path, video_only=True):
+                continue
+            seen.add(str(path))
+            subscription = str(row.get('source_type') or '').startswith('subscription')
+            if not setting_bool('downloader_write_nfo' if subscription else 'single_download_write_nfo', True):
+                continue
+            try:
+                info = _read_media_info_sidecar(path)
+                for key, value in {'id': row['video_id'], 'title': row['title'], 'channel': row['channel_title'],
+                                   'channel_id': row['channel_id']}.items():
+                    if not info.get(key):
+                        info[key] = value
+                info = publication_metadata_info(info)
+                published = publication_value(info, row.get('published_at'))
+                if not published:
+                    missing += 1
+                    continue
+                info['published_at'] = published
+                changed = write_video_nfo(info, path, episode=subscription,
+                                          tz_name=get_setting('guide_timezone', 'Europe/London'))
+                with db() as conn:
+                    conn.execute("UPDATE downloads SET published_at=? WHERE id=?", (published, row['id']))
+                updated += int(changed)
+            except Exception as exc:
+                errors += 1
+                log_activity('download_metadata', 'Release-date repair failed',
+                             f"Unable to update the NFO ({type(exc).__name__}). Check file access and XML validity.",
+                             'warning', row.get('channel_id'), job_id=row['job_id'])
+        if updated:
+            invalidate_video_inventory()
+        if not quiet or errors:
+            log_activity('download_metadata', 'Emby release dates checked',
+                         f"Updated {updated} video NFOs. {missing} need a YouTube publication date. {errors} errors.",
+                         'warning' if errors else 'success')
+        return {'updated': updated, 'missing': missing, 'errors': errors}
+
+
+guide = UploadGuide(sys.modules[__name__])
+
+
+@app.get('/guide')
+def upload_guide_page():
+    return index()
+
+
+@app.get('/api/guide')
+def upload_guide_api():
+    try:
+        result = guide.read(request.args)
+    except (ValueError, OverflowError):
+        return jsonify(ok=False, error='Invalid guide date or page.'), 400
+    response = jsonify(result)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
+
+
+@app.post('/api/guide/refresh')
+def upload_guide_refresh():
+    count = guide.request_refresh()
+    return jsonify(ok=True, channels=count, message=f'Metadata refresh requested for {count} enabled channels. Progress appears in the guide.')
+
+
+@app.post('/settings/guide')
+def save_guide_settings():
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    name = request.form.get('guide_timezone', 'Europe/London').strip()
+    try:
+        ZoneInfo(name)
+        budget = int(request.form.get('guide_daily_budget', 1000))
+        if not 50 <= budget <= 10000:
+            raise ValueError
+    except (ValueError, ZoneInfoNotFoundError):
+        flash('Enter a valid timezone and a guide allowance between 50 and 10000 calls.', 'error')
+        return redirect('/guide')
+    history = request.form.get('guide_history', 'all')
+    if history not in ('all', 'year'):
+        abort(400)
+    for key, value in [('guide_timezone', name), ('guide_history', history), ('guide_daily_budget', str(budget))]:
+        set_setting(key, value)
+    flash('Upload guide settings saved.', 'success')
+    return redirect('/guide')
+
+
+@app.post('/settings/downloader/repair-dates')
+def repair_emby_release_dates():
+    threading.Thread(target=repair_publication_dates, name='emby-publication-repair', daemon=True).start()
+    flash('Emby release-date repair started. Results appear in Diagnostics > Activity. Refresh metadata in Emby after the repair completes.', 'success')
+    return redirect(url_for('index'))
+
+
 init_db()
 init_v3_db()
 init_v303_defaults()
@@ -20340,4 +20454,7 @@ scheduler.add_job(
     max_instances=1,
     coalesce=True,
 )
+scheduler.add_job(guide.tick, "interval", seconds=30, id="upload-guide-metadata",
+                  max_instances=1, coalesce=True)
+threading.Thread(target=guide.tick, name="upload-guide-startup", daemon=True).start()
 scheduler.start()

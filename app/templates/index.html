@@ -3398,6 +3398,8 @@
       .header-actions { justify-content:flex-start; }
     }
 </style>
+<script src="{{ url_for('static', filename='subscription-sort.js') }}?v={{ version }}"></script>
+{% if guide_view %}<link rel="stylesheet" href="{{ url_for('static', filename='upload-guide.css') }}?v={{ version }}">{% endif %}
 </head>
 <body class="{% if not page_view.channel_controls %}hide-channel-controls{% endif %} {% if not page_view.channel_control_favourite %}hide-channel-favourite{% endif %} {% if not page_view.channel_control_downloads %}hide-channel-downloads{% endif %} {% if not page_view.channel_control_scan %}hide-channel-scan{% endif %} {% if not page_view.channel_control_delete %}hide-channel-delete{% endif %} {% if not page_view.channel_control_retention %}hide-channel-retention{% endif %}">
 <div class="wrap">
@@ -3411,6 +3413,7 @@
       <button class="btn secondary" type="button" onclick="openSingleDownload()" title="One-time download">Single Download</button>
       {% endif %}
 
+      <a class="btn ghost" href="{{ '/' if guide_view else '/guide' }}">{{ 'Dashboard' if guide_view else 'Guide' }}</a>
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
 
       {% if page_view.button_discover %}
@@ -3448,7 +3451,8 @@
     </div>
   {% endif %}
 
-  <div id="dashboard-sections">
+  {% if guide_view %}{% include 'upload_guide.html' %}{% endif %}
+  <div id="dashboard-sections" {% if guide_view %}style="display:none"{% endif %}>
   {% if page_view.load_summary %}
   <div class="grid" data-page-section="summary" id="summary-tiles">
     {% if page_view.show_summary_google %}
@@ -5277,6 +5281,11 @@
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <button class="btn secondary" type="submit">Import / rescan existing media</button>
           </form>
+        <form method="post" action="/settings/downloader/repair-dates" style="margin-top:8px">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn ghost smallbtn" type="submit">Repair Emby release dates</button>
+          <span class="muted small">Use YouTube publication dates for existing video NFOs. Then refresh metadata in Emby.</span>
+        </form>
           <div class="muted small" style="margin-top:8px">Imports existing media and enables matched subscriptions, including channels with files already imported. Keeps their range and media profile. Repairs channel folder names for Windows shares and rebuilds artwork and NFO. Active channel folders wait until their downloads finish.</div>
         </div>
       </div>
@@ -7633,6 +7642,7 @@ function syncChannelAvatarControls(channelId, override={}) {
     button.title = "Delete or remove channel";
   });
 
+  document.dispatchEvent(new CustomEvent('ytsd:channel-state', {detail:{channelId,...state}}));
   return state;
 }
 
@@ -13115,26 +13125,16 @@ function applyFilters(options={}) {
     row.classList.toggle("hidden-row", !(textMatch && statusMatch));
   });
 
-  const compareBySelectedSort = (a, b) => {
-    if (sortFilter.value === "media_profile") {
-      return rowValues.get(a).profileOrder - rowValues.get(b).profileOrder
-        || rowValues.get(a).profile.localeCompare(rowValues.get(b).profile, "en-GB", {numeric:true, sensitivity:"base"})
-        || a.dataset.title.localeCompare(b.dataset.title);
-    }
-    if (sortFilter.value === "status") {
-      return a.dataset.status.localeCompare(b.dataset.status)
-        || a.dataset.title.localeCompare(b.dataset.title);
-    }
-    if (sortFilter.value === "newest") {
-      return b.dataset.firstSeen.localeCompare(a.dataset.firstSeen)
-        || a.dataset.title.localeCompare(b.dataset.title);
-    }
-    if (sortFilter.value === "storage") {
-      return Number(b.dataset.storage || 0) - Number(a.dataset.storage || 0)
-        || a.dataset.title.localeCompare(b.dataset.title);
-    }
-    return a.dataset.title.localeCompare(b.dataset.title);
-  };
+  const comparable = row => ({
+    channel_id:row.dataset.channelId, title:row.dataset.title,
+    status:row.dataset.status, first_seen_at:row.dataset.firstSeen,
+    storage_bytes:Number(row.dataset.storage || 0),
+    profile_id:row.querySelector('.source-profile select')?.value || row.querySelector('.source-profile')?.dataset.profileId || '',
+    profile_name:rowValues.get(row).profile
+  });
+  const compareBySelectedSort = (a,b) => ytsdCompareChannels(comparable(a),comparable(b),sortFilter.value);
+  document.dispatchEvent(new CustomEvent('ytsd:sort'));
+
 
   rows.sort((a, b) => {
     if (pinFavouritesToTop && a.dataset.favourite !== b.dataset.favourite) {
@@ -13351,5 +13351,6 @@ latestVideoDialog?.addEventListener(
   });
 });
 </script>
+{% if guide_view %}<script src="{{ url_for('static', filename='upload-guide.js') }}?v={{ version }}"></script>{% endif %}
 </body>
 </html>
