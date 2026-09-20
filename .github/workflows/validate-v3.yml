@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - v3-youtube-subscription-downloader
-      - v3.0.2-performance-ui
+      - v3.0.2-performance-codec
 
 permissions:
   contents: read
@@ -96,31 +96,37 @@ jobs:
         run: docker build -t youtube-subscription-downloader:v3-test ./app
 
 
-      - name: Stage clean source package
+      - name: Verify Direct Play compatibility conversion
         run: |
-          mkdir -p /tmp/v13.0.2
-          git archive HEAD | tar -x -C /tmp/v13.0.2
-          rm -rf /tmp/v13.0.2/app/__pycache__
+          docker run --rm --entrypoint sh youtube-subscription-downloader:v3-test -c '
+            set -eu
+            mkdir -p /tmp/appdata /tmp/media
+            ffmpeg -hide_banner -loglevel error -y               -f lavfi -i color=c=blue:s=320x240:d=1               -f lavfi -i sine=frequency=440:duration=1               -c:v mpeg4 -c:a pcm_s16le /tmp/input.avi
+            DATA_DIR=/tmp/appdata DOWNLOAD_ROOT=/tmp/media python - <<'"'"'PY'"'"'
+import app
+out = app.ensure_download_emby_compatibility(
+    "/tmp/input.avi",
+    compatibility_profile="emby_tv",
+)
+video, audio = app._probe_single_download_codecs(out)
+assert out.endswith(".mp4"), out
+assert video == "h264", video
+assert audio == "aac", audio
+print("Direct Play conversion OK", out, video, audio)
+PY
+          '
 
-      - name: Upload v13.0.2 source package
-        uses: actions/upload-artifact@v4
-        with:
-          name: v13.0.2
-          path: /tmp/v13.0.2
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-
-      - name: Package V3.0.2 source
+      - name: Stage clean v3.0.2 source package
         run: |
-          zip -qr youtube-subscription-downloader-v3.0.2.zip . \
-            -x ".git/*" \
-            -x "youtube-subscription-downloader-v3.0.2.zip"
+          mkdir -p /tmp/youtube-subscription-downloader-v3.0.2
+          git archive HEAD | tar -x -C /tmp/youtube-subscription-downloader-v3.0.2
+          rm -rf /tmp/youtube-subscription-downloader-v3.0.2/app/__pycache__
 
-      - name: Upload V3.0.2 source package
+      - name: Upload v3.0.2 source package
         uses: actions/upload-artifact@v4
         with:
           name: youtube-subscription-downloader-v3.0.2
-          path: youtube-subscription-downloader-v3.0.2.zip
+          path: /tmp/youtube-subscription-downloader-v3.0.2
+          include-hidden-files: true
           if-no-files-found: error
+          retention-days: 7
