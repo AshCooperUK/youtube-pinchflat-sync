@@ -6218,6 +6218,15 @@ function renderDownloaderActiveDownloads(data) {
     ? `${active.length} active · ${waiting} waiting`
     : `No active downloads · ${waiting} waiting`;
 
+  const completedMetric = document.getElementById("dashboard-downloads-completed");
+  const queueStatus = document.getElementById("dashboard-downloads-queue-status");
+  if (completedMetric && Number.isFinite(Number(data.summary?.completed))) {
+    completedMetric.textContent = String(Number(data.summary.completed || 0));
+  }
+  if (queueStatus) {
+    queueStatus.textContent = `${active.length} active · ${waiting} queued`;
+  }
+
   badge.textContent = String(waiting);
   badge.classList.toggle(
     "hidden",
