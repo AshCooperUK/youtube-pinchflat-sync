@@ -110,3 +110,17 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+
+      - name: Package V3.0.2 source
+        run: |
+          zip -qr youtube-subscription-downloader-v3.0.2.zip . \
+            -x ".git/*" \
+            -x "youtube-subscription-downloader-v3.0.2.zip"
+
+      - name: Upload V3.0.2 source package
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-subscription-downloader-v3.0.2
+          path: youtube-subscription-downloader-v3.0.2.zip
+          if-no-files-found: error
