@@ -33,7 +33,7 @@ from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatc
 from apscheduler.schedulers.background import BackgroundScheduler
 from bs4 import BeautifulSoup
 from dateutil.relativedelta import relativedelta
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for, send_file
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -52,7 +52,7 @@ from downloader_media import MediaYoutubeDL, SUBTITLE_EXTENSIONS, safe_media_com
 from publication_metadata import publication_value, write_video_nfo
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.8"
+VERSION = "3.0.9"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -821,6 +821,7 @@ def init_db():
         ensure_column(conn, "activity", "video_title", "TEXT")
         ensure_column(conn, "activity", "job_id", "TEXT")
         ensure_column(conn, "activity", "channel_title", "TEXT")
+        ensure_column(conn, "activity", "thumbnail_url", "TEXT")
         ensure_column(conn, "cleanup_jobs", "source_id", "TEXT")
         ensure_column(
             conn,
@@ -950,7 +951,7 @@ def init_db():
             "page_channel_control_delete": "1",
             "page_channel_control_retention": "1",
 
-            "page_section_order": "summary,pinchflat,latest,subscriptions",
+            "page_section_order": "summary,pinchflat,guide,latest,subscriptions",
             "page_summary_order": "google,pinchflat,pinchflat_tasks,latest_download,subscriptions,downloads,errors",
         }
         for key, value in defaults.items():
@@ -1000,6 +1001,7 @@ def init_v3_db():
         ensure_column(conn, "downloads", "failure_code", "TEXT")
         ensure_column(conn, "downloads", "auth_mode", "TEXT")
         ensure_column(conn, "downloads", "warning", "TEXT")
+        ensure_column(conn, "downloads", "thumbnail_url", "TEXT")
         ensure_column(conn, "subscriptions", "download_folder", "TEXT")
         conn.executescript(
             """
@@ -2238,18 +2240,20 @@ def activity_video_id_from_message(message):
 
 
 def log_activity(event_type, title, message, severity="info", channel_id=None, *, video_id=None, video_title=None, job_id=None, channel_title=None):
+    thumbnail_url = None
     with db() as conn:
         if job_id:
             job = conn.execute("SELECT * FROM downloads WHERE job_id=?", (job_id,)).fetchone()
             if job:
                 video_id = video_id or job["video_id"] or youtube_video_id_from_url(job["youtube_url"])
                 video_title = video_title or job["title"]
+                thumbnail_url = dict(job).get("thumbnail_url")
                 channel_id = channel_id or dict(job).get("channel_id")
                 channel_title = channel_title or job["channel_title"]
         if channel_id and not channel_title:
             channel = conn.execute("SELECT title FROM subscriptions WHERE channel_id=?", (channel_id,)).fetchone()
             channel_title = channel["title"] if channel else None
-        video_id = activity_video_id(video_id) or activity_video_id_from_message(message)
+        video_id = video_id if str(video_id or '').startswith('media:') else activity_video_id(video_id) or activity_video_id_from_message(message)
         conn.execute(
             """
             INSERT INTO activity (
@@ -2259,6 +2263,8 @@ def log_activity(event_type, title, message, severity="info", channel_id=None, *
             """,
             (now_iso(), event_type, title, message, severity, channel_id, video_id or None, video_title, job_id, channel_title),
         )
+        if thumbnail_url:
+            conn.execute('UPDATE activity SET thumbnail_url=? WHERE id=last_insert_rowid()', (thumbnail_url,))
 
 
 def activity_view_rows(rows):
@@ -2266,7 +2272,8 @@ def activity_view_rows(rows):
     items = [dict(row) for row in rows]
     titles = set()
     for item in items:
-        item["video_id"] = activity_video_id(item.get("video_id")) or activity_video_id_from_message(item.get("message"))
+        item["is_external"] = str(item.get("video_id") or '').startswith('media:')
+        item["video_id"] = '' if item['is_external'] else activity_video_id(item.get("video_id")) or activity_video_id_from_message(item.get("message"))
         item["candidate_titles"] = []
         if not item["video_id"] and item["event_type"] in {"download", "download_metadata", "emby_download", "emby"}:
             message = str(item.get("message") or "")
@@ -2291,10 +2298,13 @@ def activity_view_rows(rows):
     for item in items:
         job = jobs.get(item.get("job_id"), {})
         item["video_id"] = item["video_id"] or activity_video_id(job.get("video_id")) or activity_video_id(youtube_video_id_from_url(job.get("youtube_url")))
+        item["is_external"] = item["is_external"] or str(job.get("video_id") or '').startswith('media:')
+        if item['is_external']:
+            item['video_id'] = ''
         item["video_title"] = item.get("video_title") or job.get("title") or ""
         item["channel_id"] = item.get("channel_id") or job.get("channel_id") or ""
         item["channel_title"] = item.get("channel_title") or job.get("channel_title") or ""
-        if not item["video_id"]:
+        if not item["video_id"] and not item["is_external"]:
             for candidate in sorted(item["candidate_titles"], key=len, reverse=True):
                 matches = {activity_video_id(row["video_id"]) for row in by_title.get(candidate, [])
                            if not item.get("channel_id") or row["channel_id"] == item["channel_id"]}
@@ -2305,7 +2315,8 @@ def activity_view_rows(rows):
                     break
         item.pop("candidate_titles", None)
         video_id = item["video_id"]
-        item["thumbnail_url"] = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""
+        item["thumbnail_url"] = item.get("thumbnail_url") or job.get("thumbnail_url") or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else "")
+        item["local_media_url"] = f"/downloads/{job['job_id']}/media" if job.get('status') == 'completed' and str(job.get('video_id') or '').startswith('media:') and is_finished_media_file(job.get('output_path')) else ''
         item["video_url"] = f"https://www.youtube.com/watch?v={video_id}" if video_id else ""
     # Events predating job_id, and remote-only videos, still have useful local metadata.
     videos = {}
@@ -5584,6 +5595,27 @@ def download_filesystem_snapshot():
         return {"total": 0, "used": 0, "free": 0}
 
 
+def valid_download_url(value):
+    """Let yt-dlp select the extractor; accept complete HTTP(S) video URLs."""
+    try:
+        parsed = urlparse(str(value or ''))
+        return (parsed.scheme.lower() in {'http', 'https'} and bool(parsed.hostname)
+                and parsed.username is None and parsed.password is None
+                and not any(ord(c) < 32 for c in value) and len(value) <= 8192)
+    except (ValueError, TypeError):
+        return False
+
+
+def download_info_id(info):
+    identity = str(info.get('id') or '')
+    provider = str(info.get('extractor_key') or info.get('extractor') or 'Youtube').lower()
+    return identity if provider == 'youtube' else f'media:{provider}:{identity}'
+
+
+def download_info_channel(info):
+    return str(info.get('channel_id') or '') if not download_info_id(info).startswith('media:') else ''
+
+
 def valid_youtube_url(value):
     try:
         parsed = urlparse(value)
@@ -5722,8 +5754,14 @@ def enqueue_download(
     profile_id=None,
     redownload=False,
 ):
-    if not valid_youtube_url(youtube_url):
-        raise RuntimeError("Enter a valid YouTube video URL.")
+    if not (valid_download_url(youtube_url) if source_type == 'single' else valid_youtube_url(youtube_url)):
+        raise RuntimeError("Enter a complete HTTP or HTTPS video URL." if source_type == 'single' else "Enter a valid YouTube video URL.")
+    if source_type == 'single':
+        with db() as conn:
+            prior = conn.execute("SELECT job_id,status,output_path FROM downloads WHERE source_type='single' AND youtube_url=? AND status IN ('queued','downloading','processing','completed') ORDER BY id DESC", (youtube_url,)).fetchall()
+        for previous in prior:
+            if previous['status'] != 'completed' or is_finished_media_file(previous['output_path']):
+                return previous['job_id'], False
 
     # Never create duplicate active jobs for the same video/source. Completed
     # subscription downloads are also skipped unless an explicit redownload
@@ -5822,7 +5860,7 @@ def update_download_job(job_id, **values):
         "video_id", "title", "channel_title", "status", "phase", "progress", "speed",
         "eta", "downloaded_bytes", "total_bytes", "output_path", "error",
         "started_at", "finished_at", "channel_id", "published_at", "profile_id",
-        "failure_code", "auth_mode", "warning",
+        "failure_code", "auth_mode", "warning", "thumbnail_url",
     }
     values = {key: value for key, value in values.items() if key in allowed}
     if not values:
@@ -5874,8 +5912,9 @@ def _download_progress_hook(job_id, progress_ceiling=100.0):
             return
         identity = {
             key: value for key, value in {
-                "video_id": info.get("id"), "title": info.get("title"),
-                "channel_id": info.get("channel_id"),
+                "video_id": download_info_id(info) if info.get("id") else None, "title": info.get("title"),
+                "thumbnail_url": info.get("thumbnail"),
+                "channel_id": download_info_channel(info),
                 "channel_title": info.get("channel") or info.get("uploader"),
             }.items() if value
         }
@@ -5893,7 +5932,7 @@ def _download_progress_hook(job_id, progress_ceiling=100.0):
             update_download_job(
                 job_id,
                 status="downloading",
-                phase="Downloading from YouTube",
+                phase="Downloading media",
                 progress=round(progress, 2),
                 speed=str(speed).strip(),
                 eta=str(eta).strip(),
@@ -6166,9 +6205,11 @@ def write_direct_download_series_metadata(
         ET.SubElement(root, "title").text = str(channel_title)
         ET.SubElement(root, "sorttitle").text = str(channel_title)
         ET.SubElement(root, "plot").text = description
-        ET.SubElement(root, "studio").text = "YouTube"
-        ET.SubElement(root, "genre").text = "YouTube"
-        if channel_id:
+        provider = str(info.get("extractor_key") or "YouTube")
+        provider = 'YouTube' if provider.lower() == 'youtube' else provider
+        ET.SubElement(root, "studio").text = provider
+        ET.SubElement(root, "genre").text = 'YouTube' if provider == 'YouTube' else 'Online video'
+        if channel_id and not download_info_id(info).startswith('media:'):
             unique = ET.SubElement(
                 root,
                 "uniqueid",
@@ -6530,7 +6571,7 @@ def _v3_download_with_auth_retry(job, ydl_opts):
     except SubscriptionMediaExcluded:
         raise
     except Exception as anonymous_error:
-        if not setting_bool("downloader_auth_retry", True):
+        if not valid_youtube_url(job["youtube_url"]) or not setting_bool("downloader_auth_retry", True):
             raise
         if not should_retry_with_cookies(anonymous_error):
             raise
@@ -6585,6 +6626,12 @@ def run_download_job(job_id):
             if source_type == "single"
             else "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s"
         )
+        if source_type == 'single' and not valid_youtube_url(job['youtube_url']):
+            # Generic extractors often use a basename such as 'video' as ID.
+            # Keep unrelated URLs from reusing a completed file with that name.
+            source_key = hashlib.sha256(job['youtube_url'].encode()).hexdigest()[:12]
+            template_path = Path(relative_template)
+            relative_template = str(template_path.with_name(template_path.stem + f' [source-{source_key}]' + template_path.suffix))
         output_template = str(output_dir / relative_template)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -6592,7 +6639,7 @@ def run_download_job(job_id):
     update_download_job(
         job_id,
         status="downloading",
-        phase="Preparing YouTube download",
+        phase="Preparing video download",
         started_at=now_iso(),
         error=None,
         warning=None,
@@ -6617,6 +6664,7 @@ def run_download_job(job_id):
     ydl_opts = {
         "outtmpl": output_template,
         "noplaylist": True,
+        "playlist_items": "1",
         "continuedl": True,
         "overwrites": bool(subscription_redownload),
         "force_overwrites": bool(subscription_redownload),
@@ -6657,6 +6705,10 @@ def run_download_job(job_id):
                 record_download_notice(job_id, f"Channel metadata: {exc}")
             update_download_job(job_id, phase="Preparing YouTube download")
         info, ydl, auth_mode = _v3_download_with_auth_retry(job, ydl_opts)
+        if info and info.get('_type') in ('playlist', 'multi_video'):
+            info = next((entry for entry in info.get('entries', []) if entry), None)
+        if not info:
+            raise RuntimeError('No downloadable media was returned for this URL.')
 
         output_path = ""
         requested = info.get("requested_downloads") or []
@@ -6672,10 +6724,11 @@ def run_download_job(job_id):
         if not output_path:
             raise RuntimeError("The downloader did not produce a final media file.")
         update_download_job(job_id, status="processing", output_path=output_path,
-                            video_id=info.get("id") or job.get("video_id"),
+                            video_id=download_info_id(info) or job.get("video_id"),
                             title=info.get("title") or job.get("title"),
                             channel_title=info.get("channel") or info.get("uploader") or job.get("channel_title"),
-                            channel_id=info.get("channel_id") or job.get("channel_id"),
+                            channel_id=download_info_channel(info) or job.get("channel_id"),
+                            thumbnail_url=info.get("thumbnail") or job.get("thumbnail_url"),
                             phase="Finalising downloaded media", speed="", eta="")
 
         if compatibility_video:
@@ -6716,7 +6769,7 @@ def run_download_job(job_id):
                 raise RuntimeError(f"Emby compatibility conversion failed: {exc}") from exc
 
         resolved_channel_id = (
-            str(info.get("channel_id") or "").strip()
+            download_info_channel(info).strip()
             or str(job.get("channel_id") or "").strip()
         )
         info = publication_metadata_info(info)
@@ -6757,7 +6810,7 @@ def run_download_job(job_id):
 
         update_download_job(
             job_id,
-            video_id=info.get("id") or job.get("video_id"),
+            video_id=download_info_id(info) or job.get("video_id"),
             title=info.get("title") or job.get("title"),
             channel_title=(
                 info.get("uploader")
@@ -7823,22 +7876,25 @@ def native_recent_downloaded_videos(limit=100):
         path = Path(str(row.get("output_path") or ""))
         if not path.exists():
             continue
-        video_id = str(row.get("video_id") or "").strip()
+        video_id = activity_video_id(row.get("video_id"))
+        external = str(row.get("video_id") or "").startswith("media:")
         channel_id = str(row.get("channel_id") or "").strip()
         published = str(row.get("published_at") or row.get("finished_at") or "")
         results.append({
             "video_id": video_id,
             "title": row.get("title") or "YouTube video",
             "description": "",
-            "video_url": f"https://www.youtube.com/watch?v={video_id}",
-            "shorts_url": f"https://www.youtube.com/shorts/{video_id}",
+            "video_url": f"https://www.youtube.com/watch?v={video_id}" if video_id else row.get("youtube_url") or "",
+            "is_external": external,
+            "local_media_url": f"/downloads/{row['job_id']}/media",
+            "shorts_url": f"https://www.youtube.com/shorts/{video_id}" if video_id else "",
             "channel_id": channel_id,
             "channel_title": row.get("channel_title") or "YouTube channel",
             "channel_url": row.get("channel_url") or (
                 f"https://www.youtube.com/channel/{channel_id}" if channel_id else "https://www.youtube.com"
             ),
             "channel_thumbnail_url": row.get("channel_thumbnail_url") or "",
-            "thumbnail_url": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+            "thumbnail_url": row.get("thumbnail_url") or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""),
             "published_at": published,
             "downloaded_at": row.get("finished_at") or "",
             "view_count": 0,
@@ -15451,7 +15507,9 @@ def pinchflat_download_overview(queue_limit=100):
             "progress": max(0.0, min(100.0, float(row.get("progress") or 0))),
             "downloaded_bytes": int(row.get("downloaded_bytes") or 0),
             "total_bytes": int(row.get("total_bytes") or 0),
-            "thumbnail_url": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else "",
+            "thumbnail_url": row.get("thumbnail_url") or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""),
+            "is_external": str(row.get("video_id") or "").startswith("media:"),
+            "local_media_url": f"/downloads/{row['job_id']}/media" if row.get('status') == 'completed' and output_path and is_finished_media_file(output_path) else '',
             "video_id": video_id,
             "youtube_id": video_id,
             "video_url": f"https://www.youtube.com/watch?v={video_id}" if video_id else str(row.get("youtube_url") or ""),
@@ -16403,6 +16461,9 @@ def delete_user(user_id):
 @app.route("/")
 def index():
     page_view = {
+        "load_guide": setting_bool("page_load_guide", True),
+        "autoload_guide": setting_bool("page_autoload_guide", True),
+        "min_guide": setting_bool("page_min_guide", False),
         "load_summary": setting_bool("page_load_summary", True),
         "load_pinchflat_downloads": setting_bool(
             "page_load_pinchflat_downloads",
@@ -16515,12 +16576,14 @@ def index():
         (
             "summary",
             "pinchflat",
+            "guide",
             "latest",
             "subscriptions",
         ),
         (
             "summary",
             "pinchflat",
+            "guide",
             "latest",
             "subscriptions",
         ),
@@ -16728,6 +16791,10 @@ def index():
         guide_timezone=get_setting("guide_timezone", "Europe/London"),
         guide_history=get_setting("guide_history", "all"),
         guide_daily_budget=setting_int("guide_daily_budget", 1000, 50, 10000),
+        guide_refresh_time=get_setting("guide_refresh_time", "04:00"),
+        guide_predictions_enabled=setting_bool("guide_predictions_enabled", True),
+        guide_bootstrap=guide.initial_payload(request.args) if request.path == "/guide" or (page_view["load_guide"] and page_view["autoload_guide"]) else None,
+
         google_configured=google_configured(),
         google_connected=google_connected,
         google_write_ready=google_write_ready,
@@ -17496,6 +17563,9 @@ def save_general_settings():
 @app.post("/settings/page-view")
 def save_page_view_settings():
     boolean_settings = {
+        "page_load_guide",
+        "page_autoload_guide",
+        "page_min_guide",
         "page_load_summary",
         "page_load_pinchflat_downloads",
         "page_load_latest_videos",
@@ -17547,6 +17617,7 @@ def save_page_view_settings():
         in {
             "summary",
             "pinchflat",
+            "guide",
             "latest",
             "subscriptions",
         }
@@ -17577,6 +17648,7 @@ def save_page_view_settings():
     valid_sections = [
         "summary",
         "pinchflat",
+        "guide",
         "latest",
         "subscriptions",
     ]
@@ -19269,7 +19341,7 @@ def unsubscribe_from_youtube(channel_id):
 @app.post("/single-download/start")
 def single_download_start():
     payload = request.get_json(silent=True) or {}
-    youtube_url = str(payload.get("youtube_url") or "").strip()
+    youtube_url = str(payload.get("url") or payload.get("youtube_url") or "").strip()
 
     try:
         video_id = youtube_video_id_from_url(youtube_url)
@@ -19290,7 +19362,7 @@ def single_download_start():
                     FROM downloads
                     WHERE source_type = 'single'
                       AND video_id = ?
-                      AND status IN ('queued', 'downloading')
+                      AND status IN ('queued', 'downloading', 'processing')
                     ORDER BY id DESC
                     LIMIT 1
                     """,
@@ -19319,6 +19391,19 @@ def single_download_start():
         )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get('/downloads/<job_id>/media')
+def completed_download_media(job_id):
+    job = download_job_row(job_id)
+    if not job or job.get('status') != 'completed':
+        abort(404)
+    path = Path(str(job.get('output_path') or '')).resolve()
+    if not path.is_relative_to(DOWNLOAD_ROOT.resolve()) or not is_finished_media_file(path):
+        abort(404)
+    response = send_file(path, conditional=True)
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 @app.get("/api/downloads/single-completed")
@@ -20304,6 +20389,9 @@ def health():
 def publication_metadata_info(info):
     """Prefer the public release timestamp already indexed by the guide."""
     result = dict(info or {})
+    if download_info_id(info).startswith('media:'):
+        return dict(info)
+
     video_id = result.get("id") or result.get("video_id")
     if video_id:
         with db() as conn:
@@ -20401,19 +20489,23 @@ def save_guide_settings():
     name = request.form.get('guide_timezone', 'Europe/London').strip()
     try:
         ZoneInfo(name)
+        clock = request.form.get('guide_refresh_time', '04:00')
+        datetime.strptime(clock, '%H:%M')
         budget = int(request.form.get('guide_daily_budget', 1000))
         if not 50 <= budget <= 10000:
             raise ValueError
     except (ValueError, ZoneInfoNotFoundError):
-        flash('Enter a valid timezone and a guide allowance between 50 and 10000 calls.', 'error')
+        flash('Enter a valid timezone, daily refresh time and a guide allowance between 50 and 10000 calls.', 'error')
         return redirect('/guide')
     history = request.form.get('guide_history', 'all')
     if history not in ('all', 'year'):
         abort(400)
-    for key, value in [('guide_timezone', name), ('guide_history', history), ('guide_daily_budget', str(budget))]:
+    for key, value in [('guide_timezone', name), ('guide_history', history), ('guide_daily_budget', str(budget)), ('guide_refresh_time', clock), ('guide_predictions_enabled', '1' if request.form.get('guide_predictions_enabled') == '1' else '0')]:
         set_setting(key, value)
-    flash('Upload guide settings saved.', 'success')
-    return redirect('/guide')
+    with db() as conn:
+        conn.execute("UPDATE guide_runtime SET forecast_revision='' WHERE id=1")
+    flash('Upload guide settings saved. Metadata updates automatically each day.', 'success')
+    return redirect(url_for('index'))
 
 
 @app.post('/settings/downloader/repair-dates')

@@ -113,7 +113,7 @@ def write_video_nfo(info, output_path, episode=True, tz_name='Europe/London'):
             put('season', match[1] if match else str(released.year), False)
             put('episode', match[2] if match else released.strftime('%m%d') + '00', False)
     video_id = str(info.get('id') or info.get('video_id') or '')
-    if re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id):
+    if re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id) and str(info.get('extractor_key') or 'youtube').lower() == 'youtube':
         node = root.find("uniqueid[@type='youtube']")
         if node is None:
             node = ET.SubElement(root, 'uniqueid', {'type': 'youtube', 'default': 'true'})

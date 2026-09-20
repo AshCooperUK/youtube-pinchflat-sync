@@ -76,10 +76,10 @@
     #ytsd-guide .yt-cell.today {background:#1531582b}
     #ytsd-guide .yt-programme {border:1px solid #2e4564;border-left:3px solid #527ba9;border-radius:5px;text-align:left;padding:7px 7px 6px;background:#192c45;width:100%;min-width:0;display:flex;flex-direction:column;gap:4px;position:relative;min-height:73px;overflow:hidden;color:#e2ecfc}
     #ytsd-guide .yt-programme:hover {background:#253e5e;border-color:#7796c0}
-    #ytsd-guide .yt-programme[aria-pressed="true"] {border:1px solid #6398ff;border-left:3px solid #99bcff;background:#214b91;box-shadow:0 0 0 1px #386cc34d}
+    #ytsd-guide .yt-programme[data-selected="true"] {border:1px solid #6398ff;border-left:3px solid #99bcff;background:#214b91;box-shadow:0 0 0 1px #386cc34d}
     #ytsd-guide .yt-programme.expected {background:#302b1d80;border:1px dashed #a88b49;border-left:3px solid #c4a555;color:#f4dfad}
     #ytsd-guide .yt-programme.expected:hover {background:#453b2580}
-    #ytsd-guide .yt-programme.expected[aria-pressed="true"] {background:#49402b;border-color:#f7cc63}
+    #ytsd-guide .yt-programme.expected[data-selected="true"] {background:#49402b;border-color:#f7cc63}
     #ytsd-guide .yt-programme-time {font-size:11px;font-variant-numeric:tabular-nums;opacity:.8;white-space:nowrap}
     #ytsd-guide .yt-programme-title {font-size:11px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-weight:500}
     #ytsd-guide .yt-programme-tail {display:flex;align-items:center;justify-content:space-between;gap:3px;font-size:11px;opacity:.8;margin-top:auto;white-space:nowrap}
@@ -189,7 +189,7 @@
 #ytsd-guide .yt-more {font-size:11px;min-height:28px;padding:4px 6px;background:#152942;border:1px solid var(--yt-line);border-radius:4px}
 #ytsd-guide .yt-hour-lane {background-size:calc(100% / var(--yt-columns)) 100%;padding:0}
 #ytsd-guide .yt-hour-lane .yt-programme {position:relative;display:block;background:transparent;border:0;min-height:66px;height:66px;width:100%;margin:0;padding:0;border-radius:0;overflow:hidden}
-#ytsd-guide .yt-hour-lane .yt-programme:hover,#ytsd-guide .yt-hour-lane .yt-programme[aria-pressed="true"] {background:#16315766;box-shadow:none}
+#ytsd-guide .yt-hour-lane .yt-programme:hover,#ytsd-guide .yt-hour-lane .yt-programme[data-selected="true"] {background:#16315766;box-shadow:none}
 #ytsd-guide .yt-time-bar {position:absolute;top:8px;left:var(--release-left);width:var(--release-width);min-width:1px;height:9px;background:#527ba9;border-radius:2px}
 #ytsd-guide .downloaded .yt-time-bar {background:var(--yt-green)}
 #ytsd-guide .scheduled .yt-time-bar {background:#76c9ff}
@@ -232,3 +232,44 @@
  #ytsd-guide .yt-settings input,#ytsd-guide .yt-settings select {font-size:16px;max-width:100%}
  #ytsd-guide .yt-settings label {width:100%}
 }
+
+/* v3.0.9: click-to-open details, independent play buttons and full catalogue. */
+#ytsd-guide .yt-heading h2 {font-size:22px;line-height:1.2}
+#ytsd-guide .yt-heading {padding-top:0}
+#ytsd-guide .yt-programme {cursor:default;min-width:0}
+#ytsd-guide .yt-programme-copy {display:flex;flex-direction:column;gap:4px;min-width:0}
+#ytsd-guide .yt-programme-title {border:0;background:none;color:inherit;text-align:left;padding:0;font-weight:600;cursor:pointer;min-height:32px;overflow-wrap:anywhere}
+#ytsd-guide .yt-programme-title:hover {text-decoration:underline}
+#ytsd-guide .yt-programme-actions {display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:3px}
+#ytsd-guide .yt-programme-actions button {display:grid;place-items:center;min-width:30px;min-height:30px;border:1px solid #4a617e;border-radius:6px;background:#142840;color:#d9e9ff;padding:3px;font-size:15px;cursor:pointer}
+#ytsd-guide .yt-programme-actions button:hover {background:#285080}
+#ytsd-guide .yt-programme-length {font-size:10px;margin-left:auto;color:var(--yt-muted)}
+#ytsd-guide .yt-hour-lane .yt-programme {height:110px;min-height:110px}
+#ytsd-guide .yt-day-text {width:220px;left:clamp(4px,var(--release-left),calc(100% - 224px))}
+#ytsd-guide .yt-cell {align-items:stretch}
+#yt-guide-info {width:min(1040px,94vw);max-height:90dvh;padding:0;background:var(--yt-panel);color:var(--yt-text);border:1px solid var(--yt-line);border-radius:14px;overflow:auto}
+#yt-guide-info::backdrop {background:#020711b8}
+#yt-guide-info .yt-detail {margin:0;border:0;border-radius:0;padding:24px}
+#yt-guide-info .yt-description {display:block;max-height:40vh;overflow:auto;white-space:pre-line;overflow-wrap:anywhere}
+#yt-guide-info .yt-detail-title-button {cursor:default}
+#yt-guide-info .yt-cache-date {display:block;flex-basis:100%;font-size:11px}
+#ytsd-guide.yt-fullscreen {position:fixed;inset:0;z-index:100;width:100vw;height:100dvh;padding:20px;background:var(--yt-bg);overflow:auto;border-radius:0}
+#ytsd-guide.yt-fullscreen .yt-grid {max-height:calc(100dvh - 300px)}
+body.guide-is-fullscreen {overflow:hidden}
+@media(max-width:550px){
+ #ytsd-guide .yt-heading h2 {font-size:20px}
+ #ytsd-guide .yt-heading-right {max-width:185px}
+ #ytsd-guide .yt-programme-actions button {min-width:36px;min-height:36px}
+ #ytsd-guide .yt-cell.has-video {flex-direction:column}
+ #ytsd-guide .yt-hour-lane .yt-programme {height:auto;min-height:110px}
+ #ytsd-guide .yt-day-text {width:auto}
+ #ytsd-guide.yt-fullscreen {padding:12px}
+ #ytsd-guide.yt-fullscreen .yt-grid {max-height:none}
+}
+@media(pointer:coarse){#ytsd-guide .yt-programme-actions button {min-width:44px;min-height:44px}}
+#ytsd-guide .yt-programme-actions svg,#ytsd-guide .yt-heading-right svg {display:block;width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#ytsd-guide .yt-play-icon svg {fill:currentColor;stroke:none}
+#ytsd-guide .yt-channel {align-items:flex-start}
+#ytsd-guide .yt-channel-link {position:sticky;top:54px}
+#ytsd-guide .yt-channel-name {font-weight:600}
+@media(max-width:550px){#ytsd-guide .yt-channel-link {position:static}}

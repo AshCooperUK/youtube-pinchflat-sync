@@ -148,7 +148,7 @@ class GuideTests(unittest.TestCase):
         item=next(e for e in self.get()['channels'][0]['events'] if e['video_id']=='abcdefghijk')
         self.assertEqual(item['state'],'scheduled');self.assertFalse(item['downloaded'])
         self.assertEqual(len(self.get(filter='published')['channels'][0]['events']),1)
-        self.assertFalse(self.get(filter='expected')['forecasts']['enabled'])
+        self.assertTrue(self.get(filter='expected')['forecasts']['enabled'])
         self.assertEqual(self.get(filter='expected')['channels'][0]['events'],[])
         self.job('short',status='skipped',video_id='bcdefghijkl',exists=False)
         with app.db() as conn:conn.execute("UPDATE downloads SET failure_code='shorts_excluded'")
@@ -245,6 +245,7 @@ class GuideTests(unittest.TestCase):
         self.guide.save_videos([video()]);self.guide.request_refresh()
         with app.db() as conn:
             conn.execute("UPDATE guide_sync SET initialised=1,backfill_cursor='expired',recent_checked_at=?,refresh_requested=0,channel_refresh_requested=0",(catalogue.stamp(),))
+            conn.execute('UPDATE guide_runtime SET scheduled_at=?',(self.guide.scheduled_boundary(),))
         response=Mock(status_code=400)
         response.json.return_value={'error':{'errors':[{'reason':'invalidPageToken'}]}}
         with patch.object(app,'load_credentials',return_value=object()),patch.object(app,'youtube_api_request',side_effect=requests.HTTPError(response=response)):
@@ -254,10 +255,8 @@ class GuideTests(unittest.TestCase):
             self.assertFalse(row['initialised']);self.assertIsNone(row['backfill_cursor'])
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM guide_videos').fetchone()[0],1)
 
-    def test_dense_channel_events_have_explicit_pagination(self):
+    def test_dense_channel_events_all_visible_without_pagination(self):
         self.guide.save_videos([video('dense'+str(i).zfill(6)) for i in range(503)])
         first=self.get()['channels'][0]
-        self.assertEqual(len(first['events']),500);self.assertEqual(first['events_next_offset'],500)
-        second=self.get(channel='UCsample',event_offset=500)['channels'][0]
-        self.assertEqual(len(second['events']),3);self.assertIsNone(second['events_next_offset'])
-        self.assertFalse({v['id'] for v in first['events']}&{v['id'] for v in second['events']})
+        self.assertEqual(len(first['events']),503);self.assertIsNone(first['events_next_offset'])
+        self.assertEqual(len({v['id'] for v in first['events']}),503)

@@ -3406,7 +3406,8 @@
     }
 </style>
 <script src="{{ url_for('static', filename='subscription-sort.js') }}?v={{ version }}"></script>
-{% if guide_view %}<link rel="stylesheet" href="{{ url_for('static', filename='upload-guide.css') }}?v={{ version }}">{% endif %}
+{% if guide_view or page_view.load_guide %}<link rel="stylesheet" href="{{ url_for('static', filename='upload-guide.css') }}?v={{ version }}">{% endif %}
+<link rel="stylesheet" href="{{ url_for('static', filename='navigation.css') }}?v={{ version }}">
 </head>
 <body class="{% if not page_view.channel_controls %}hide-channel-controls{% endif %} {% if not page_view.channel_control_favourite %}hide-channel-favourite{% endif %} {% if not page_view.channel_control_downloads %}hide-channel-downloads{% endif %} {% if not page_view.channel_control_scan %}hide-channel-scan{% endif %} {% if not page_view.channel_control_delete %}hide-channel-delete{% endif %} {% if not page_view.channel_control_retention %}hide-channel-retention{% endif %}">
 <div class="wrap">
@@ -3415,26 +3416,13 @@
       <h1>YouTube Subscription Downloader</h1>
       <div class="version">v{{ version }}</div>
     </div>
-    <div class="header-actions">
-      {% if is_admin and page_view.button_single_download %}
-      <button class="btn secondary" type="button" onclick="openSingleDownload()" title="One-time download">Single Download</button>
-      {% endif %}
-
+    <button type="button" id="menu-toggle" class="btn ghost" aria-label="Open menu" aria-expanded="false" aria-controls="main-menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <nav class="header-actions" id="main-menu" aria-label="Main menu">
       <a class="btn ghost" href="{{ '/' if guide_view else '/guide' }}">{{ 'Dashboard' if guide_view else 'Guide' }}</a>
+      {% if page_view.button_discover or page_view.button_favourites %}<button class="btn ghost" type="button" onclick="openDiscover()">Discover</button>{% endif %}
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
-
-      {% if page_view.button_discover %}
-      <button class="btn ghost" type="button" onclick="openDiscover()">Discover</button>
-      {% endif %}
-
-      {% if page_view.button_favourites %}
-      <button class="btn ghost" type="button" onclick="openFavourites()">Favourites</button>
-      {% endif %}
-
-      {% if page_view.button_logout %}
-      <form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out {{ current_user.username }}</button></form>
-      {% endif %}
-    </div>
+      {% if page_view.button_logout %}<form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost">Log out</button></form>{% endif %}
+    </nav>
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -3528,7 +3516,8 @@
 
     {% if page_view.show_summary_latest_download %}
     <div class="card latest-download-summary-card" data-summary-tile="latest_download" id="latest-download-summary-card">
-      <div class="muted small">Latest Downloaded</div>
+      <div class="latest-summary-heading"><div class="muted small">Latest Downloaded</div>
+      {% if is_admin and page_view.button_single_download %}<button type="button" class="summary-icon latest-single-download" onclick="openSingleDownload()" aria-label="Single Download" title="Single Download"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>{% endif %}</div>
       <button id="latest-download-summary-button" class="latest-download-summary-button" type="button" disabled>
         <img id="latest-download-summary-thumb" src="{{ url_for('static', filename='channel-placeholder.svg') }}" alt="Latest downloaded video">
         <span class="latest-download-summary-copy">
@@ -3568,6 +3557,7 @@
   </div>
   {% endif %}
 
+  {% if page_view.load_guide and not guide_view %}<div class="card" data-page-section="guide" id="guide-dashboard-tile">{% include 'upload_guide.html' %}</div>{% endif %}
   {% if page_view.load_pinchflat_downloads %}
   <div
     class="card pinchflat-download-card{% if not (google_connected and page_view.load_latest_videos) %} pinchflat-download-card-no-latest{% endif %}"
@@ -4556,6 +4546,7 @@
             referrerpolicy="strict-origin-when-cross-origin"
             allowfullscreen
           ></iframe>
+          <video id="latest-native-player" controls playsinline preload="metadata" hidden></video>
         </div>
 
         <div class="media-player-action-dock" aria-label="Video actions">
@@ -4710,18 +4701,14 @@
 
 <dialog id="single-download-dialog">
   <div class="modal-head">
-    <div><h2 style="margin:0">Single Download</h2><div class="muted small">Download one YouTube video using your saved One-time Download settings.</div></div>
+    <div><h2 style="margin:0">Single Download</h2><div class="muted small">Download a video from a site supported by yt-dlp.</div></div>
     <button class="modal-close" onclick="closeSingleDownload()" aria-label="Close">×</button>
   </div>
   <div class="modal-body">
     <form id="single-download-form" onsubmit="startSingleDownload(event)">
-      <label>YouTube URL
-        <input id="single-download-url" type="url" placeholder="https://www.youtube.com/watch?v=..." required>
+      <label>Video URL
+        <input id="single-download-url" type="url" placeholder="https://…" required>
       </label>
-      <div class="settings-path-card" style="margin:8px 0 12px">
-        <span class="muted small">Current settings</span>
-        <div><strong>{{ single_download_format|upper }}</strong>{% if single_download_format == 'audio' %} · {{ single_download_audio_format|upper }}{% elif single_download_compatibility_profile == 'emby_tv' %} · H.264 + AAC · MP4{% else %} · Automatic codecs{% endif %} · <code>/downloads/{{ single_download_folder }}</code></div>
-      </div>
       <button class="btn" id="single-download-start">Start download</button>
     </form>
     <div id="single-download-status" class="progress-wrap hidden">
@@ -4746,6 +4733,7 @@
   </div>
   <div class="modal-body">
     <div class="discover-toolbar">
+      {% if page_view.button_favourites %}<button id="discover-favourites-btn" class="btn secondary" type="button" onclick="openFavourites()">Favourites</button>{% endif %}
       <button id="discover-downloaded-btn" class="btn" type="button" onclick="showDiscoverMode('downloaded')">Downloaded</button>
       <button id="discover-latest-btn" class="btn secondary" type="button" onclick="showDiscoverMode('latest')">Latest Subscriptions</button>
       <button id="discover-liked-btn" class="btn secondary" type="button" onclick="showDiscoverMode('liked')">Liked Videos</button>
@@ -4963,6 +4951,7 @@
           <span class="settings-nav-title">Application</span>
           <button type="button" class="tab-btn active" data-tab="general" onclick="showTab('general')"><strong>General</strong><small>Subscriptions and app behaviour</small></button>
           <button type="button" class="tab-btn" data-tab="pageview" onclick="showTab('pageview')"><strong>Dashboard</strong><small>Layout, visibility and controls</small></button>
+          <button type="button" class="tab-btn" data-tab="guide" onclick="showTab('guide')"><strong>Guide</strong><small>Daily metadata updates and predictions</small></button>
         </div>
         <div class="settings-nav-group">
           <span class="settings-nav-title">Connections</span>
@@ -5037,6 +5026,21 @@
       </div>
     </section>
 
+    <section class="tab-panel" data-panel="guide">
+      <div class="settings-panel-intro"><div><h3>Guide</h3><p>All enabled channels and uploads appear from the saved server catalogue. Opening the guide does not use YouTube API credits.</p></div></div>
+      <form method="post" action="/settings/guide"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <div class="setting-box"><div class="settings-grid">
+          <label>Timezone<input name="guide_timezone" value="{{ guide_timezone }}" required placeholder="Europe/London"></label>
+          <label>Refresh every day at<input name="guide_refresh_time" type="time" value="{{ guide_refresh_time }}" required></label>
+          <label>Metadata history<select name="guide_history"><option value="all" {% if guide_history == 'all' %}selected{% endif %}>All available</option><option value="year" {% if guide_history == 'year' %}selected{% endif %}>Past year</option></select></label>
+          <label>Daily guide API allowance<input name="guide_daily_budget" type="number" min="50" max="10000" value="{{ guide_daily_budget }}" required></label>
+        </div><label class="source-toggle media-option"><input type="checkbox" name="guide_predictions_enabled" value="1" {% if guide_predictions_enabled %}checked{% endif %}><span class="toggle-track"></span><span>Predict uploads from channel history</span></label>
+        <p class="muted small">Initial indexing starts automatically after Google is connected and channels are enabled. Large catalogues build in batches within the allowance and resume after restarts. Daily refresh uses the timezone above; older metadata is renewed before it expires.</p>
+        <p class="muted small">Predictions show estimated windows for the next 14 days, with confidence and supporting history. Times assume this timezone. Irregular or insufficient history produces no estimate. These are YTSD estimates, not announced uploads.</p>
+        <button class="btn" type="submit">Save guide settings</button></div>
+      </form>
+    </section>
+
     <section class="tab-panel" data-panel="pageview">
       <div class="settings-panel-intro">
         <div><h3>Dashboard</h3><p>Arrange the main page in the same top-to-bottom order you want to see it, then choose which sections and controls load.</p></div>
@@ -5054,8 +5058,8 @@
             <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
               <span class="page-order-handle" aria-hidden="true">☰</span>
               <span>
-                <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Current Downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
-                <small>{% if item == "summary" %}Connection, subscription, storage and latest-download cards.{% elif item == "pinchflat" %}Subscription and one-time downloads, processing and queue state.{% elif item == "latest" %}Newest videos and Shorts from your subscriptions.{% elif item == "subscriptions" %}Channel management table.{% endif %}</small>
+                <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Current Downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "guide" %}Upload guide{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+                <small>{% if item == "summary" %}Connection, subscription, storage and latest-download cards.{% elif item == "pinchflat" %}Subscription and one-time downloads, processing and queue state.{% elif item == "latest" %}Newest videos and Shorts from your subscriptions.{% elif item == "guide" %}Cached upload guide with a full-screen option.{% elif item == "subscriptions" %}Channel management table.{% endif %}</small>
               </span>
             </div>
             {% endfor %}
@@ -5068,8 +5072,8 @@
           {% for item in page_section_order %}
           <div class="settings-order-card">
             <div>
-              <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Current Downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
-              <small>{% if item == "summary" %}Small dashboard cards loaded first.{% elif item == "pinchflat" %}Poll Downloader for active and queued jobs.{% elif item == "latest" %}Use YouTube to load recent subscription videos.{% elif item == "subscriptions" %}Render and manage the full subscription list.{% endif %}</small>
+              <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Current Downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "guide" %}Upload guide{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+              <small>{% if item == "summary" %}Small dashboard cards loaded first.{% elif item == "pinchflat" %}Poll Downloader for active and queued jobs.{% elif item == "latest" %}Use YouTube to load recent subscription videos.{% elif item == "guide" %}All enabled channels from the server catalogue.{% elif item == "subscriptions" %}Render and manage the full subscription list.{% endif %}</small>
             </div>
             {% if item == "summary" %}
               <label><input type="checkbox" name="page_load_summary" value="1" {% if page_view.load_summary %}checked{% endif %}> Show</label>
@@ -5080,6 +5084,10 @@
             {% elif item == "latest" %}
               <label><input type="checkbox" name="page_load_latest_videos" value="1" {% if page_view.load_latest_videos %}checked{% endif %}> Show</label>
               <label><input type="checkbox" name="page_min_latest_videos" value="1" {% if page_view.min_latest_videos %}checked{% endif %}> Start minimised</label>
+            {% elif item == "guide" %}
+              <label><input type="checkbox" name="page_load_guide" value="1" {% if page_view.load_guide %}checked{% endif %}> Show</label>
+              <label><input type="checkbox" name="page_autoload_guide" value="1" {% if page_view.autoload_guide %}checked{% endif %}> Auto-load</label>
+              <label><input type="checkbox" name="page_min_guide" value="1" {% if page_view.min_guide %}checked{% endif %}> Start minimised</label>
             {% elif item == "subscriptions" %}
               <label><input type="checkbox" name="page_load_subscriptions" value="1" {% if page_view.load_subscriptions %}checked{% endif %}> Show</label>
               <label><input type="checkbox" name="page_min_subscriptions" value="1" {% if page_view.min_subscriptions %}checked{% endif %}> Start minimised</label>
@@ -5109,13 +5117,13 @@
           </div>
 
           <div class="setting-box">
-            <h3>4. Header buttons</h3>
+            <h3>4. Navigation and tile controls</h3>
             <p class="muted small">Settings always stays visible so the interface remains recoverable.</p>
             <label><input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}> Downloader tile: Sync &amp; Scan</label>
             <label><input type="checkbox" name="page_button_refresh_youtube" value="1" {% if page_view.button_refresh_youtube %}checked{% endif %}> Google tile: Refresh YouTube</label>
-            <label><input type="checkbox" name="page_button_single_download" value="1" {% if page_view.button_single_download %}checked{% endif %}> Single Download</label>
+            <label><input type="checkbox" name="page_button_single_download" value="1" {% if page_view.button_single_download %}checked{% endif %}> Latest Downloaded tile: Single Download</label>
             <label><input type="checkbox" name="page_button_discover" value="1" {% if page_view.button_discover %}checked{% endif %}> Discover</label>
-            <label><input type="checkbox" name="page_button_favourites" value="1" {% if page_view.button_favourites %}checked{% endif %}> Favourites</label>
+            <label><input type="checkbox" name="page_button_favourites" value="1" {% if page_view.button_favourites %}checked{% endif %}> Discover: Favourites</label>
             <label><input type="checkbox" name="page_button_logout" value="1" {% if page_view.button_logout %}checked{% endif %}> Log out</label>
           </div>
         </div>
@@ -5399,7 +5407,7 @@
 
       <div class="setting-box">
         <h3>One-time Download</h3>
-        <p class="muted small">Every Single Download button across the app uses these settings. The download popup only asks for the YouTube URL.</p>
+        <p class="muted small">Every Single Download button across the app uses these settings. The download popup only asks for the video URL. Any site supported by yt-dlp can be used.</p>
         <form method="post" action="/settings/single-download">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <div class="profile-settings-grid">
@@ -5788,8 +5796,8 @@
         </div>
         <div id="activity-list" aria-label="Activity log">
           {% for item in activity_rows %}
-          <div class="activity-item {% if item.video_id %}activity-video{% endif %}" data-activity-id="{{ item.id }}" data-video-id="{{ item.video_id }}" data-video-title="{{ item.video_title }}" data-channel-id="{{ item.channel_id or '' }}" data-channel-title="{{ item.channel_title }}">
-            {% if item.video_id %}<a class="activity-video-link" href="{{ item.video_url }}" data-activity-video="{{ item.video_id }}" aria-label="Play {{ item.video_title or 'video' }}"><img class="activity-video-thumb" src="{{ item.thumbnail_url }}" alt="{{ item.video_title or 'Video thumbnail' }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}'"></a>{% endif %}
+          <div class="activity-item {% if item.thumbnail_url %}activity-video{% endif %}" data-activity-id="{{ item.id }}" data-video-id="{{ item.video_id }}" data-video-title="{{ item.video_title }}" data-channel-id="{{ item.channel_id or '' }}" data-channel-title="{{ item.channel_title }}" data-media-url="{{ item.local_media_url or '' }}">
+            {% if item.video_id %}<a class="activity-video-link" href="{{ item.video_url }}" data-activity-video="{{ item.video_id }}" aria-label="Play {{ item.video_title or 'video' }}"><img class="activity-video-thumb" src="{{ item.thumbnail_url }}" alt="{{ item.video_title or 'Video thumbnail' }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}'"></a>{% elif item.thumbnail_url %}<button type="button" class="activity-video-link" data-activity-media="1" {% if not item.local_media_url %}disabled{% endif %} aria-label="Play {{ item.video_title }}"><img class="activity-video-thumb" src="{{ item.thumbnail_url }}" alt="{{ item.video_title }}" loading="lazy"></button>{% endif %}
             <div class="activity-copy">
               <strong class="{% if item.severity == 'warning' %}warn{% elif item.severity == 'success' %}ok{% elif item.severity == 'error' %}bad{% endif %}">{{ item.title }}</strong>
               {% if item.video_id %}<div class="activity-video-title"><a class="activity-popup-link" href="{{ item.video_url }}" data-activity-video="{{ item.video_id }}">{{ item.video_title or 'Play video' }}</a></div>{% elif item.video_title %}<div class="activity-video-title">{{ item.video_title }}</div>{% endif %}
@@ -5958,6 +5966,8 @@ const discoverDialog = document.getElementById("discover-dialog");
 const favouritesDialog = document.getElementById("favourites-dialog");
 const listPickerDialog = document.getElementById("list-picker-dialog");
 const latestVideoDialog = document.getElementById("latest-video-dialog");
+latestVideoDialog.addEventListener('close',()=>{const native=document.getElementById('latest-native-player');native.pause();native.removeAttribute('src');native.load();});
+
 const userIsAdmin = {{ 'true' if is_admin else 'false' }};
 const embyApiConfigured = {{ 'true' if emby_api_configured else 'false' }};
 const googleWriteReady = {{ 'true' if google_write_ready else 'false' }};
@@ -6207,6 +6217,7 @@ async function fetchCompleteVideoMetadata(item) {
 }
 
 async function openDownloaderMedia(item) {
+  if(item?.is_external && item.local_media_url){openLatestVideo(item);return;}
   const videoId =
     item?.youtube_id
     || item?.video_id
@@ -6735,8 +6746,8 @@ function renderLatestDownloadSummary(item) {
     event.stopPropagation();
     openChannelDetails(item.channel_id);
   } : null;
-  button.disabled = !item.youtube_id;
-  button.onclick = item.youtube_id ? event => {
+  button.disabled = !(item.youtube_id || item.local_media_url);
+  button.onclick = (item.youtube_id || item.local_media_url) ? event => {
     if (event?.target === channel) return;
     openDownloaderMedia(item);
   } : null;
@@ -7119,6 +7130,7 @@ function settingsActionNeedsPageRefresh(path) {
   return new Set([
     "/settings/general",
     "/settings/page-view",
+    "/settings/guide",
     "/settings/configuration",
     "/settings/youtube",
     "/settings/apis",
@@ -8352,6 +8364,18 @@ async function loadLatestPopupChannelDetails(channelId, expectedVideoId) {
 }
 
 function openLatestVideo(item) {
+  const native=document.getElementById('latest-native-player');
+  const remote=document.getElementById('latest-video-player');
+  const local=!!(item?.is_external && /^\/downloads\/[a-zA-Z0-9_-]+\/media$/.test(item.local_media_url || ''));
+  latestVideoDialog.classList.toggle('native-media',local);
+  native.pause();native.removeAttribute('src');native.hidden=!local;remote.hidden=local;
+  if(local){
+    latestPopupVideo={...item,video_id:'',channel_id:''};
+    remote.src='';native.src=item.local_media_url;
+    renderLatestVideoDetails(latestPopupVideo);
+    if(!latestVideoDialog.open)latestVideoDialog.showModal();
+    native.play().catch(()=>{});return;
+  }
   const videoId = item?.video_id || item?.youtube_id || "";
   if (!videoId) return;
 
@@ -8386,6 +8410,8 @@ function openLatestVideo(item) {
 }
 
 function closeLatestVideo() {
+  const native=document.getElementById('latest-native-player');
+  native.pause();native.removeAttribute('src');native.load();
   const player = document.getElementById("latest-video-player");
   const reopenDownloaderQueue =
     returnToDownloaderQueueAfterPlayer;
@@ -10368,7 +10394,7 @@ let activitySnapshot = "";
 
 // Delegation handles both server-rendered logs and entries replaced by polling.
 document.getElementById('activity-list')?.addEventListener('click', event => {
-  const link = event.target.closest('[data-activity-video], [data-activity-channel]');
+  const link = event.target.closest('[data-activity-video], [data-activity-channel], [data-activity-media]');
   if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   const row = link.closest('[data-activity-id]');
@@ -10377,7 +10403,8 @@ document.getElementById('activity-list')?.addEventListener('click', event => {
       channel_id:row.dataset.channelId, channel_title:row.dataset.channelTitle,
       thumbnail_url:`https://i.ytimg.com/vi/${row.dataset.videoId}/hqdefault.jpg`,
       video_url:`https://www.youtube.com/watch?v=${row.dataset.videoId}`});
-  } else openChannelDetails(link.dataset.activityChannel);
+  } else if(link.dataset.activityMedia)openLatestVideo({is_external:true,local_media_url:row.dataset.mediaUrl,title:row.dataset.videoTitle,channel_title:row.dataset.channelTitle});
+  else openChannelDetails(link.dataset.activityChannel);
 });
 
 async function loadActivity(force=false) {
@@ -10398,12 +10425,13 @@ async function loadActivity(force=false) {
       for (const item of rows) {
         const row = document.createElement("div");
         const videoId = /^[A-Za-z0-9_-]{11}$/.test(item.video_id || "") ? item.video_id : "";
-        row.className = "activity-item" + (videoId ? " activity-video" : "");
+        row.className = "activity-item" + (item.thumbnail_url ? " activity-video" : "");
         row.dataset.activityId = String(item.id);
         row.dataset.videoId = videoId;
         row.dataset.videoTitle = item.video_title || '';
         row.dataset.channelId = item.channel_id || '';
         row.dataset.channelTitle = item.channel_title || '';
+        row.dataset.mediaUrl = item.local_media_url || '';
         if (videoId) {
           const link = document.createElement("a");
           link.className = "activity-video-link";
@@ -10418,6 +10446,9 @@ async function loadActivity(force=false) {
           image.onerror = () => { image.onerror = null; image.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
           link.appendChild(image);
           row.appendChild(link);
+        } else if(item.thumbnail_url) {
+          const link=document.createElement('button');link.type='button';link.className='activity-video-link';link.dataset.activityMedia='1';link.disabled=!item.local_media_url;link.setAttribute('aria-label',`Play ${item.video_title || 'video'}`);
+          const image=document.createElement('img');image.className='activity-video-thumb';image.src=item.thumbnail_url;image.alt=item.video_title || 'Video thumbnail';image.loading='lazy';link.append(image);row.append(link);
         }
         const body = document.createElement("div");
         body.className = "activity-copy";
@@ -13441,6 +13472,7 @@ latestVideoDialog?.addEventListener(
   });
 });
 </script>
-{% if guide_view %}<script src="{{ url_for('static', filename='upload-guide.js') }}?v={{ version }}"></script>{% endif %}
+{% if guide_view or page_view.load_guide %}<script src="{{ url_for('static', filename='upload-guide.js') }}?v={{ version }}"></script>{% endif %}
+<script src="{{ url_for('static', filename='navigation.js') }}?v={{ version }}"></script>
 </body>
 </html>

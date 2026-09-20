@@ -2,7 +2,7 @@
 
 A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
 
-Version: **3.0.8** · [Latest changes](RELEASE-v3.0.8.md) · [Full changelog](CHANGELOG.md)
+Version: **3.0.9** · [Latest changes](RELEASE-v3.0.9.md) · [Full changelog](CHANGELOG.md)
 
 ## Install: set up your Cloudflare domain first
 
@@ -126,7 +126,15 @@ Upload a Mozilla/Netscape-format `cookies.txt` file under **Settings → Downloa
 
 The native downloader defaults to one download worker, lightweight feed scans, four RSS scan workers and queued deeper scans. Duplicate checks use YouTube video IDs. Optional expert yt-dlp JSON settings cannot override application-managed safety and filtering options.
 
-The Upload Guide's background worker caches YouTube metadata and tracks quota, pagination and backoff. Opening the guide does not queue video downloads. Forecasts remain inactive pending the project permission required by the approved implementation handover.
+The Upload Guide is available on the dashboard and at `/guide`. It shows all enabled channels and every upload in the selected period from a server-side catalogue. Opening the guide, navigating dates or opening its video-info popup uses saved metadata, not YouTube Data API calls. The play and channel icons reuse the app's existing popups; opening those may refresh their own details or stream media.
+
+Initial indexing starts automatically once Google is connected and channels are enabled. **Settings > Guide** controls the timezone, history depth, daily API allowance, prediction toggle and daily refresh time (default **04:00 Europe/London**). Channel metadata and recent uploads refresh daily. Older video metadata is renewed before its 30-day expiry. A large initial catalogue appears progressively in background batches, resumes after restarts and stays within the configured allowance.
+
+Predictions are enabled and labelled **Expected upload**. They show an estimated window, supporting history and confidence, rather than an announced release. Daily, weekday, fortnightly and calendar-month patterns are tested against later historical observations. Sparse history, irregular uploads or a changed schedule can produce no estimate. Forecasts cover up to 14 days, use the configured guide timezone as an explicit assumption, and never start downloads.
+
+Click a programme title or its info icon for details; use its play icon for playback. **Settings > Dashboard** controls the Guide tile's visibility, automatic loading, starting state and position. Its maximise control fills the screen; Escape restores the tile.
+
+Single Download now lives under the download icon in **Latest Downloaded**. Paste a supported HTTP/HTTPS video URL; yt-dlp selects the extractor. Provider support follows the installed [yt-dlp extractors and generic extractor](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md). Completed non-YouTube files play locally in the shared popup. Favourites is inside Discover, and smaller or touch devices use the hamburger menu.
 
 ## V3 architecture and upgrades
 
@@ -139,7 +147,7 @@ V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, r
 
 For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
 
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.8 ZIP targets v3.0.7. It contains the same updated files as the full-source ZIP.
+For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.9 ZIP targets v3.0.8. It contains the same updated files as the full-source ZIP.
 
 ## Development
 
@@ -163,6 +171,22 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 
 <details>
 <summary>V3: native downloader and current releases</summary>
+
+### v3.0.9
+
+- Enable upload estimates from saved channel history, with labelled time windows, supporting observation counts and qualitative confidence. Keep genuine YouTube announcements separate. Predictions never create video IDs or download jobs.
+- Validate daily, weekday, fortnightly and calendar-month patterns against later historical observations. Separate known content types and suppress sparse, irregular, stale or changed schedules. Show estimates only within the next 14 days.
+- Show all enabled guide channels and all uploads in the selected period. Remove More channels and collapsed +N uploads controls. Include the initial catalogue in the page response and read further navigation from SQLite.
+- Index automatically after Google is connected and channels are enabled. Refresh channel metadata and recent uploads daily at a configurable time (default 04:00, Europe/London). Preserve checkpoints, a daily API allowance, retries and historical metadata renewal across restarts.
+- Move guide controls to Settings > Guide. Cache video views, likes and comments alongside publication data. Guide browsing and its info popup do not call the YouTube Data API.
+- Replace hover details with click-to-open video info, plus a separate play icon for the existing player. Channel names and avatars use the shared channel popup, including inside guide details. Preserve the existing site-wide popup links.
+- Add a dashboard Guide tile with minimise, full-screen maximise, visibility, auto-load and position settings under Settings > Dashboard.
+- Move Single Download to a download icon in Latest Downloaded. Simplify the URL popup and accept supported HTTP/HTTPS sites through yt-dlp without a YouTube-only hostname restriction.
+- Keep non-YouTube provider identities, thumbnails and NFO labels separate. Add a short source identifier to non-YouTube filenames to avoid collisions between generic extractor IDs. Reuse the media popup for authenticated local playback of completed files; support seeking and never serve partial files or paths outside the media root. Keep YouTube cookie retries scoped to YouTube.
+- Move Favourites into Discover. Place Settings immediately before Log out and remove the account name from that button. Use a hamburger menu on mobile and tablets.
+- Preserve completed-only Latest Downloaded, active processing in Current Downloads, Activity thumbnails/popups, sortable subscriptions, Shorts exclusions, retention protection and Emby release dates.
+
+[Release details](RELEASE-v3.0.9.md).
 
 ### v3.0.8
 

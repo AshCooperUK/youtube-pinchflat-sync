@@ -95,10 +95,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "3.0.8"
+  version: "3.0.9"
   update_at: "2026-09-20"
   release_notes:
-    en_US: v3.0.8 adds sortable subscription headings, Activity video and channel popup links, restored release history and Cloudflare-first setup instructions.
+    en_US: v3.0.9 adds daily cached guide updates, upload estimates, guide popups and dashboard controls, simpler navigation and downloads from supported yt-dlp sites.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

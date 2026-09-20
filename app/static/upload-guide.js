@@ -21,9 +21,12 @@
     hour:Math.max(0,Math.min(24,parseInt(query.get('hour') || '0',10) || 0)),
     sort:localStorage.getItem('ytpf-sort') || 'title'
   };
-  let data=null, selectedItem=null, loaded=20, abort=null, sequence=0, debounce=null, refreshing=false;
-  let modalOrigin=null, modalScroll=null, initialRestore=true, snapshot='', moreLoading=false;
-  const expanded = new Set();
+  let data=null, selectedItem=null, abort=null, sequence=0, debounce=null, refreshing=false;
+  const dashboard=root.dataset.dashboard==='true';
+  let started=root.dataset.autoload==='true';
+  let minimised=root.dataset.minimised==='true';
+  const infoDialog=$('yt-guide-info');
+  let modalOrigin=null, modalScroll=null, initialRestore=true, snapshot='';
   const element = (tag, className, text) => {const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
   const button = (className,text,fn) => {const node=element('button',className,text);node.type='button';node.addEventListener('click',fn);return node;};
   const image = (url, alt, className='') => {
@@ -34,10 +37,11 @@
   function saveState() {
     const params=new URLSearchParams();
     for(const key of ['date','zoom','filter','search','selected','hour']) if(state[key]!=='' && state[key]!==undefined) params.set(key,String(state[key]));
-    history.replaceState(null,'',`/guide?${params}`);
-    sessionStorage.setItem(storageKey,JSON.stringify({url:location.search,top:grid.scrollTop,left:grid.scrollLeft,y:scrollY,loaded}));
+    if(!dashboard)history.replaceState(null,'',`/guide?${params}`);
+    sessionStorage.setItem(storageKey,JSON.stringify({url:location.search,top:grid.scrollTop,left:grid.scrollLeft,y:scrollY}));
   }
   function rememberOrigin(origin) {
+    if(modalScroll)return;
     modalOrigin=origin?.dataset.focusKey || null;
     modalScroll={top:grid.scrollTop,left:grid.scrollLeft,y:scrollY};
     saveState();
@@ -76,47 +80,62 @@
     const link=channelButton(channel,'yt-detail-channel-button');link.id='yt-detail-channel';old.replaceWith(link);
     $('yt-detail-time').textContent=eventTime(item,{weekday:'short',day:'numeric',month:'short',timeZoneName:'short'});
     $('yt-detail-title').textContent=item.title || 'Expected upload';
-    $('yt-detail-title').disabled=!item.video_id;
+    $('yt-detail-title').disabled=false;
     $('yt-detail-description').textContent=item.description || item.explanation || 'No video description.';
     $('yt-detail-description').title=item.description || item.explanation || '';
     const extra=$('yt-detail-extra');extra.replaceChildren();
     if(item.downloaded) extra.append(element('span','yt-downloaded','● Downloaded'));
     else extra.append(element('span','',item.state==='scheduled'?'Announced on YouTube':item.state==='expected'?'YTSD estimate':'Available on YouTube'));
     if(duration(item.duration_seconds)) extra.append(element('span','',`· ${duration(item.duration_seconds)}`));
+    for(const [key,label] of [['view_count','views'],['like_count','likes'],['comment_count','comments']]) {
+      if(item[key]!==null && item[key]!==undefined)extra.append(element('span','',`· ${Number(item[key]).toLocaleString('en-GB')} ${label}`));
+    }
+    if(item.state==='expected') extra.append(element('span','',`${eventTime({event_at:item.window_start})} – ${eventTime({event_at:item.window_end})} · ${item.confidence} confidence`));
+    if(item.metadata_checked_at)extra.append(element('span','yt-cache-date',`Metadata updated ${new Date(item.metadata_checked_at).toLocaleString('en-GB')}`));
     const thumb=$('yt-thumbnail');thumb.replaceChildren();thumb.disabled=!item.video_id;
     if(item.thumbnail_url) thumb.append(image(item.thumbnail_url,item.title || 'Video thumbnail'));
     else thumb.append(element('span','yt-no-image',item.state==='expected'?'Upload estimate':'Thumbnail unavailable'));
     if(duration(item.duration_seconds)) thumb.append(element('span','yt-duration',duration(item.duration_seconds)));
-    for(const node of grid.querySelectorAll('[data-programme-id]')) node.setAttribute('aria-pressed',String(node.dataset.programmeId===item.id));
+    for(const node of grid.querySelectorAll('[data-programme-id]')) node.dataset.selected=String(node.dataset.programmeId===item.id);
     for(const row of grid.querySelectorAll('.yt-channel-row')) row.querySelector('.yt-channel')?.classList.toggle('selected',row.dataset.channelId===channel.channel_id);
     saveState();
   }
   function play(item,origin) {
     if(!item?.video_id || item.state==='expected') return;
     rememberOrigin(origin);
-    openLatestVideo({...item,is_short:!!item.is_short,metadata_complete:false});
+    openLatestVideo({...item,is_short:!!item.is_short,metadata_rich:true});
+  }
+  function showInfo(item,channel,origin) {
+    rememberOrigin(origin);choose(item,channel);
+    if(!infoDialog.open)infoDialog.showModal();
   }
   function programme(item,channel,day=false) {
-    const node=button(`yt-programme ${item.state}${item.downloaded?' downloaded':''}`,'',()=>{choose(item,channel);play(item,node);});
-    node.dataset.programmeId=item.id;node.dataset.focusKey=`video:${item.id}`;
-    node.setAttribute('aria-pressed',String(state.selected===item.id));
-    node.title=`${item.title || 'Expected upload'} · ${eventTime(item,{weekday:'short',day:'numeric',month:'short'})}${duration(item.duration_seconds)?' · '+duration(item.duration_seconds):''}`;
-    node.setAttribute('aria-label',node.title+(item.downloaded?' · Downloaded':'')+(item.state==='scheduled'?' · Scheduled':''));
-    node.addEventListener('mouseenter',()=>choose(item,channel));
-    node.addEventListener('focus',()=>choose(item,channel));
-    const copy=day?element('span','yt-day-text'):node;
-    const mobileDay=element('span','yt-mobile-day');
-    mobileDay.textContent=item.event_at ? formatDate(localDay(item.event_at,data.window.timezone),{weekday:'short'})+' · ' : '';
+    const node=element('article',`yt-programme ${item.state}${item.downloaded?' downloaded':''}`);
+    node.dataset.programmeId=item.id;
+    node.dataset.selected=String(state.selected===item.id);
+    const copy=element('div',day?'yt-day-text':'yt-programme-copy');
     const timeLabel=element('span','yt-programme-time');
-    if(state.zoom==='month') timeLabel.textContent=item.event_at?formatDate(localDay(item.event_at,data.window.timezone),{day:'numeric',month:'short'})+' · ':'';
-    else timeLabel.append(mobileDay);
-    timeLabel.append(document.createTextNode(eventTime(item)));
-    copy.append(timeLabel,element('span','yt-programme-title',item.title || 'Expected upload'));
-    if(!day) {
-      const tail=element('span','yt-programme-tail',item.state==='scheduled'?'Scheduled':duration(item.duration_seconds));
-      if(item.downloaded) tail.append(element('span','yt-downloaded','✓'));
-      copy.append(tail);
-    } else node.append(element('span','yt-time-bar'),copy);
+    if(state.zoom==='month')timeLabel.textContent=(item.event_at?formatDate(localDay(item.event_at,data.window.timezone),{day:'numeric',month:'short'})+' · ':'')+eventTime(item);
+    else timeLabel.textContent=eventTime(item,{weekday:'short'});
+    if(item.state==='expected')timeLabel.prepend(document.createTextNode('Around '));
+    const title=button('yt-programme-title',item.title || 'Expected upload',()=>showInfo(item,channel,title));
+    title.dataset.focusKey=`video:${item.id}`;
+    copy.append(timeLabel,title);
+    const actions=element('div','yt-programme-actions');
+    const info=button('yt-info-icon','',()=>showInfo(item,channel,info));
+    info.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg>';
+    info.setAttribute('aria-label',`Video info: ${item.title || 'Expected upload'}`);info.title='Video info and stats';info.dataset.focusKey=`info:${item.id}`;
+    actions.append(info);
+    if(item.video_id) {
+      const playButton=button('yt-play-icon','',()=>{choose(item,channel);play(item,playButton);});
+      playButton.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg>';
+      playButton.setAttribute('aria-label',`Play: ${item.title}`);playButton.title='Play video';playButton.dataset.focusKey=`play:${item.id}`;actions.append(playButton);
+    }
+    if(item.downloaded)actions.append(element('span','yt-downloaded','✓'));
+    if(duration(item.duration_seconds))actions.append(element('span','yt-programme-length',duration(item.duration_seconds)));
+    copy.append(actions);
+    if(day)node.append(element('span','yt-time-bar'));
+    node.append(copy);
     return node;
   }
   function columns() {
@@ -134,6 +153,7 @@
     return result;
   }
   function render() {
+    data.channels.sort((a,b)=>Number(!a.favourite)-Number(!b.favourite) || ytsdCompareChannels(a,b,state.sort));
     const scroll={top:grid.scrollTop,left:grid.scrollLeft,y:scrollY};
     const active=document.activeElement?.dataset.focusKey;
     const cols=columns();grid.style.setProperty('--yt-columns',cols.length);
@@ -177,14 +197,12 @@
           const cell=element('div',`yt-cell${col.day===data.window.today?' today':''}`);
           const items=channel.events.filter(item=>{const day=item.event_at?localDay(item.event_at,data.window.timezone):item.publication_date;return day>=col.day && day<col.end;});
           if(items.length)cell.classList.add('has-video');
-          const key=channel.channel_id+':'+col.day;
-          for(const item of expanded.has(key)?items:items.slice(0,3))cell.append(programme(item,channel));
-          if(items.length>3)cell.append(button('yt-more',expanded.has(key)?'Show fewer':`+${items.length-3} uploads`,()=>{expanded.has(key)?expanded.delete(key):expanded.add(key);render();}));
+          for(const item of items)cell.append(programme(item,channel));
           lane.append(cell);
         }
         if(mobile && !channel.events.length)lane.append(element('span','yt-day-empty','No uploads in this period.'));
       }
-      if(channel.events_next_offset!==null && channel.events_next_offset!==undefined) lane.append(button('yt-more','More uploads in this period',()=>loadMoreEvents(channel)));
+
       row.append(lane);fragment.append(row);
     }
     if(!data.channels.length)fragment.append(element('div','yt-empty',state.search?'No matching enabled channels.':'Enable channels in Subscriptions to see their uploads here.'));
@@ -201,26 +219,13 @@
       $('yt-later').disabled=cols[cols.length-1].end>=Date.parse(data.window.end);
       $('yt-hours-label').textContent=`${eventTime({event_at:new Date(cols[0].start).toISOString()})} – ${eventTime({event_at:new Date(cols[cols.length-1].end).toISOString()})} · ${data.window.timezone}`;
     }
-    $('yt-load-more').hidden=data.next_offset===null;
+
     const incomplete=data.channels.some(c=>!c.coverage.complete && !c.coverage.history_limited);
     let message=data.coverage.error || (data.coverage.running?'Updating YouTube metadata…':data.channels.some(c=>c.coverage.pending)?'Metadata refresh pending…':incomplete?'Recent history appears first. Older uploads are indexing in background batches.':'Available upload history indexed.');
     if(data.coverage.history==='year')message+=' History setting: past year. Older pages are paused by this setting.';
-    if(state.filter==='expected') message=data.forecasts.reason+' Published uploads and announced schedules remain available in All uploads.';
+    if(state.filter==='expected') message=data.forecasts.reason;
+    if(data.coverage.next_refresh_at)message+=` Next refresh: ${new Date(data.coverage.next_refresh_at).toLocaleString('en-GB',{timeZone:data.window.timezone})} (${data.window.timezone}).`;
     $('yt-guide-state').textContent=message;
-    let selectedChannel=data.channels.find(c=>c.events.some(i=>i.id===state.selected));
-    if(selectedChannel) choose(selectedChannel.events.find(i=>i.id===state.selected),selectedChannel);
-    else if(data.selection?.item?.id===state.selected) choose(data.selection.item,data.selection.channel);
-    else {
-      selectedItem=null;
-      selectedChannel=data.channels.find(c=>c.events.length);
-      if(selectedChannel)choose(selectedChannel.events[0],selectedChannel);
-      else {
-        state.selected='';$('yt-detail-status').hidden=true;$('yt-detail-channel').hidden=true;
-        $('yt-detail-time').textContent='';$('yt-detail-title').textContent='Select an upload';$('yt-detail-title').disabled=true;
-        $('yt-detail-description').textContent='Browse published videos and announced schedules from your enabled channels.';
-        $('yt-detail-extra').replaceChildren();$('yt-thumbnail').disabled=true;$('yt-thumbnail').replaceChildren(element('span','yt-no-image','No upload selected'));
-      }
-    }
     if(active && !hasDialog()) root.querySelector(`[data-focus-key="${CSS.escape(active)}"]`)?.focus({preventScroll:true});
     grid.scrollTop=scroll.top;grid.scrollLeft=scroll.left;window.scrollTo({top:scroll.y,behavior:'instant'});
     if(initialRestore) {
@@ -228,60 +233,21 @@
       if(saved.url===location.search) {grid.scrollTop=saved.top||0;grid.scrollLeft=saved.left||0;window.scrollTo({top:saved.y||0,behavior:'instant'});}
     }
   }
-  async function load({quiet=false,more=false}={}) {
+  async function load({quiet=false}={}) {
+    if(!started)return;
     abort?.abort();abort=new AbortController();const signal=abort.signal;
     const requestId=++sequence;
-    const count=more?loaded+20:loaded;
     if(!quiet)$('yt-guide-state').textContent='Loading saved uploads…';
     saveState();
     try {
-      let responseData=null;
-      for(let offset=0;offset<count;offset+=100) {
-        const params=new URLSearchParams({...state,offset,limit:Math.min(100,count-offset)});
-        const response=await fetch('/api/guide?'+params,{signal,headers:{Accept:'application/json'}});
-        if(!response.ok)throw new Error('The upload guide could not be loaded. Refresh the page to retry.');
-        const page=await response.json();if(!page.ok)throw new Error(page.error || 'Unable to load uploads.');
-        if(requestId!==sequence)return;
-        if(!responseData)responseData=page;
-        else {
-          if(responseData.revision!==page.revision) {setTimeout(()=>load({quiet:true}),100);return;}
-          responseData.channels.push(...page.channels);responseData.next_offset=page.next_offset;
-        }
-        if(page.next_offset===null)break;
-      }
+      const response=await fetch('/api/guide?'+new URLSearchParams(state),{signal,headers:{Accept:'application/json'}});
+      if(!response.ok)throw new Error('The saved guide could not be loaded. Please retry.');
+      const responseData=await response.json();
       if(requestId!==sequence)return;
-      loaded=count;
+      if(!responseData.ok)throw new Error(responseData.error || 'Unable to load uploads.');
       const signature=JSON.stringify({...responseData,server_time:''});
-      if(!quiet || signature!==snapshot) {
-        if(quiet && data?.window.start===responseData.window.start && data?.window.end===responseData.window.end) {
-          for(const channel of responseData.channels) {
-            const old=data.channels.find(c=>c.channel_id===channel.channel_id);
-            if(old?.events.length>500) {
-              while(channel.events_next_offset!==null && channel.events.length<old.events.length) {
-                const params=new URLSearchParams({...state,channel:channel.channel_id,event_offset:channel.events_next_offset});
-                const extra=await fetch('/api/guide?'+params,{signal,headers:{Accept:'application/json'}});
-                if(!extra.ok)break;
-                const result=await extra.json();
-                if(requestId!==sequence)return;
-                if(!result.channels?.[0])break;
-                channel.events.push(...result.channels[0].events);
-                channel.events_next_offset=result.channels[0].events_next_offset;
-              }
-            }
-          }
-        }
-        data=responseData;snapshot=signature;render();
-      }
+      if(!quiet || signature!==snapshot) {data=responseData;snapshot=signature;render();}
     } catch(error) {if(error.name!=='AbortError' && requestId===sequence)$('yt-guide-state').textContent=error.message;}
-  }
-  async function loadMoreEvents(channel) {
-    if(moreLoading)return;moreLoading=true;
-    const requestId=sequence;
-    try {
-      const response=await fetch('/api/guide?'+new URLSearchParams({...state,channel:channel.channel_id,event_offset:channel.events_next_offset}));
-      const result=await response.json();
-      if(requestId===sequence && result.ok && result.channels[0]) {channel.events.push(...result.channels[0].events);channel.events_next_offset=result.channels[0].events_next_offset;render();}
-    } catch (_) {$('yt-guide-state').textContent='More uploads could not be loaded. Try again.';} finally {moreLoading=false;}
   }
   function navigate(direction) {
     if(state.zoom==='month') {const d=calendarDate(state.date);d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+direction);state.date=d.toISOString().slice(0,10);}
@@ -297,8 +263,7 @@
   root.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;load();});
   $('yt-channel-search').value=state.search;
   $('yt-channel-search').oninput=event=>{state.search=event.target.value;clearTimeout(debounce);abort?.abort();sequence++;debounce=setTimeout(()=>{debounce=null;load();},300);};
-  $('yt-load-more').onclick=()=>load({more:true});
-  $('yt-detail-title').onclick=()=>play(selectedItem,$('yt-detail-title'));
+  $('yt-info-close').onclick=()=>infoDialog.close();
   $('yt-thumbnail').onclick=()=>play(selectedItem,$('yt-thumbnail'));
   $('yt-detail-title').dataset.focusKey='selected-title';$('yt-thumbnail').dataset.focusKey='selected-thumbnail';
   if($('yt-refresh'))$('yt-refresh').onclick=async()=>{
@@ -322,9 +287,31 @@
   document.addEventListener('ytsd:channel-state',()=>{clearTimeout(stateRefresh);stateRefresh=setTimeout(()=>load({quiet:true}),250);});
   document.addEventListener('ytsd:sort',()=>{const sort=localStorage.getItem('ytpf-sort')||'title';if(sort!==state.sort){state.sort=sort;load({quiet:true});}});
   window.addEventListener('storage',event=>{if(event.key==='ytpf-sort'){state.sort=event.newValue || 'title';load({quiet:true});}});
-  let resizeTimer=null;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(data)render();},150);});
+  let resizeTimer=null;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(data && !hasDialog())render();},150);});
   for(const target of [grid,window])target.addEventListener('scroll',()=>{if(!hasDialog())saveState();},{passive:true});
-  loaded=saved.url===location.search?Math.max(20,Number(saved.loaded)||20):20;
-  load();
-  setInterval(()=>{if(!document.hidden && !hasDialog() && !debounce)load({quiet:true});},15000);
+  function updateTile() {
+    $('yt-guide-body').hidden=minimised;
+    $('yt-guide-minimise').textContent=minimised?'+':'−';
+    $('yt-guide-minimise').setAttribute('aria-expanded',String(!minimised));
+    $('yt-guide-minimise').setAttribute('aria-label',minimised?'Expand guide':'Minimise guide');
+    $('yt-guide-minimise').title=minimised?'Expand guide':'Minimise guide';
+    if(!started)$('yt-channel-count').textContent='Saved guide';
+    $('yt-manual-load').hidden=started;$('yt-guide-content').hidden=!started;
+  }
+  $('yt-load-guide').onclick=()=>{started=true;updateTile();load();};
+  $('yt-guide-minimise').onclick=()=>{const collapse=!minimised;if(collapse && root.classList.contains('yt-fullscreen'))maximise(false);minimised=collapse;updateTile();if(!minimised && started && !data)load();};
+  function maximise(on) {
+    root.classList.toggle('yt-fullscreen',on);document.body.classList.toggle('guide-is-fullscreen',on);
+    $('yt-guide-maximise').setAttribute('aria-pressed',String(on));
+    $('yt-guide-maximise').setAttribute('aria-label',on?'Restore guide size':'Maximise guide');
+    $('yt-guide-maximise').title=on?'Restore guide size':'Maximise guide';
+    if(on){minimised=false;updateTile();} if(data)render();
+  }
+  $('yt-guide-maximise').onclick=()=>maximise(!root.classList.contains('yt-fullscreen'));
+  document.addEventListener('keydown',event=>{if(event.key==='Escape' && !hasDialog() && root.classList.contains('yt-fullscreen')){maximise(false);$('yt-guide-maximise').focus();}});
+  updateTile();
+  const bootstrap=JSON.parse($('yt-guide-bootstrap').textContent || 'null');
+  if(started && bootstrap) {data=bootstrap;snapshot=JSON.stringify({...data,server_time:''});render();}
+  else if(started && !minimised)load();
+  setInterval(()=>{if(started && !minimised && !document.hidden && !hasDialog() && !debounce)load({quiet:true});},60000);
 })();

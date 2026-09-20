@@ -4,6 +4,20 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.9
+
+- Enable upload estimates from saved channel history, with labelled time windows, supporting observation counts and qualitative confidence. Keep genuine YouTube announcements separate. Predictions never create video IDs or download jobs.
+- Validate daily, weekday, fortnightly and calendar-month patterns against later historical observations. Separate known content types and suppress sparse, irregular, stale or changed schedules. Show estimates only within the next 14 days.
+- Show all enabled guide channels and all uploads in the selected period. Remove More channels and collapsed +N uploads controls. Include the initial catalogue in the page response and read further navigation from SQLite.
+- Index automatically after Google is connected and channels are enabled. Refresh channel metadata and recent uploads daily at a configurable time (default 04:00, Europe/London). Preserve checkpoints, a daily API allowance, retries and historical metadata renewal across restarts.
+- Move guide controls to Settings > Guide. Cache video views, likes and comments alongside publication data. Guide browsing and its info popup do not call the YouTube Data API.
+- Replace hover details with click-to-open video info, plus a separate play icon for the existing player. Channel names and avatars use the shared channel popup, including inside guide details. Preserve the existing site-wide popup links.
+- Add a dashboard Guide tile with minimise, full-screen maximise, visibility, auto-load and position settings under Settings > Dashboard.
+- Move Single Download to a download icon in Latest Downloaded. Simplify the URL popup and accept supported HTTP/HTTPS sites through yt-dlp without a YouTube-only hostname restriction.
+- Keep non-YouTube provider identities, thumbnails and NFO labels separate. Add a short source identifier to non-YouTube filenames to avoid collisions between generic extractor IDs. Reuse the media popup for authenticated local playback of completed files; support seeking and never serve partial files or paths outside the media root. Keep YouTube cookie retries scoped to YouTube.
+- Move Favourites into Discover. Place Settings immediately before Log out and remove the account name from that button. Use a hamburger menu on mobile and tablets.
+- Preserve completed-only Latest Downloaded, active processing in Current Downloads, Activity thumbnails/popups, sortable subscriptions, Shorts exclusions, retention protection and Emby release dates.
+
 ## v3.0.8
 
 - Click any subscription column heading to sort in both directions: Channel, Enabled, Range, Media Profile, Cut-off, Disk usage, Error and Save / Actions.

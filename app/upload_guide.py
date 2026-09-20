@@ -14,9 +14,10 @@ import unicodedata
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from publication_metadata import exact_timestamp
+from guide_forecasts import forecast_events
 
 UTC = timezone.utc
-VIDEO_PARTS = 'snippet,contentDetails,status,liveStreamingDetails'
+VIDEO_PARTS = 'snippet,contentDetails,status,liveStreamingDetails,statistics'
 
 
 def now():
@@ -127,16 +128,61 @@ def init_guide_db(db):
         ''')
         if 'channel_refresh_requested' not in {r[1] for r in conn.execute('PRAGMA table_info(guide_sync)')}:
             conn.execute('ALTER TABLE guide_sync ADD COLUMN channel_refresh_requested INTEGER NOT NULL DEFAULT 0')
+        for table, name, declaration in (
+            ('guide_videos', 'view_count', 'INTEGER'), ('guide_videos', 'like_count', 'INTEGER'),
+            ('guide_videos', 'comment_count', 'INTEGER'), ('guide_predictions', 'details', 'TEXT'),
+            ('guide_runtime', 'scheduled_at', "TEXT NOT NULL DEFAULT ''"),
+            ('guide_runtime', 'forecast_revision', "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if name not in {r[1] for r in conn.execute(f'PRAGMA table_info({table})')}:
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {declaration}')
+
 
 
 class ForecastProvider:
-    """Separate permission dependency. No API-derived forecasts run in v3.0.7."""
-    @staticmethod
-    def status():
-        return {'enabled': False, 'reason': 'Forecasts await confirmation of YouTube API permission.'}
+    def __init__(self, app, timezone_name):
+        self.app, self.timezone_name = app, timezone_name
 
-    def events(self, *args, **kwargs):
-        return []
+    def status(self):
+        enabled = self.app.setting_bool('guide_predictions_enabled', True)
+        return {'enabled': enabled, 'reason': ('Estimates use saved upload patterns. Channels without enough reliable history have no forecast.'
+                if enabled else 'Upload estimates are switched off in Settings > Guide.')}
+
+    def rebuild(self):
+        with self.app.db() as conn:
+            conn.execute('DELETE FROM guide_predictions')
+            if not self.status()['enabled']:
+                return
+            channels = conn.execute("SELECT s.channel_id,g.oldest_covered_at,g.initialised FROM subscriptions s JOIN guide_sync g USING(channel_id) WHERE s.active=1 AND s.download_enabled=1").fetchall()
+            for channel in channels:
+                if not channel['initialised']:
+                    continue
+                records = [dict(r) for r in conn.execute("SELECT * FROM guide_videos WHERE channel_id=? AND availability IN ('public','unlisted') AND metadata_checked_at>?", (channel['channel_id'], stamp(now()-timedelta(days=30))))]
+                for item in forecast_events(channel['channel_id'], records, now(), self.timezone_name()):
+                    conn.execute('INSERT INTO guide_predictions(prediction_id,channel_id,provider,window_start,window_end,explanation,created_at,expires_at,details) VALUES(?,?,?,?,?,?,?,?,?)',
+                        (item['id'], channel['channel_id'], 'calendar-v1', stamp(datetime.fromisoformat(item['window_start'])), stamp(datetime.fromisoformat(item['window_end'])), item['explanation'], stamp(), stamp(datetime.fromisoformat(item['window_end'])), json.dumps(item)))
+
+    def events(self, conn, channel_id, window, include_shorts, include_live):
+        if not self.status()['enabled']:
+            return []
+        items = [json.loads(r['details']) for r in conn.execute('SELECT details FROM guide_predictions WHERE channel_id=? AND window_start<? AND window_end>? AND expires_at>?', (channel_id, window['end'], window['start'], stamp())) if r['details']]
+        known = [dict(r) for r in conn.execute('SELECT published_at,scheduled_start_at,broadcast_state,classification FROM guide_videos WHERE channel_id=? AND metadata_checked_at>?', (channel_id, stamp(now()-timedelta(days=30))))]
+        result = []
+        for item in items:
+            if (not include_shorts and item['classification']=='short') or (not include_live and item['classification']=='livestream'):
+                continue
+            moment = datetime.fromisoformat(item['event_at'])
+            if not (datetime.fromisoformat(window['start']) <= moment < datetime.fromisoformat(window['end'])):
+                continue
+            duplicate = False
+            for video in known:
+                value = video['scheduled_start_at'] if video['broadcast_state']=='upcoming' else video['published_at']
+                if value and video['classification']==item['classification'] and abs((datetime.fromisoformat(value)-moment).total_seconds()) <= 3*3600:
+                    duplicate = True
+                    break
+            if not duplicate:
+                result.append(item)
+        return result
 
 
 class GuidePaused(Exception):
@@ -147,7 +193,7 @@ class UploadGuide:
     def __init__(self, app):
         self.app = app
         self.lock = threading.Lock()
-        self.forecasts = ForecastProvider()
+        self.forecasts = ForecastProvider(app, self.timezone_name)
         self.budget_left = 0
 
     def timezone_name(self):
@@ -257,6 +303,9 @@ class UploadGuide:
                   (vid, channel, title, description, thumb, published, day or None, 'exact' if published else 'date' if day else 'unknown',
                    scheduled, actual, ended, duration_seconds(details.get('duration')), availability, int(status.get('embeddable', True)),
                    state, classification, stamp(), stamp()))
+                stats = record.get('statistics') or {}
+                numbers = [int(str(stats[k])) if str(stats.get(k, '')).isdigit() else None for k in ('viewCount', 'likeCount', 'commentCount')]
+                conn.execute('UPDATE guide_videos SET view_count=?,like_count=?,comment_count=? WHERE video_id=?', (*numbers, vid))
                 saved.append(vid)
         return saved
 
@@ -332,6 +381,20 @@ class UploadGuide:
         if old != error:
             self.app.log_activity('guide', 'Upload guide refresh paused', error, 'warning', channel_id)
 
+    def scheduled_boundary(self):
+        zone = ZoneInfo(self.timezone_name())
+        clock = self.app.get_setting('guide_refresh_time', '04:00')
+        try:
+            hour, minute = map(int, clock.split(':'))
+            scheduled = datetime.combine(now().astimezone(zone).date(), time(hour, minute), zone)
+        except (ValueError, TypeError):
+            scheduled = datetime.combine(now().astimezone(zone).date(), time(4), zone)
+        return stamp(scheduled if scheduled <= now() else scheduled-timedelta(days=1))
+
+    def next_refresh(self):
+        last = datetime.fromisoformat(self.scheduled_boundary()).astimezone(ZoneInfo(self.timezone_name()))
+        return stamp(last+timedelta(days=1))
+
     def tick(self):
         if not self.lock.acquire(blocking=False):
             return False
@@ -350,6 +413,14 @@ class UploadGuide:
             ids = self.enabled_ids()
             if not ids:
                 return False
+            # A restart resumes incomplete indexing. The stored checkpoint stops
+            # completed catalogues being re-fetched every time a container starts.
+            boundary = self.scheduled_boundary()
+            if runtime['scheduled_at'] < boundary:
+                with self.app.db() as conn:
+                    conn.execute('UPDATE guide_sync SET refresh_requested=1,channel_refresh_requested=1 WHERE channel_id IN (SELECT channel_id FROM subscriptions WHERE active=1 AND download_enabled=1)')
+                    conn.execute('UPDATE guide_runtime SET scheduled_at=? WHERE id=1', (boundary,))
+
             creds = self.app.load_credentials()
             if not creds:
                 with self.app.db() as conn:
@@ -374,7 +445,7 @@ class UploadGuide:
                 stale_videos = [r[0] for r in conn.execute('''SELECT v.video_id FROM guide_videos v
                    JOIN subscriptions s ON s.channel_id=v.channel_id WHERE s.active=1 AND s.download_enabled=1
                    AND (v.metadata_checked_at<? OR (v.broadcast_state IN ('upcoming','live') AND v.metadata_checked_at<?))
-                   ORDER BY v.metadata_checked_at LIMIT 50''', (stamp(now()-timedelta(days=25)), stamp(now()-timedelta(minutes=15))))]
+                   ORDER BY v.metadata_checked_at LIMIT 50''', (stamp(now()-timedelta(days=25)), self.scheduled_boundary()))]
             self._videos(creds, stale_videos)
             with self.app.db() as conn:
                 channels = [dict(r) for r in conn.execute('''SELECT c.*,s.* FROM guide_channels c JOIN guide_sync s USING(channel_id)
@@ -384,7 +455,7 @@ class UploadGuide:
             for channel in channels:
                 if self.budget_left < 2:
                     break
-                if channel['refresh_requested'] or not channel['initialised'] or (channel['recent_checked_at'] or '') < stamp(now()-timedelta(hours=2)):
+                if channel['refresh_requested'] or not channel['initialised'] or (channel['recent_checked_at'] or '') < self.scheduled_boundary():
                     channel_id = channel['channel_id']
                     self._page(creds, channel, 'recent')
             with self.app.db() as conn:
@@ -400,6 +471,13 @@ class UploadGuide:
                     continue
                 channel_id = channel['channel_id']
                 self._page(creds, channel, 'backfill')
+            with self.app.db() as conn:
+                updated = dict(conn.execute('SELECT * FROM guide_runtime WHERE id=1').fetchone())
+            revision = str(updated['last_success_at']) + ':' + boundary + ':' + str(self.forecasts.status()['enabled']) + ':' + self.timezone_name()
+            if updated['forecast_revision'] != revision:
+                self.forecasts.rebuild()
+                with self.app.db() as conn:
+                    conn.execute('UPDATE guide_runtime SET forecast_revision=? WHERE id=1', (revision,))
             return True
         except GuidePaused as exc:
             if str(exc) == 'Daily guide allowance reached':
@@ -428,12 +506,18 @@ class UploadGuide:
                 'start': stamp(datetime.combine(start, time(), zone)), 'end': stamp(datetime.combine(end, time(), zone)),
                 'today': today.isoformat(), 'timezone': str(zone)}
 
+    def initial_payload(self, args):
+        try:
+            return self.read(args)
+        except (ValueError, OverflowError):
+            return None
+
     def read(self, args):
         window = self.window(args)
         minimum = stamp(now()-timedelta(days=30))
         mode = args.get('sort', 'title')
         offset = max(0, int(args.get('offset', 0)))
-        limit = min(100, max(1, int(args.get('limit', 20))))
+        limit = min(100, max(1, int(args['limit']))) if args.get('limit') else None
         terms = plain(args.get('search', '')).casefold().split()
         kind = args.get('filter', 'all')
         favourite_ids = self.app.favourite_channel_ids()
@@ -476,7 +560,7 @@ class UploadGuide:
         revision = hashlib.sha256(json.dumps([(c['channel_id'], c['favourite'], c['profile_id'], c['status'], c['storage_bytes']) for c in channels]).encode()).hexdigest()[:20]
         total = len(channels)
         selected_channel = args.get('channel')
-        channels = [c for c in channels if c['channel_id'] == selected_channel] if selected_channel else channels[offset:offset+limit]
+        channels = [c for c in channels if c['channel_id'] == selected_channel] if selected_channel else channels[offset:offset+limit if limit else None]
         completed = {r['video_id']: r for r in self.app.completed_video_inventory().get('rows', []) if r.get('video_id')}
         include_shorts = self.app.setting_bool('downloader_include_shorts', False)
         include_live = self.app.setting_bool('downloader_include_livestreams', True)
@@ -498,11 +582,15 @@ class UploadGuide:
                     sql += " AND broadcast_state!='upcoming'"
                 elif kind == 'expected':
                     sql += ' AND 0'
-                sql += " ORDER BY COALESCE(CASE WHEN broadcast_state='upcoming' THEN scheduled_start_at ELSE published_at END,publication_date),video_id LIMIT 501 OFFSET ?"
-                records = [dict(r) for r in conn.execute(sql, (*values, event_offset))]
-                channel['events_next_offset'] = event_offset+500 if len(records)>500 else None
-                for item in records[:500]:
+                sql += " ORDER BY COALESCE(CASE WHEN broadcast_state='upcoming' THEN scheduled_start_at ELSE published_at END,publication_date),video_id"
+                records = [dict(r) for r in conn.execute(sql, values)]
+                channel['events_next_offset'] = None
+                for item in records:
                     channel['events'].append(self.event_item(item, channel, completed))
+                if kind != 'published':
+                    channel['events'].extend(self.forecasts.events(conn, channel['channel_id'], window, include_shorts, include_live))
+                channel['events'].sort(key=lambda e:e.get('event_at') or e.get('publication_date') or '')
+                channel['forecast_status'] = ('Estimates available' if any(e['state']=='expected' for e in channel['events']) else 'No reliable pattern or not enough history')
             selected = conn.execute('SELECT * FROM guide_videos WHERE video_id=? AND metadata_checked_at>?',
                                     (args.get('selected', ''), minimum)).fetchone()
             if selected and selected['channel_id'] in enabled_channels and selected['availability'] in ('public', 'unlisted'):
@@ -512,17 +600,17 @@ class UploadGuide:
                     selection = {'channel': {k: v for k, v in channel.items() if k != 'events'},
                                  'item': self.event_item(dict(selected), channel, completed)}
         return {'ok': True, 'window': window, 'channels': channels, 'total_channels': total, 'enabled_channels': len(rows),
-                'selection': selection, 'next_offset': offset+limit if offset+limit<total else None, 'revision': revision,
+                'selection': selection, 'next_offset': offset+limit if limit and offset+limit<total else None, 'revision': revision,
                 'forecasts': self.forecasts.status(), 'coverage': {'history': self.app.get_setting('guide_history', 'all'),
                 'error': runtime['last_error'], 'retry_at': runtime['retry_at'], 'last_success_at': runtime['last_success_at'],
-                'running': runtime['lease_until']>stamp(), 'daily_calls': runtime['calls']}, 'server_time': stamp()}
+                'running': runtime['lease_until']>stamp(), 'daily_calls': runtime['calls'], 'next_refresh_at': self.next_refresh()}, 'server_time': stamp()}
 
     def event_item(self, item, channel, completed):
         event = {**item, 'id': item['video_id'], 'channel_title': channel['title'],
                  'video_url': 'https://www.youtube.com/watch?v='+item['video_id'],
                  'event_at': item['scheduled_start_at'] if item['broadcast_state']=='upcoming' else item['published_at'],
                  'state': 'scheduled' if item['broadcast_state']=='upcoming' else 'published',
-                 'downloaded': False, 'is_short': item['classification']=='short'}
+                 'downloaded': False, 'is_short': item['classification']=='short', 'metadata_rich': True, 'channel_thumbnail_url': channel['thumbnail_url']}
         local = completed.get(item['video_id'])
         if local and self.app.is_finished_media_file(Path(str(local.get('output_path') or '')), video_only=True):
             event['downloaded'] = True

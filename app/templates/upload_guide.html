@@ -1,14 +1,8 @@
-<section id="ytsd-guide" data-user-id="{{ current_user.id }}" data-timezone="{{ guide_timezone }}" aria-label="Upload guide">
-  <div class="yt-heading"><h1>Upload guide</h1><div class="yt-heading-right"><span class="yt-online"></span><span id="yt-channel-count">Loading enabled channels…</span>{% if is_admin %}<button id="yt-refresh" class="yt-control" type="button">Refresh</button>{% endif %}</div></div>
-  <section class="yt-detail" aria-label="Selected programme">
-    <div class="yt-detail-copy">
-      <div class="yt-detail-meta"><span class="yt-label" id="yt-detail-status" hidden></span><button type="button" class="yt-detail-channel-button" id="yt-detail-channel" hidden></button><span id="yt-detail-time"></span></div>
-      <h2><button class="yt-detail-title-button" type="button" id="yt-detail-title" disabled>Select an upload</button></h2>
-      <p class="yt-description" id="yt-detail-description">Browse published videos and announced schedules from your enabled channels.</p>
-      <div class="yt-detail-bottom" id="yt-detail-extra"></div>
-    </div>
-    <button class="yt-thumbnail" id="yt-thumbnail" type="button" disabled aria-label="Play selected video"><span class="yt-no-image">No upload selected</span></button>
-  </section>
+<section id="ytsd-guide" data-user-id="{{ current_user.id }}" data-timezone="{{ guide_timezone }}" data-dashboard="{{ 'false' if guide_view else 'true' }}" data-autoload="{{ 'true' if guide_view or page_view.autoload_guide else 'false' }}" data-minimised="{{ 'true' if not guide_view and page_view.min_guide else 'false' }}" aria-label="Upload guide">
+  <div class="yt-heading"><h2>Upload guide</h2><div class="yt-heading-right"><span class="yt-online"></span><span id="yt-channel-count">Loading enabled channels…</span>{% if is_admin %}<button id="yt-refresh" class="yt-control" type="button">Refresh</button>{% endif %}<button type="button" id="yt-guide-maximise" class="yt-control yt-icon" aria-label="Maximise guide" title="Maximise guide" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button><button type="button" id="yt-guide-minimise" class="yt-control yt-icon" aria-label="Minimise guide" title="Minimise guide" aria-expanded="true" aria-controls="yt-guide-body">−</button></div></div>
+  <div id="yt-guide-body">
+  <div id="yt-manual-load" hidden><button type="button" class="yt-control" id="yt-load-guide">Load saved guide</button></div>
+  <div id="yt-guide-content">
   <div class="yt-toolbar">
     <div class="yt-date-controls"><button class="yt-control" id="yt-prev" type="button">Previous</button><button class="yt-control" id="yt-today" type="button">Today</button><button class="yt-control" id="yt-next" type="button">Next</button><input id="yt-date-picker" type="date" aria-label="Guide date"><span class="yt-date-title" id="yt-date-title"></span></div>
     <div class="yt-zoom" role="group" aria-label="Guide time scale"><button type="button" data-zoom="day" aria-pressed="false">Day</button><button type="button" data-zoom="week" aria-pressed="true">Week</button><button type="button" data-zoom="month" aria-pressed="false">Month</button></div>
@@ -17,17 +11,19 @@
   <div class="yt-filterbar"><div class="yt-filter-buttons" role="group" aria-label="Upload status"><button type="button" data-filter="all" aria-pressed="true">All uploads</button><button type="button" data-filter="published" aria-pressed="false">Published</button><button type="button" data-filter="expected" aria-pressed="false">Expected</button></div><label class="yt-search"><input id="yt-channel-search" type="search" aria-label="Search channel names, descriptions or video titles" placeholder="Search your channels…"></label></div>
   <div class="yt-grid" id="yt-guide-grid" aria-label="Channel uploads" tabindex="0"><div class="yt-empty">Loading the saved catalogue…</div></div>
   <div class="yt-guide-state" id="yt-guide-state" role="status"></div>
-  <button id="yt-load-more" type="button" class="yt-control" hidden>More channels</button>
   <footer class="yt-footer"><div class="yt-legend"><span><b class="yt-key"></b>Published</span><span><b class="yt-key downloaded"></b>Downloaded</span><span><b class="yt-key scheduled"></b>Scheduled</span><span><b class="yt-key expected"></b>Expected upload</span><span><b class="yt-key today"></b>Today</span></div><span id="yt-zone-label"></span></footer>
-  {% if is_admin %}
-  <details class="yt-settings"><summary>Guide settings</summary>
-    <form method="post" action="/settings/guide"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-      <label>Timezone<input name="guide_timezone" type="text" value="{{ guide_timezone }}" required placeholder="Europe/London"></label>
-      <label>Metadata history<select name="guide_history"><option value="all" {% if guide_history == 'all' %}selected{% endif %}>All available</option><option value="year" {% if guide_history == 'year' %}selected{% endif %}>Past year</option></select></label>
-      <label>Daily guide API allowance<input name="guide_daily_budget" type="number" min="50" max="10000" value="{{ guide_daily_budget }}" required></label>
-      <button class="yt-control" type="submit">Save</button>
-    </form>
-    <p class="yt-notice">History indexing runs in the background. Guide settings do not change download ranges or start downloads.</p>
-  </details>
-  {% endif %}
+  </div></div>
+  <dialog id="yt-guide-info" aria-labelledby="yt-detail-title">
+    <div class="modal-head"><h2>Video info</h2><button type="button" class="modal-close" id="yt-info-close" aria-label="Close video info">×</button></div>
+  <section class="yt-detail" aria-label="Selected programme">
+    <div class="yt-detail-copy">
+      <div class="yt-detail-meta"><span class="yt-label" id="yt-detail-status" hidden></span><button type="button" class="yt-detail-channel-button" id="yt-detail-channel" hidden></button><span id="yt-detail-time"></span></div>
+      <h2 id="yt-detail-title">Select an upload</h2>
+      <p class="yt-description" id="yt-detail-description">Browse published videos and announced schedules from your enabled channels.</p>
+      <div class="yt-detail-bottom" id="yt-detail-extra"></div>
+    </div>
+    <button class="yt-thumbnail" id="yt-thumbnail" type="button" disabled aria-label="Play selected video"><span class="yt-no-image">No upload selected</span></button>
+  </section>
+  </dialog>
+  <script type="application/json" id="yt-guide-bootstrap">{{ guide_bootstrap|tojson }}</script>
 </section>
