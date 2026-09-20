@@ -5955,7 +5955,7 @@ def _v3_download_with_auth_retry(job, ydl_opts):
 
 def run_download_job(job_id):
     job = download_job_row(job_id)
-    if not job:
+    if not job or str(job.get("status") or "") != "queued":
         return
 
     source_type = str(job.get("source_type") or "")
@@ -7047,6 +7047,39 @@ def _retention_media_size(media):
         except (TypeError, ValueError):
             total = 0
     return max(0, total)
+
+
+def set_pinchflat_container_power(running):
+    return {
+        "exists": True,
+        "running": True,
+        "status": "running",
+        "control_available": False,
+        "worker_concurrency": setting_int("downloader_worker_concurrency", 1, 1, 8),
+    }
+
+
+def pinchflat_container_logs(tail=250):
+    try:
+        limit = max(20, min(int(tail or 250), 1000))
+    except (TypeError, ValueError):
+        limit = 250
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT created_at, level, category, title, message
+            FROM activity
+            ORDER BY id DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    lines = []
+    for row in reversed(rows):
+        lines.append(
+            f"{row['created_at']} [{str(row['level'] or 'info').upper()}] "
+            f"{row['category']}: {row['title']} - {row['message']}"
+        )
+    return "\n".join(lines)
 
 
 def pinchflat_retention_inventory(channel_id=""):
@@ -14154,6 +14187,48 @@ def _v3_queue_entry(sub, entry, redownload=False):
     return bool(created)
 
 
+def _v3_enrich_flat_entry(entry):
+    """Resolve a flat playlist entry only when its publication date is missing."""
+    entry = dict(entry or {})
+    if _v3_parse_entry_date(entry):
+        return entry
+    video_id = str(entry.get("id") or entry.get("video_id") or "").strip()
+    video_url = str(entry.get("webpage_url") or entry.get("url") or "").strip()
+    if not video_url.startswith("http") and video_id:
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+    if not video_url:
+        return entry
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "socket_timeout": 20,
+    }
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            resolved = ydl.extract_info(video_url, download=False) or {}
+    except Exception as exc:
+        if setting_bool("downloader_auth_retry", True) and should_retry_with_cookies(exc):
+            try:
+                with yt_dlp.YoutubeDL(_v3_authenticated_options(options)) as ydl:
+                    resolved = ydl.extract_info(video_url, download=False) or {}
+            except Exception:
+                return entry
+        else:
+            return entry
+
+    merged = dict(entry)
+    for key in (
+        "id", "title", "webpage_url", "url", "upload_date", "timestamp",
+        "release_timestamp", "channel", "channel_id", "uploader",
+    ):
+        if resolved.get(key) not in (None, ""):
+            merged[key] = resolved.get(key)
+    return merged
+
+
 def v3_scan_subscription(channel_id, deep=False, redownload=False):
     with db() as conn:
         row = conn.execute(
@@ -14206,17 +14281,26 @@ def v3_scan_subscription(channel_id, deep=False, redownload=False):
     queued = 0
     cutoff = date.fromisoformat(subscription_cutoff(sub))
     for entry in entries:
+        if deep and not _v3_parse_entry_date(entry):
+            entry = _v3_enrich_flat_entry(entry)
         entry_date = _v3_parse_entry_date(entry)
         # Channel playlists are newest first. Once a dated entry is older than
         # the cutoff during a deep scan there is no value walking further back.
         if deep and entry_date and entry_date < cutoff:
             break
+        # For a deep historical scan, do not queue an entry whose date still
+        # cannot be established. This prevents a flat 500-item playlist from
+        # bypassing a "Today" or "This week" cutoff.
+        if deep and not entry_date:
+            continue
         if _v3_queue_entry(sub, entry, redownload=redownload):
             queued += 1
     return {"found": len(entries), "queued": queued}
 
 
 def enqueue_subscription_scan(channel_id, deep=False, redownload=False):
+    if setting_bool("pinchflat_task_block_enabled", False):
+        return None, False
     with db() as conn:
         existing = conn.execute(
             """
@@ -14723,10 +14807,7 @@ def pinchflat_delete_all_tasks():
             "UPDATE subscription_scan_jobs SET status='cancelled', finished_at=? WHERE status IN ('queued','running')",
             (now_iso(),),
         ).rowcount
-        downloads = conn.execute(
-            "UPDATE downloads SET status='cancelled', phase='Cancelled' WHERE status='queued' AND source_type LIKE 'subscription%'"
-        ).rowcount
-    return {"cancelled": int(scan or 0) + int(downloads or 0), "deleted": 0}
+    return {"cancelled": int(scan or 0), "deleted": 0}
 
 
 def pinchflat_resume_all_tasks():
@@ -15849,7 +15930,7 @@ def save_default_history():
 
 @app.post("/subscriptions/<channel_id>/save")
 def save_subscription_row(channel_id):
-    """Save one source. Enabled is authoritative for Pinchflat membership."""
+    """Save one source. Enabled is authoritative for native subscription downloads."""
     ajax = is_ajax_request()
 
     mode = request.form.get(
@@ -16002,11 +16083,11 @@ def save_subscription_row(channel_id):
             )
         elif enabled:
             message = (
-                f"{current['title']} saved and enabled in Pinchflat."
+                f"{current['title']} saved and enabled in the downloader."
             )
         else:
             message = (
-                f"{current['title']} saved and removed from Pinchflat. "
+                f"{current['title']} saved and disabled in the downloader. "
                 "Existing downloaded files were kept."
             )
 
@@ -16142,12 +16223,12 @@ def save_subscription_history(channel_id):
                 media_profile_id=subscription_media_profile_id(row),
             )
             flash(
-                f"Source download range saved and Pinchflat updated to cutoff {cutoff}.",
+                f"Source download range saved with cutoff {cutoff}.",
                 "success",
             )
         except Exception as exc:
             flash(
-                "The local range was saved, but Pinchflat could not be updated: "
+                "The local range was saved, but the downloader could not be updated: "
                 f"{exc}",
                 "error",
             )
@@ -16207,7 +16288,7 @@ def save_subscription_download(channel_id):
             )
             flash(
                 f"{row['title']} is now "
-                f"{'enabled' if enabled else 'disabled'} in Pinchflat.",
+                f"{'enabled' if enabled else 'disabled'} in the downloader.",
                 "success",
             )
         except Exception as exc:
@@ -17251,14 +17332,14 @@ def save_subscription_profile(channel_id):
                 download_enabled=subscription_download_enabled(row),
                 media_profile_id=profile_id or effective_media_profile_id(),
             )
-            flash("Media Profile updated in Pinchflat.", "success")
+            flash("Download profile updated.", "success")
         except Exception as exc:
             with db() as conn:
                 conn.execute(
                     "UPDATE subscriptions SET last_error = ? WHERE channel_id = ?",
                     (str(exc)[:1000], channel_id),
                 )
-            flash(f"Profile saved locally, but Pinchflat update failed: {exc}", "error")
+            flash(f"Profile saved locally, but downloader update failed: {exc}", "error")
     else:
         flash("Media Profile selection saved.", "success")
 
@@ -17293,7 +17374,7 @@ def retry_subscription(channel_id):
                 (channel_id,),
             )
         flash(
-            f"Retried {row_dict['title']}. Pinchflat state: {result.get('state', 'updated')}.",
+            f"Retried {row_dict['title']}. Downloader state: {result.get('state', 'updated')}.",
             "success",
         )
     except Exception as exc:
@@ -17632,7 +17713,7 @@ def channel_details_api(channel_id):
             "download_enabled": bool(item.get("download_enabled")),
             "pinchflat_added": bool(item.get("pinchflat_added")),
             "pinchflat_source_id": str(source_id or ""),
-            "pinchflat_source_url": f"{PINCHFLAT_URL}/sources/{source_id}" if source_id else "",
+            "pinchflat_source_url": "",
             "ui_status": item.get("ui_status") or "",
             "cutoff": item.get("cutoff") or "",
             "history_label": item.get("history_label") or "",
