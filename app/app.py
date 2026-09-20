@@ -15,6 +15,7 @@ import subprocess
 import sqlite3
 import struct
 import threading
+import tempfile
 import xml.etree.ElementTree as ET
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -47,7 +48,7 @@ from downloader_auth import (
     test_cookie_authentication,
 )
 
-VERSION = "3.0.2"
+VERSION = "3.0.3"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -454,7 +455,8 @@ def refresh_dashboard_preloads(force_storage=False):
                 except Exception:
                     pass
                 try:
-                    youtube_latest_subscription_videos(limit=36, force=False)
+                    if setting_bool("page_load_latest_videos", False):
+                        youtube_latest_subscription_videos(limit=36, force=False)
                 except Exception:
                     pass
         persist_dashboard_cache()
@@ -906,7 +908,7 @@ def init_db():
             # Page View defaults
             "page_load_summary": "1",
             "page_load_pinchflat_downloads": "1",
-            "page_load_latest_videos": "1",
+            "page_load_latest_videos": "0",
             "page_load_subscriptions": "1",
 
             "page_min_pinchflat_downloads": "1",
@@ -1026,6 +1028,14 @@ def init_v3_db():
                 END
             """
         )
+
+
+def init_v303_defaults():
+    with db() as conn:
+        migrated = conn.execute("SELECT value FROM settings WHERE key='v303_dashboard_defaults'").fetchone()
+        if not migrated:
+            conn.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('page_load_latest_videos','0')")
+            conn.execute("INSERT INTO settings(key,value) VALUES ('v303_dashboard_defaults','1')")
 
 
 def now_iso():
@@ -5496,7 +5506,7 @@ def single_download_file_exists(row):
         return False
 
     path = Path(raw_path)
-    if path.exists() and path.is_file():
+    if is_finished_media_file(path):
         return True
 
     # Some yt-dlp post-processors change the final extension after the path was
@@ -5507,7 +5517,7 @@ def single_download_file_exists(row):
     if video_id and parent.exists() and parent.is_dir():
         try:
             return any(
-                child.is_file() and video_id in child.name
+                is_finished_media_file(child) and f"[{video_id}]" in child.name
                 for child in parent.iterdir()
             )
         except OSError:
@@ -5679,6 +5689,9 @@ def update_download_job(job_id, **values):
             f"UPDATE downloads SET {assignments} WHERE job_id = ?",
             params,
         )
+    if values.get("status") in {"completed", "failed", "retention_deleted"}:
+        invalidate_video_inventory()
+
 
 
 def remove_playlist_item_from_youtube(playlist_item_id):
@@ -5703,6 +5716,14 @@ def _download_progress_hook(job_id, progress_ceiling=100.0):
 
     def hook(data):
         status = data.get("status")
+        info = data.get("info_dict") or {}
+        identity = {
+            key: value for key, value in {
+                "video_id": info.get("id"), "title": info.get("title"),
+                "channel_id": info.get("channel_id"),
+                "channel_title": info.get("channel") or info.get("uploader"),
+            }.items() if value
+        }
         if status == "downloading":
             downloaded = int(data.get("downloaded_bytes") or 0)
             total = int(data.get("total_bytes") or data.get("total_bytes_estimate") or 0)
@@ -5723,16 +5744,18 @@ def _download_progress_hook(job_id, progress_ceiling=100.0):
                 eta=str(eta).strip(),
                 downloaded_bytes=downloaded,
                 total_bytes=total,
+                **identity,
             )
         elif status == "finished":
             update_download_job(
                 job_id,
                 status="processing",
-                phase="Merging and processing media",
+                phase="FFmpeg · merging and processing media",
                 progress=ceiling,
                 speed="",
                 eta="",
                 output_path=data.get("filename") or "",
+                **identity,
             )
     return hook
 
@@ -5743,10 +5766,13 @@ def _download_postprocessor_hook(job_id, progress_ceiling=100.0):
     def hook(data):
         status = str(data.get("status") or "").lower()
         postprocessor = str(data.get("postprocessor") or "").strip()
+        if postprocessor in {"SponsorBlock", "SubtitlesConvertor", "ThumbnailsConvertor"}:
+            update_download_job(job_id, status="downloading", phase=f"Preparing · {postprocessor}")
+            return
         if status in {"started", "processing"}:
             label = "Processing downloaded media"
             if postprocessor:
-                label = f"Processing media · {postprocessor}"
+                label = f"FFmpeg · {postprocessor}" if "ffmpeg" in postprocessor.lower() or postprocessor in {"Merger", "Metadata", "EmbedSubtitle", "EmbedThumbnail"} else f"Processing · {postprocessor}"
             update_download_job(
                 job_id,
                 status="processing",
@@ -5780,23 +5806,22 @@ def _best_thumbnail_url(info):
 
 
 def youtube_channel_artwork(channel_id):
-    """Return authoritative YouTube channel avatar/banner URLs when available."""
+    """Use channel metadata, falling back to the saved subscription avatar."""
     channel_id = str(channel_id or "").strip()
+    artwork = {"thumbnail_url": "", "banner_url": ""}
     if not channel_id:
-        return {"thumbnail_url": "", "banner_url": ""}
+        return artwork
     try:
-        summary = youtube_channel_summary(
-            channel_id,
-            include_videos=False,
-            include_popular=False,
-            force=False,
-        )
-        return {
-            "thumbnail_url": str(summary.get("thumbnail_url") or "").strip(),
-            "banner_url": str(summary.get("banner_url") or "").strip(),
-        }
+        summary = youtube_channel_summary(channel_id, include_videos=False, include_popular=False, force=False)
+        artwork.update({key: str(summary.get(key) or "").strip() for key in artwork})
     except Exception:
-        return {"thumbnail_url": "", "banner_url": ""}
+        pass
+    if not artwork["thumbnail_url"]:
+        with db() as conn:
+            sub = conn.execute("SELECT thumbnail_url FROM subscriptions WHERE channel_id=?", (channel_id,)).fetchone()
+        if sub:
+            artwork["thumbnail_url"] = str(sub["thumbnail_url"] or "").strip()
+    return artwork
 
 
 def _download_image(url):
@@ -5821,6 +5846,18 @@ def _write_jpeg_variant(image, path, size):
     rendered.save(path, format="JPEG", quality=90, optimize=True)
 
 
+def subscription_channel_directory(output_path):
+    path = Path(output_path)
+    try:
+        parts = path.relative_to(DOWNLOAD_ROOT).parts
+        if len(parts) >= 3 and parts[0].casefold() == "shows":
+            return DOWNLOAD_ROOT / parts[0] / parts[1]
+    except ValueError:
+        pass
+    parent = path.parent
+    return parent.parent if parent.name.casefold().startswith("season ") else parent
+
+
 def write_direct_download_series_metadata(
     info,
     output_path,
@@ -5833,8 +5870,8 @@ def write_direct_download_series_metadata(
         return
 
     channel_dir = Path(output_path).parent
-    if channel_root and channel_dir.name.casefold().startswith("season "):
-        channel_dir = channel_dir.parent
+    if channel_root:
+        channel_dir = subscription_channel_directory(output_path)
     channel_dir.mkdir(parents=True, exist_ok=True)
 
     channel_title = (
@@ -5877,37 +5914,33 @@ def write_direct_download_series_metadata(
     if not write_images:
         return
 
-    if channel_root and channel_id:
+    if channel_root:
+        # Subscription artwork must never fall back to the current video thumbnail.
         artwork = youtube_channel_artwork(channel_id)
-        avatar_url = artwork.get("thumbnail_url") or ""
-        banner_url = artwork.get("banner_url") or ""
-
-        # A channel's Emby artwork should represent the channel itself. Previous
-        # V3 builds incorrectly generated fanart/poster/banner from the current
-        # video's thumbnail.
-        avatar = banner = None
+        images = {}
+        errors = []
+        for key in ("thumbnail_url", "banner_url"):
+            try:
+                image = _download_image(artwork.get(key))
+                if image is not None:
+                    images[key] = image
+            except Exception as exc:
+                errors.append(f"{key}: {exc}")
+        avatar = images.get("thumbnail_url")
+        banner = images.get("banner_url")
+        primary = avatar if avatar is not None else banner
         try:
-            avatar = _download_image(avatar_url)
-            banner = _download_image(banner_url)
-            if banner:
-                _write_jpeg_variant(banner, channel_dir / "fanart.jpg", (1920, 1080))
-                _write_jpeg_variant(banner, channel_dir / "banner.jpg", (1920, 480))
-            elif avatar:
-                _write_jpeg_variant(avatar, channel_dir / "fanart.jpg", (1920, 1080))
-                _write_jpeg_variant(avatar, channel_dir / "banner.jpg", (1920, 480))
-            if avatar:
-                _write_jpeg_variant(avatar, channel_dir / "poster.jpg", (1000, 1500))
+            if primary is None:
+                raise RuntimeError("Channel artwork unavailable. Refresh YouTube, then rescan the existing library to retry. " + "; ".join(errors))
+            # Keep the complete channel image visible, including square logos.
+            for filename, size in (("fanart.jpg", (1920, 1080)), ("poster.jpg", (1000, 1500))):
+                rendered = ImageOps.pad(primary, size, method=Image.Resampling.LANCZOS, color=(16, 27, 45))
+                rendered.save(channel_dir / filename, format="JPEG", quality=90, optimize=True)
+                rendered.close()
+            _write_jpeg_variant(banner if banner is not None else primary, channel_dir / "banner.jpg", (1920, 480))
         finally:
-            try:
-                if avatar:
-                    avatar.close()
-            except Exception:
-                pass
-            try:
-                if banner:
-                    banner.close()
-            except Exception:
-                pass
+            for image in images.values():
+                image.close()
         return
 
     # One-time / playlist downloads do not have a persistent subscription
@@ -5988,22 +6021,26 @@ def single_download_ydl_settings():
     }
 
 
-def _probe_single_download_media(path):
+def _probe_download_payload(path):
     result = subprocess.run(
         [
             "ffprobe", "-v", "error",
-            "-show_entries", "stream=codec_type,codec_name:format=duration",
+            "-show_entries", "stream=index,codec_type,codec_name:stream_disposition=attached_pic:format=duration",
             "-of", "json", str(path),
         ],
         capture_output=True, text=True, timeout=30, check=True,
     )
-    payload = json.loads(result.stdout or "{}")
+    return json.loads(result.stdout or "{}")
+
+
+def _probe_single_download_media(path, payload=None):
+    payload = payload if payload is not None else _probe_download_payload(path)
     video = ""
     audio = ""
     for stream in payload.get("streams") or []:
         kind = str(stream.get("codec_type") or "")
         codec = str(stream.get("codec_name") or "").lower()
-        if kind == "video" and not video:
+        if kind == "video" and not video and not (stream.get("disposition") or {}).get("attached_pic"):
             video = codec
         elif kind == "audio" and not audio:
             audio = codec
@@ -6020,42 +6057,25 @@ def _probe_single_download_codecs(path):
 
 
 def resolve_direct_download_output_path(info, ydl, output_dir, current_path=""):
-    """Return the final media file after yt-dlp merging/post-processing."""
-    candidates = [
-        current_path,
-        info.get("filepath"),
-        info.get("_filename"),
-    ]
+    """Resolve an existing final media file without treating an ID as a glob."""
+    candidates = [info.get("filepath"), current_path, info.get("_filename")]
     for requested in info.get("requested_downloads") or []:
         candidates.extend([requested.get("filepath"), requested.get("filename")])
     try:
         candidates.append(ydl.prepare_filename(info))
     except Exception:
         pass
-
-    ignored_suffixes = {".part", ".json", ".jpg", ".jpeg", ".png", ".webp", ".nfo"}
     for candidate in candidates:
-        if not candidate:
-            continue
-        path = Path(str(candidate))
-        if path.exists() and path.is_file() and path.suffix.lower() not in ignored_suffixes:
-            return str(path)
-
+        if candidate and is_finished_media_file(candidate):
+            return str(candidate)
     video_id = str(info.get("id") or "").strip()
     if video_id:
-        matches = []
-        try:
-            for path in Path(output_dir).rglob(f"*[{video_id}]*"):
-                if not path.is_file() or path.suffix.lower() in ignored_suffixes:
-                    continue
-                matches.append(path)
-        except Exception:
-            matches = []
+        # Square brackets in the normal filename are literal characters.
+        matches = [path for path in Path(output_dir).rglob("*")
+                   if f"[{video_id}]" in path.name and is_finished_media_file(path)]
         if matches:
-            matches.sort(key=lambda item: item.stat().st_mtime, reverse=True)
-            return str(matches[0])
-
-    return str(current_path or "")
+            return str(max(matches, key=lambda path: path.stat().st_mtime))
+    return ""
 
 
 def ensure_download_emby_compatibility(
@@ -6069,7 +6089,8 @@ def ensure_download_emby_compatibility(
     if not path.exists() or str(compatibility_profile or "").strip().lower() != "emby_tv":
         return str(path)
 
-    video_codec, audio_codec, duration = _probe_single_download_media(path)
+    probe = _probe_download_payload(path)
+    video_codec, audio_codec, duration = _probe_single_download_media(path, probe)
     video_ok = video_codec == "h264"
     audio_ok = (not audio_codec) or audio_codec == "aac"
     container_ok = path.suffix.lower() == ".mp4"
@@ -6090,8 +6111,9 @@ def ensure_download_emby_compatibility(
         f".{final_path.stem}.compat-{secrets.token_hex(4)}.mp4"
     )
     command = [
-        "ffmpeg", "-y", "-i", str(path),
-        "-map", "0:v:0", "-map", "0:a?",
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(path),
+        "-map", "0:V:0", "-map", "0:a?", "-map", "0:s?",
+        "-c:s", "mov_text",
     ]
 
     if video_ok:
@@ -6109,15 +6131,21 @@ def ensure_download_emby_compatibility(
     else:
         command += ["-c:a", "aac", "-b:a", "192k"]
 
+    # Preserve embedded cover art as an attached picture during conversion.
+    covers = [stream for stream in probe.get("streams", [])
+              if stream.get("codec_type") == "video" and (stream.get("disposition") or {}).get("attached_pic")]
+    for index, stream in enumerate(covers, 1):
+        command += ["-map", f"0:{stream['index']}", f"-c:v:{index}", "copy",
+                    f"-disposition:v:{index}", "attached_pic"]
     command += [
-        "-map_metadata", "0",
+        "-map_metadata", "0", "-map_chapters", "0",
         "-movflags", "+faststart",
         "-progress", "pipe:1",
         "-nostats",
         str(temp_path),
     ]
 
-    converting_phase = (phase_prefix + "Converting for Emby / Smart TV").strip()
+    converting_phase = (phase_prefix + "FFmpeg · converting for Emby / Smart TV").strip()
     if job_id:
         update_download_job(
             job_id,
@@ -6129,11 +6157,12 @@ def ensure_download_emby_compatibility(
         )
 
     process = None
+    stderr_file = tempfile.TemporaryFile(mode="w+t")
     try:
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=stderr_file,
             text=True,
             bufsize=1,
         )
@@ -6158,8 +6187,9 @@ def ensure_download_emby_compatibility(
                 except (TypeError, ValueError):
                     pass
 
-        stderr = process.stderr.read() if process.stderr is not None else ""
         return_code = process.wait(timeout=7200)
+        stderr_file.seek(0)
+        stderr = stderr_file.read()
         if return_code != 0:
             raise RuntimeError(
                 (stderr or f"ffmpeg exited with code {return_code}")[-1800:]
@@ -6191,6 +6221,9 @@ def ensure_download_emby_compatibility(
                 process.kill()
             except Exception:
                 pass
+        if process is not None and process.stdout is not None:
+            process.stdout.close()
+        stderr_file.close()
         if temp_path.exists():
             try:
                 temp_path.unlink()
@@ -6309,13 +6342,6 @@ def run_download_job(job_id):
         ydl_opts.update(single_download_ydl_settings())
     elif subscription_job:
         ydl_opts.update(_v3_profile_ydl_options(job.get("profile_id")))
-        # Subscription files are the long-term Emby library. Keep the sidecars
-        # required for migration/reconciliation even if metadata embedding fails.
-        ydl_opts.update({
-            "writeinfojson": True,
-            "writethumbnail": True,
-            "embedmetadata": True,
-        })
     else:
         ydl_opts.update({
             "format": "bestvideo*+bestaudio/best",
@@ -6342,6 +6368,14 @@ def run_download_job(job_id):
                 output_path = job.get("output_path") or ""
 
         output_path = resolve_direct_download_output_path(info, ydl, output_dir, output_path)
+        if not output_path:
+            raise RuntimeError("The downloader did not produce a final media file.")
+        update_download_job(job_id, status="processing", output_path=output_path,
+                            video_id=info.get("id") or job.get("video_id"),
+                            title=info.get("title") or job.get("title"),
+                            channel_title=info.get("channel") or info.get("uploader") or job.get("channel_title"),
+                            channel_id=info.get("channel_id") or job.get("channel_id"),
+                            phase="Finalising downloaded media", speed="", eta="")
 
         if compatibility_video:
             try:
@@ -6385,27 +6419,6 @@ def run_download_job(job_id):
         )
         published_at = _v3_subscription_info_date(info, job.get("published_at"))
 
-        update_download_job(
-            job_id,
-            video_id=info.get("id") or job.get("video_id"),
-            title=info.get("title") or job.get("title"),
-            channel_title=(
-                info.get("uploader")
-                or info.get("channel")
-                or job.get("channel_title")
-            ),
-            channel_id=resolved_channel_id or None,
-            published_at=published_at or None,
-            status="completed",
-            phase="Completed",
-            progress=100.0,
-            output_path=output_path,
-            finished_at=now_iso(),
-            error=None,
-            failure_code=None,
-            auth_mode=auth_mode,
-        )
-
         if source_type in {"single", "emby_download"} or subscription_job:
             try:
                 if subscription_job and not (
@@ -6414,7 +6427,8 @@ def run_download_job(job_id):
                 ):
                     raise StopIteration
                 write_direct_download_series_metadata(
-                    info,
+                    {**info, "channel_id": resolved_channel_id,
+                     "channel": info.get("channel") or info.get("uploader") or job.get("channel_title")},
                     output_path,
                     write_nfo=(
                         setting_bool("single_download_write_nfo", True)
@@ -6440,6 +6454,27 @@ def run_download_job(job_id):
                     "warning",
                     resolved_channel_id or None,
                 )
+
+        update_download_job(
+            job_id,
+            video_id=info.get("id") or job.get("video_id"),
+            title=info.get("title") or job.get("title"),
+            channel_title=(
+                info.get("uploader")
+                or info.get("channel")
+                or job.get("channel_title")
+            ),
+            channel_id=resolved_channel_id or None,
+            published_at=published_at or None,
+            status="completed",
+            phase="Completed",
+            progress=100.0,
+            output_path=output_path,
+            finished_at=now_iso(),
+            error=None,
+            failure_code=None,
+            auth_mode=auth_mode,
+        )
 
         if job.get("remove_playlist_item") and job.get("playlist_item_id"):
             try:
@@ -7398,26 +7433,72 @@ def pinchflat_container_logs(tail=250):
     return "\n".join(lines)
 
 
-def pinchflat_recent_downloaded_videos(limit=100):
+VIDEO_FILE_EXTENSIONS = {".mp4", ".mkv", ".webm", ".m4v", ".mov", ".avi", ".mpeg", ".mpg", ".ts"}
+AUDIO_FILE_EXTENSIONS = {".m4a", ".mp3", ".opus", ".flac", ".wav", ".ogg", ".aac"}
+
+
+def is_finished_media_file(value, video_only=False):
+    path = Path(str(value or ""))
+    extensions = VIDEO_FILE_EXTENSIONS if video_only else VIDEO_FILE_EXTENSIONS | AUDIO_FILE_EXTENSIONS
+    if path.suffix.lower() not in extensions or path.name.startswith("."):
+        return False
+    if re.search(r"\.(?:f\d+|part|temp|ytdl|compat-[a-f0-9]+)\.", path.name, re.I):
+        return False
+    try:
+        path.resolve().relative_to(DOWNLOAD_ROOT.resolve())
+        return path.is_file() and path.stat().st_size > 0
+    except (OSError, ValueError):
+        return False
+
+
+video_inventory_lock = threading.Lock()
+video_inventory_cache = {"at": 0.0, "data": None}
+
+
+def invalidate_video_inventory():
+    with video_inventory_lock:
+        video_inventory_cache["at"] = 0.0
+        video_inventory_cache["data"] = None
+
+
+def completed_video_inventory(force=False):
+    """Count unique completed video files still on disk, never sidecars or audio."""
+    with video_inventory_lock:
+        if not force and video_inventory_cache["data"] is not None and time.monotonic() - video_inventory_cache["at"] < 5:
+            return video_inventory_cache["data"]
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT d.*, s.channel_url, s.thumbnail_url AS channel_thumbnail_url
+            FROM downloads d LEFT JOIN subscriptions s ON s.channel_id=d.channel_id
+            WHERE d.status='completed' AND COALESCE(d.output_path,'')!=''
+            ORDER BY d.finished_at DESC, d.id DESC
+        """).fetchall()
+    videos, seen, total = [], set(), 0
+    for record in rows:
+        row = dict(record)
+        path = Path(row["output_path"])
+        if row.get("profile_id") == "audio" or not is_finished_media_file(path, video_only=True):
+            continue
+        try:
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            row["file_size"] = path.stat().st_size
+        except OSError:
+            continue
+        seen.add(key)
+        total += row["file_size"]
+        videos.append(row)
+    result = {"rows": videos, "count": len(videos), "bytes": total}
+    with video_inventory_lock:
+        video_inventory_cache.update(at=time.monotonic(), data=result)
+    return result
+
+
+def native_recent_downloaded_videos(limit=100):
     """Compatibility name: return native V3 completed downloads for Discover."""
     limit = max(1, min(int(limit or 100), 500))
-    with db() as conn:
-        rows = [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT d.*, s.channel_url
-                FROM downloads d
-                LEFT JOIN subscriptions s ON s.channel_id=d.channel_id
-                WHERE d.status='completed'
-                  AND COALESCE(d.video_id,'')!=''
-                  AND COALESCE(d.output_path,'')!=''
-                ORDER BY d.finished_at DESC, d.id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        ]
+    rows = [row for row in completed_video_inventory()["rows"] if row.get("video_id")][:limit]
 
     results = []
     for row in rows:
@@ -7438,7 +7519,7 @@ def pinchflat_recent_downloaded_videos(limit=100):
             "channel_url": row.get("channel_url") or (
                 f"https://www.youtube.com/channel/{channel_id}" if channel_id else "https://www.youtube.com"
             ),
-            "channel_thumbnail_url": "",
+            "channel_thumbnail_url": row.get("channel_thumbnail_url") or "",
             "thumbnail_url": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
             "published_at": published,
             "downloaded_at": row.get("finished_at") or "",
@@ -11013,259 +11094,8 @@ def pinchflat_download_overview(queue_limit=100):
 
 
 def pinchflat_recent_downloaded_videos(limit=100):
-    conn = pinchflat_db_readonly()
-
-    if conn is None:
-        raise RuntimeError(
-            "Pinchflat database is unavailable."
-        )
-
-    try:
-        tables = pinchflat_table_names(conn)
-
-        if "media_items" not in tables:
-            return []
-
-        media_columns = pinchflat_table_columns(
-            conn,
-            "media_items",
-        )
-
-        filepath_column = next(
-            (
-                name
-                for name in (
-                    "media_filepath",
-                    "filepath",
-                    "file_path",
-                )
-                if name in media_columns
-            ),
-            None,
-        )
-
-        if not filepath_column:
-            return []
-
-        wanted = [
-            column
-            for column in (
-                "id",
-                "title",
-                "media_id",
-                "youtube_id",
-                "youtube_video_id",
-                "video_id",
-                "original_url",
-                "webpage_url",
-                "url",
-                "media_url",
-                "source_id",
-                "media_filepath",
-                "filepath",
-                "file_path",
-                "inserted_at",
-                "updated_at",
-                "downloaded_at",
-                "upload_date",
-                "duration_seconds",
-            )
-            if column in media_columns
-        ]
-
-        order_column = next(
-            (
-                name
-                for name in (
-                    "downloaded_at",
-                    "updated_at",
-                    "inserted_at",
-                    "id",
-                )
-                if name in media_columns
-            ),
-            "id",
-        )
-
-        rows = conn.execute(
-            f"""
-            SELECT {", ".join(wanted)}
-            FROM media_items
-            WHERE {filepath_column} IS NOT NULL
-              AND TRIM({filepath_column}) != ''
-            ORDER BY {order_column} DESC, id DESC
-            LIMIT ?
-            """,
-            (
-                max(
-                    1,
-                    min(
-                        int(limit or 100),
-                        500,
-                    ),
-                ),
-            ),
-        ).fetchall()
-
-        media_rows = [
-            dict(row)
-            for row in rows
-        ]
-
-        source_ids = {
-            int(row["source_id"])
-            for row in media_rows
-            if row.get("source_id")
-            not in (None, "")
-        }
-
-        source_map = {}
-
-        if (
-            source_ids
-            and "sources" in tables
-        ):
-            source_columns = pinchflat_table_columns(
-                conn,
-                "sources",
-            )
-
-            source_wanted = [
-                column
-                for column in (
-                    "id",
-                    "custom_name",
-                    "collection_name",
-                    "collection_id",
-                    "original_url",
-                )
-                if column in source_columns
-            ]
-
-            placeholders = ",".join(
-                "?"
-                for _ in source_ids
-            )
-
-            source_rows = conn.execute(
-                f"""
-                SELECT {", ".join(source_wanted)}
-                FROM sources
-                WHERE id IN ({placeholders})
-                """,
-                tuple(sorted(source_ids)),
-            ).fetchall()
-
-            source_map = {
-                int(row["id"]): dict(row)
-                for row in source_rows
-            }
-
-        results = []
-
-        for media in media_rows:
-            youtube_id = pinchflat_extract_youtube_id(
-                media
-            )
-
-            if not youtube_id:
-                continue
-
-            source = {}
-            source_id = media.get("source_id")
-
-            if source_id not in (None, ""):
-                try:
-                    source = source_map.get(
-                        int(source_id),
-                        {},
-                    )
-                except Exception:
-                    source = {}
-
-            channel_id = str(
-                pinchflat_row_value(
-                    source,
-                    "collection_id",
-                )
-                or ""
-            )
-
-            channel_title = str(
-                pinchflat_row_value(
-                    source,
-                    "custom_name",
-                    "collection_name",
-                )
-                or "YouTube channel"
-            )
-
-            channel_url = str(
-                pinchflat_row_value(
-                    source,
-                    "original_url",
-                )
-                or (
-                    f"https://www.youtube.com/channel/{channel_id}"
-                    if channel_id
-                    else "https://www.youtube.com"
-                )
-            )
-
-            completed_at = str(
-                pinchflat_row_value(
-                    media,
-                    "downloaded_at",
-                    "updated_at",
-                    "inserted_at",
-                )
-                or ""
-            )
-
-            results.append(
-                {
-                    "video_id": youtube_id,
-                    "title": (
-                        pinchflat_row_value(
-                            media,
-                            "title",
-                        )
-                        or "YouTube video"
-                    ),
-                    "description": "",
-                    "video_url": (
-                        f"https://www.youtube.com/watch?v={youtube_id}"
-                    ),
-                    "shorts_url": (
-                        f"https://www.youtube.com/shorts/{youtube_id}"
-                    ),
-                    "channel_id": channel_id,
-                    "channel_title": channel_title,
-                    "channel_url": channel_url,
-                    "channel_thumbnail_url": "",
-                    "thumbnail_url": (
-                        f"https://i.ytimg.com/vi/{youtube_id}/hqdefault.jpg"
-                    ),
-                    "published_at": completed_at,
-                    "downloaded_at": completed_at,
-                    "view_count": 0,
-                    "duration": "",
-                    "duration_seconds": int(
-                        media.get("duration_seconds")
-                        or 0
-                    ),
-                    "is_short": False,
-                    "metadata_complete": False,
-                    "from_pinchflat": True,
-                }
-            )
-
-        return annotate_favourites(
-            results[:limit]
-        )
-
-    finally:
-        conn.close()
+    """Legacy route name, backed exclusively by the native download history."""
+    return native_recent_downloaded_videos(limit)
 
 
 def pinchflat_db_readonly():
@@ -14531,10 +14361,11 @@ def _v3_profile_ydl_options(profile_id):
             "embedsubtitles": embed_subs,
         })
 
-    options["writethumbnail"] = setting_bool("downloader_download_thumbnail", True)
-    options["embedthumbnail"] = setting_bool("downloader_embed_thumbnail", True)
+    download_thumb = setting_bool("downloader_download_thumbnail", True)
+    embed_thumb = setting_bool("downloader_embed_thumbnail", True)
+    embed_metadata = setting_bool("downloader_embed_metadata", True)
+    options["writethumbnail"] = download_thumb or embed_thumb
     options["writeinfojson"] = setting_bool("downloader_download_metadata", True)
-    options["embedmetadata"] = setting_bool("downloader_embed_metadata", True)
 
     sponsor_mode = get_setting("downloader_sponsorblock_behaviour", "mark").strip().lower()
     categories = [
@@ -14549,6 +14380,21 @@ def _v3_profile_ydl_options(profile_id):
         options["sponsorblock_mark"] = categories
     elif sponsor_mode == "remove" and categories:
         options["sponsorblock_remove"] = categories
+
+    # YoutubeDL's Python API needs explicit postprocessors. CLI-only flags such
+    # as embedmetadata and sponsorblock_mark do not install these processors.
+    processors = options.setdefault("postprocessors", [])
+    sponsor_enabled = sponsor_mode in {"mark", "remove"} and bool(categories)
+    if sponsor_enabled:
+        processors.append({"key": "SponsorBlock", "categories": categories, "when": "after_filter"})
+    if embed_subs:
+        processors.append({"key": "FFmpegEmbedSubtitle", "already_have_subtitle": download_subs})
+    if sponsor_enabled:
+        processors.append({"key": "ModifyChapters", "remove_sponsor_segments": categories if sponsor_mode == "remove" else []})
+    if embed_metadata or sponsor_enabled:
+        processors.append({"key": "FFmpegMetadata", "add_metadata": embed_metadata, "add_chapters": bool(sponsor_enabled), "add_infojson": False})
+    if embed_thumb:
+        processors.append({"key": "EmbedThumbnail", "already_have_thumbnail": download_thumb})
 
     include_shorts = setting_bool("downloader_include_shorts", False)
     include_livestreams = setting_bool("downloader_include_livestreams", True)
@@ -14603,6 +14449,12 @@ def _v3_parse_entry_date(entry):
         except ValueError:
             pass
     return None
+
+
+def _v3_subscription_info_date(info, fallback=""):
+    """Resolve the publication date without failing a completed transfer."""
+    published = _v3_parse_entry_date(info) or _v3_parse_entry_date({"published_at": fallback})
+    return published.isoformat() if published else ""
 
 
 def _v3_queue_entry(sub, entry, redownload=False):
@@ -15188,19 +15040,14 @@ def pinchflat_download_overview(queue_limit=100):
                 """
             ).fetchall()
         ]
-        last = conn.execute(
-            """
-            SELECT * FROM downloads
-            WHERE status='completed'
-            ORDER BY finished_at DESC, id DESC LIMIT 1
-            """
-        ).fetchone()
         membership_errors = conn.execute(
             "SELECT COUNT(*) AS c FROM downloads WHERE failure_code='membership_required'"
         ).fetchone()["c"]
-        completed_total = conn.execute(
-            "SELECT COUNT(*) AS c FROM downloads WHERE status='completed'"
-        ).fetchone()["c"]
+        waiting_total = conn.execute("SELECT COUNT(*) AS c FROM downloads WHERE status='queued'").fetchone()["c"]
+    inventory = completed_video_inventory()
+    last = inventory["rows"][0] if inventory["rows"] else None
+    processing = [row for row in active_rows if row.get("status") == "processing"]
+    latest = processing[-1] if processing else last
 
     def item(row):
         video_id = str(row.get("video_id") or "")
@@ -15214,6 +15061,7 @@ def pinchflat_download_overview(queue_limit=100):
                 file_size = 0
         return {
             "job_id": row.get("job_id"),
+            "source_type": row.get("source_type") or "",
             "title": row.get("title") or row.get("youtube_url") or "YouTube video",
             "channel": row.get("channel_title") or "",
             "channel_title": row.get("channel_title") or "",
@@ -15256,18 +15104,22 @@ def pinchflat_download_overview(queue_limit=100):
         "waiting": [item(row) for row in waiting_rows],
         "summary": {
             "active": len(active_rows),
-            "waiting": len(waiting_rows),
+            "waiting": int(waiting_total),
             "tasks_active": sum(1 for row in scan_rows if row["status"] == "running"),
             "tasks_waiting": sum(1 for row in scan_rows if row["status"] == "queued"),
             "membership_errors": int(membership_errors or 0),
-            "completed": int(completed_total or 0),
+            "completed": inventory["count"],
+            "video_bytes": inventory["bytes"],
+            "video_size_text": format_bytes(inventory["bytes"]),
+            "processing": len(processing),
         },
         "tasks": tasks,
         "task_block": {
             "enabled": pinchflat_task_block_enabled(),
             "last": dict(pinchflat_task_block_last),
         },
-        "last_downloaded": item(dict(last)) if last else None,
+        "last_downloaded": item(last) if last else None,
+        "latest_download": item(latest) if latest else None,
     }
 
 
@@ -15515,6 +15367,7 @@ def reconcile_existing_library(force=False):
             except Exception:
                 unmatched += 1
 
+    invalidate_video_inventory()
     set_setting("v3_library_import_complete", "1")
     set_setting("v3_library_last_scanned", str(scanned))
     set_setting("v3_library_last_known", str(known))
@@ -15555,14 +15408,19 @@ def refresh_existing_channel_artwork():
                       AND source_type LIKE 'subscription%'
                       AND COALESCE(channel_id,'')!=''
                       AND COALESCE(output_path,'')!=''
-                    GROUP BY channel_id
+                    GROUP BY channel_id, output_path
                     """
                 ).fetchall()
             ]
+        seen = set()
         for row in rows:
             output_path = Path(str(row.get("output_path") or ""))
             if not output_path.exists():
                 continue
+            channel_dir = subscription_channel_directory(output_path)
+            if channel_dir in seen:
+                continue
+            seen.add(channel_dir)
             fake_info = {
                 "channel_id": row.get("channel_id") or "",
                 "channel": row.get("channel_title") or "YouTube",
@@ -15572,14 +15430,15 @@ def refresh_existing_channel_artwork():
                 write_direct_download_series_metadata(
                     fake_info,
                     str(output_path),
-                    write_nfo=True,
-                    write_images=True,
+                    write_nfo=setting_bool("downloader_write_nfo", True),
+                    write_images=setting_bool("downloader_series_images", True),
                     channel_root=True,
                 )
-            except Exception:
-                continue
-    except Exception:
-        pass
+            except Exception as exc:
+                log_activity("download_metadata", "Channel artwork repair failed", str(exc), "warning", row.get("channel_id"))
+        log_activity("download_metadata", "Channel artwork repair finished", f"Checked {len(seen)} channel folders using saved media options.", "success")
+    except Exception as exc:
+        log_activity("download_metadata", "Channel artwork repair failed", str(exc), "warning")
 
 
 def library_import_status():
@@ -16156,7 +16015,7 @@ def index():
         ),
         "load_latest_videos": setting_bool(
             "page_load_latest_videos",
-            True,
+            False,
         ),
         "load_subscriptions": setting_bool(
             "page_load_subscriptions",
@@ -16398,11 +16257,12 @@ def index():
         sub["disk_bytes"] = channel_disk_usage(sub.get("title"), storage)
         sub["disk_usage"] = format_bytes(sub["disk_bytes"])
 
+    video_inventory = completed_video_inventory()
     download_counts = {
         "queued": int(download_counts_row["queued"] or 0),
         "running": int(download_counts_row["running"] or 0),
         "failed": int(download_counts_row["failed"] or 0),
-        "completed": int(download_counts_row["completed"] or 0),
+        "completed": video_inventory["count"],
     }
     youtube_account = (
         youtube_account_stats_cached()
@@ -16545,6 +16405,7 @@ def index():
         storage_free=format_bytes(storage_filesystem.get("free") or 0) if storage_capacity else "Unavailable",
         storage_content_percent=storage_content_percent,
         download_counts=download_counts,
+        video_storage_total=format_bytes(video_inventory["bytes"]),
         recent_downloads=recent_downloads,
         emby_download_enabled=setting_bool("emby_download_enabled", True),
         emby_download_playlist_name=get_setting("emby_download_playlist_name", "Emby Download"),
@@ -19093,9 +18954,7 @@ def pinchflat_download_overview_api():
         return jsonify(
             {
                 "ok": True,
-                "database_path": str(
-                    resolve_pinchflat_db_path()
-                ),
+                "database_path": str(DB_PATH),
                 **data,
             }
         )
@@ -19669,6 +19528,7 @@ def discover_videos():
 
     if kind not in {
         "downloaded",
+        "latest",
         "liked",
         "disliked",
         "videos",
@@ -19678,6 +19538,11 @@ def discover_videos():
         kind = "downloaded"
 
     try:
+        if kind == "latest":
+            result = youtube_latest_subscription_videos(limit=36, force=refresh)
+            videos = list(result.get("results") or []) + list(result.get("shorts") or [])
+            videos.sort(key=lambda item: item.get("published_at") or "", reverse=True)
+            return jsonify({"ok": True, **result, "results": videos})
         if kind == "downloaded":
             stats = api_usage_stats()
             return jsonify(
@@ -20043,6 +19908,7 @@ def health():
 
 init_db()
 init_v3_db()
+init_v303_defaults()
 cache_restored = load_persistent_dashboard_cache()
 start_download_worker()
 start_scan_worker()

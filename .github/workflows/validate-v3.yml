@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - v3-youtube-subscription-downloader
-      - v3.0.2-performance-ui
+      - main
 
 permissions:
   contents: read
@@ -38,7 +38,7 @@ jobs:
           mkdir -p "$DATA_DIR" "$DOWNLOAD_ROOT"
           PYTHONPATH=app python - <<'PY'
           import app
-          assert app.VERSION == "3.0.2"
+          assert app.VERSION == "3.0.3"
           assert app.YOUTUBE_COOKIE_PATH.name == "youtube-cookies.txt"
           assert app.subscription_download_compatibility_profile() == "emby_tv"
           profile = app._v3_profile_ydl_options("1080p")
@@ -48,6 +48,9 @@ jobs:
           assert callable(app.ensure_download_emby_compatibility)
           print("Application import OK", app.VERSION)
           PY
+
+      - name: Test native download regressions
+        run: python -m unittest discover -s tests -v
 
       - name: Test cookie upload validator
         run: |
@@ -96,31 +99,15 @@ jobs:
         run: docker build -t youtube-subscription-downloader:v3-test ./app
 
 
-      - name: Stage clean source package
+      - name: Package V3.0.3 source
         run: |
-          mkdir -p /tmp/v13.0.2
-          git archive HEAD | tar -x -C /tmp/v13.0.2
-          rm -rf /tmp/v13.0.2/app/__pycache__
+          zip -qr youtube-subscription-downloader-v3.0.3.zip . \
+            -x ".git/*" "*/__pycache__/*" "*.pyc" \
+            -x "youtube-subscription-downloader-v3.0.3.zip"
 
-      - name: Upload v13.0.2 source package
+      - name: Upload V3.0.3 source package
         uses: actions/upload-artifact@v4
         with:
-          name: v13.0.2
-          path: /tmp/v13.0.2
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-
-      - name: Package V3.0.2 source
-        run: |
-          zip -qr youtube-subscription-downloader-v3.0.2.zip . \
-            -x ".git/*" \
-            -x "youtube-subscription-downloader-v3.0.2.zip"
-
-      - name: Upload V3.0.2 source package
-        uses: actions/upload-artifact@v4
-        with:
-          name: youtube-subscription-downloader-v3.0.2
-          path: youtube-subscription-downloader-v3.0.2.zip
+          name: youtube-subscription-downloader-v3.0.3
+          path: youtube-subscription-downloader-v3.0.3.zip
           if-no-files-found: error

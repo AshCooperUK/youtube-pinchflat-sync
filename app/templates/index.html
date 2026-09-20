@@ -3331,6 +3331,52 @@
       .retention-channel-card { grid-template-columns:52px 1fr; }
       .retention-channel-card > label,.retention-channel-card > .retention-channel-actions { grid-column:2; }
     }
+
+    /* v3.0.3: compact summary cards and media controls. */
+    #summary-tiles { grid-template-columns:repeat(auto-fit,minmax(235px,1fr)); gap:12px; margin:18px 0; align-items:stretch; }
+    #summary-tiles > .card { padding:14px 16px; min-height:148px; }
+    #summary-tiles .metric { font-size:25px; margin:6px 0 3px; }
+    #summary-tiles [data-summary-tile="google"], #summary-tiles [data-summary-tile="pinchflat"] { padding-right:65px; }
+    .summary-icon-stack { position:absolute; right:12px; top:12px; display:grid; gap:7px; }
+    .summary-icon-stack form, .summary-scan-action { margin:0; }
+    .summary-icon { width:36px; height:36px; padding:6px; display:grid; place-items:center; border:1px solid var(--line); border-radius:9px; background:#0b1626; color:var(--text); cursor:pointer; }
+    .summary-icon img, .summary-icon svg { width:24px; height:24px; }
+    .summary-icon:hover { background:#19304d; border-color:#527aad; }
+    .summary-icon:disabled { opacity:.4; cursor:not-allowed; }
+    .summary-scan-action { position:absolute; top:12px; right:12px; }
+    .ytsd-scan-icon { height:49px; gap:1px; padding:4px; }
+    .ytsd-scan-icon span { font-size:9px; font-weight:800; letter-spacing:.5px; }
+    .summary-task-count { color:var(--muted); white-space:nowrap; font-size:11px; padding-bottom:2px; }
+    .summary-task-count strong { color:var(--text); }
+    #summary-tiles .small { font-size:12px; }
+    #summary-tiles .pinchflat-task-block-wrap { border:0; padding-top:0; margin-top:7px!important; }
+    #summary-tiles .pinchflat-task-block-status:empty { display:none; }
+    #summary-tiles .latest-download-summary-button { grid-template-columns:84px minmax(0,1fr); gap:10px; margin-top:10px; }
+    #summary-tiles .latest-download-summary-button img { width:84px; height:52px; object-fit:cover; }
+    #summary-tiles .latest-download-summary-copy strong { font-size:13px; }
+    .latest-download-status { margin-top:9px; line-height:1.3; }
+    .latest-download-progress { display:block; width:100%; height:5px; margin-top:7px; accent-color:var(--amber); }
+    .source-toggle input:focus-visible + .toggle-track { outline:2px solid #9dc1ff; outline-offset:3px; }
+    .media-toggle-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:24px; }
+    #settings-dialog .media-option { display:flex; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); white-space:normal; margin:0; }
+    .media-option-copy { display:grid; gap:2px; min-width:0; }
+    .media-option-copy strong { font-size:13px; }
+    .media-option-copy small { color:var(--muted); font-size:11px; line-height:1.25; }
+    .media-language-options { display:grid; gap:10px; margin-top:14px; max-width:560px; }
+    .media-language-options label { font-size:12px; }
+    .media-language-options input, .media-language-options select { margin-top:4px; min-height:36px; padding:8px 10px; }
+    .sponsor-toggle-grid { display:flex; flex-wrap:wrap; gap:12px 22px; margin-top:14px; }
+    #settings-dialog .sponsor-option { display:inline-flex; gap:8px; align-items:center; margin:0; font-size:12px; }
+    .media-option .toggle-track, .sponsor-option .toggle-track { width:34px; height:20px; flex-basis:34px; }
+    .media-option .toggle-track::after, .sponsor-option .toggle-track::after { width:14px; height:14px; }
+    .media-option input:checked + .toggle-track::after, .sponsor-option input:checked + .toggle-track::after { transform:translateX(14px); }
+    @media (max-width:600px) {
+      #summary-tiles { grid-template-columns:1fr; }
+      #summary-tiles > .card { min-height:118px; }
+      .media-toggle-grid { grid-template-columns:1fr; }
+      .header { flex-wrap:wrap; }
+      .header-actions { justify-content:flex-start; }
+    }
 </style>
 </head>
 <body class="{% if not page_view.channel_controls %}hide-channel-controls{% endif %} {% if not page_view.channel_control_favourite %}hide-channel-favourite{% endif %} {% if not page_view.channel_control_downloads %}hide-channel-downloads{% endif %} {% if not page_view.channel_control_scan %}hide-channel-scan{% endif %} {% if not page_view.channel_control_delete %}hide-channel-delete{% endif %} {% if not page_view.channel_control_retention %}hide-channel-retention{% endif %}">
@@ -3341,18 +3387,6 @@
       <div class="version">v{{ version }}</div>
     </div>
     <div class="header-actions">
-      {% if is_admin and page_view.button_sync %}
-      <form method="post" action="/sync"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-        <button class="btn" {% if not google_connected %}disabled{% endif %}>Sync &amp; Scan</button>
-      </form>
-      {% endif %}
-
-      {% if is_admin and page_view.button_refresh_youtube %}
-      <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-        <button class="btn" {% if not google_connected %}disabled{% endif %}>Refresh YouTube</button>
-      </form>
-      {% endif %}
-
       {% if is_admin and page_view.button_single_download %}
       <button class="btn secondary" type="button" onclick="openSingleDownload()" title="One-time download">Single Download</button>
       {% endif %}
@@ -3360,7 +3394,7 @@
       <button class="btn secondary" type="button" onclick="openSettings('{{ 'general' if is_admin else 'security' }}')">Settings</button>
 
       {% if page_view.button_discover %}
-      <button class="btn ghost" type="button" onclick="openDiscover()" {% if not google_connected %}disabled{% endif %}>Discover</button>
+      <button class="btn ghost" type="button" onclick="openDiscover()">Discover</button>
       {% endif %}
 
       {% if page_view.button_favourites %}
@@ -3400,9 +3434,18 @@
     {% if page_view.show_summary_google %}
     <div class="card" data-summary-tile="google">
       <div class="muted small">Google</div>
-      <a class="pinchflat-icon-link google-cloud-icon" href="https://console.cloud.google.com/welcome" target="_blank" rel="noopener" title="Open Google Cloud Console" aria-label="Open Google Cloud Console">
-        <img src="https://www.gstatic.com/pantheon/images/welcome/supercloud_gradient_v2.svg" alt="Google Cloud" referrerpolicy="no-referrer">
-      </a>
+      <div class="summary-icon-stack">
+        <a class="summary-icon" href="https://console.cloud.google.com/welcome" target="_blank" rel="noopener" title="Open Google Cloud Console" aria-label="Open Google Cloud Console">
+          <img src="https://www.gstatic.com/pantheon/images/welcome/supercloud_gradient_v2.svg" alt="Google Cloud" referrerpolicy="no-referrer">
+        </a>
+        {% if is_admin and page_view.button_refresh_youtube %}
+        <form method="post" action="/refresh-subscriptions"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="summary-icon" type="submit" title="Refresh YouTube subscriptions" aria-label="Refresh YouTube subscriptions" {% if not google_connected %}disabled{% endif %}>
+            <svg viewBox="0 0 32 24" aria-hidden="true"><rect x="1" y="2" width="30" height="20" rx="6" fill="#ff0033"/><path d="M13 7l9 5-9 5z" fill="white"/></svg>
+          </button>
+        </form>
+        {% endif %}
+      </div>
       {% if google_connected and google_write_ready %}
         <div class="metric ok">Connected</div>
         <div class="muted small">Read + write access</div>
@@ -3421,24 +3464,24 @@
     {% if page_view.show_summary_pinchflat %}
     <div class="card" id="top" data-summary-tile="pinchflat">
       <div class="muted small">Downloader</div>
+      {% if is_admin and page_view.button_sync %}
+      <form class="summary-scan-action" method="post" action="/sync"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="summary-icon ytsd-scan-icon" type="submit" title="YTSD · Sync &amp; Scan" aria-label="YTSD · Sync and scan subscriptions" {% if not google_connected %}disabled{% endif %}>
+          <svg viewBox="0 0 32 24" aria-hidden="true"><rect x="1" y="1" width="30" height="22" rx="6" fill="#2563eb"/><path d="M12 5l9 6-9 6z" fill="white"/><path d="M7 20h18" stroke="white" stroke-width="2"/></svg>
+          <span>YTSD</span>
+        </button>
+      </form>
+      {% endif %}
       <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
         <div>
           <div class="metric ok">Online</div>
-          <div class="muted small">Native yt-dlp · {{ downloader_worker_concurrency }} worker{{ '' if downloader_worker_concurrency == 1 else 's' }}</div>
+          <div class="muted small">{{ downloader_worker_concurrency }} worker{{ '' if downloader_worker_concurrency == 1 else 's' }} · {% if downloader_auth_status.configured and downloader_auth_status.valid %}<span class="ok" title="Cookies ready for authenticated retry">Cookies ready</span>{% else %}Anonymous{% endif %}</div>
         </div>
-        <div style="text-align:right">
-          <div class="metric" id="pinchflat-tasks-active">0</div>
-          <div class="muted small">tasks</div>
-        </div>
+        <div class="summary-task-count"><strong id="pinchflat-tasks-active">0</strong> tasks</div>
       </div>
       <div class="muted small" id="pinchflat-tasks-status" style="margin-top:8px">No active background tasks</div>
       <div class="warn small hidden" id="pinchflat-tasks-membership-errors"></div>
       <div class="muted small" id="pinchflat-tasks-current"></div>
-      {% if downloader_auth_status.configured and downloader_auth_status.valid %}
-        <div class="muted small ok" style="margin-top:7px">Cookies ready for authenticated retry</div>
-      {% else %}
-        <div class="muted small" style="margin-top:7px">Anonymous downloads</div>
-      {% endif %}
       {% if is_admin %}
       <div class="pinchflat-task-block-wrap" style="margin-top:10px">
         <label class="source-toggle" title="Suppress new background channel scan tasks until switched off.">
@@ -3454,7 +3497,7 @@
 
     {% if page_view.show_summary_latest_download %}
     <div class="card latest-download-summary-card" data-summary-tile="latest_download" id="latest-download-summary-card">
-      <div class="muted small">Latest download</div>
+      <div class="muted small">Latest Downloaded</div>
       <button id="latest-download-summary-button" class="latest-download-summary-button" type="button" disabled>
         <img id="latest-download-summary-thumb" src="{{ url_for('static', filename='channel-placeholder.svg') }}" alt="Latest downloaded video">
         <span class="latest-download-summary-copy">
@@ -3462,6 +3505,8 @@
           <span id="latest-download-summary-channel">YouTube</span>
         </span>
       </button>
+      <div id="latest-download-summary-status" class="latest-download-status muted small" role="status"></div>
+      <progress id="latest-download-summary-progress" class="latest-download-progress hidden" max="100" aria-label="Media processing progress"></progress>
     </div>
     {% endif %}
 
@@ -3475,10 +3520,10 @@
 
     {% if page_view.show_summary_downloads %}
     <div class="card" data-summary-tile="downloads">
-      <div class="muted small">Downloads</div>
+      <div class="muted small" title="Completed video files still on disk. Excludes audio, artwork, subtitles, metadata and temporary files.">Downloads · videos</div>
       <div class="metric ok" id="dashboard-downloads-completed">{{ download_counts.completed }}</div>
       <div class="muted small" id="dashboard-downloads-queue-status">{{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
-      <div class="muted small">{{ counts.enabled }} channels enabled · {{ storage_total }} used</div>
+      <div class="muted small"><span id="dashboard-downloads-video-size">{{ video_storage_total }}</span> of video · {{ counts.enabled }} channels enabled</div>
     </div>
     {% endif %}
 
@@ -3502,9 +3547,9 @@
   >
     <div class="pinchflat-download-head">
       <div>
-        <h2>subscription downloads</h2>
+        <h2>Current Downloads</h2>
         <div class="muted small" id="pinchflat-download-summary">
-          Loading subscription download activity…
+          Loading download activity…
         </div>
       </div>
 
@@ -3532,8 +3577,8 @@
           type="button"
           id="pinchflat-download-refresh"
           onclick="loadDownloaderDownloadOverview(true)"
-          title="Refresh subscription downloads"
-          aria-label="Refresh subscription downloads"
+          title="Refresh current downloads"
+          aria-label="Refresh current downloads"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20 11a8 8 0 1 0-2.34 5.66"></path>
@@ -3546,8 +3591,8 @@
           type="button"
           id="pinchflat-download-minimise"
           onclick="toggleDownloaderDownloadSection()"
-          title="Minimise subscription downloads"
-          aria-label="Minimise subscription downloads"
+          title="Minimise current downloads"
+          aria-label="Minimise current downloads"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 17h12"></path>
@@ -3979,7 +4024,7 @@
           <div class="debug-function-row" data-debug-search="single download yt-dlp one-time"><div class="debug-function-name">Single Download</div><div class="debug-service-badge">yt-dlp / Local app</div><div class="debug-function-description">Downloads one supplied YouTube URL using the selected One-time Download options. The Emby / Smart TV profile prefers H.264 + AAC in MP4 and converts incompatible streams before the detected Emby One-time Download library is scanned.</div></div>
           <div class="debug-function-row" data-debug-search="google status oauth cloud console"><div class="debug-function-name">Google status tile</div><div class="debug-service-badge">Google OAuth</div><div class="debug-function-description">Shows whether Google is connected and whether the token has read/write access. The logo opens Google Cloud Console.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat online power start stop docker"><div class="debug-function-name">Downloader power</div><div class="debug-service-badge">Docker</div><div class="debug-function-description">Starts or stops the application container through the mounted Docker socket.</div></div>
-          <div class="debug-function-row" data-debug-search="latest download tile player"><div class="debug-function-name">Latest download tile</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Shows the newest completed Downloader download. Clicking the video opens the in-app media player.</div></div>
+          <div class="debug-function-row" data-debug-search="latest download tile player"><div class="debug-function-name">Latest download tile</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Shows the newest completed video or a video being processed, including its FFmpeg phase and progress. Completed videos open in the media player.</div></div>
           <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Opens the complete list of waiting Downloader jobs and refreshes the queue while the popup remains open.</div></div>
           <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Immediately reloads current Downloader workers, waiting count and recent completed download data.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background membership members only join this channel"><div class="debug-function-name">Tasks tile</div><div class="debug-service-badge">Native queue</div><div class="debug-function-description">Shows active and waiting Downloader background work other than media downloads, such as source indexing or metadata jobs. It also counts non-completed download jobs whose stored yt-dlp error contains “Join this channel”, shown as membership errors. Download jobs remain in the dedicated Downloads section.</div></div>
@@ -4030,7 +4075,7 @@
       <section class="debug-function-group">
         <h3>Discover</h3>
         <div class="debug-function-list">
-          <div class="debug-function-row" data-debug-search="discover downloaded pinchflat"><div class="debug-function-name">Downloaded</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Shows recently completed subscription downloads and refreshes while this Discover view is open.</div></div>
+          <div class="debug-function-row" data-debug-search="discover downloaded pinchflat"><div class="debug-function-name">Downloaded</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Shows completed native video downloads and refreshes while this Discover view is open.</div></div>
           <div class="debug-function-row" data-debug-search="liked videos discover youtube"><div class="debug-function-name">Liked Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads videos liked by the connected YouTube account, following YouTube pagination.</div></div>
           <div class="debug-function-row" data-debug-search="disliked videos discover youtube rating"><div class="debug-function-name">Disliked Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads videos disliked by the connected YouTube account from its YouTube rating history.</div></div>
           <div class="debug-function-row" data-debug-search="random videos discover recommendations"><div class="debug-function-name">Random Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Builds a larger recommendation-style selection influenced by subscriptions, favourites and liked videos.</div></div>
@@ -4655,6 +4700,7 @@
   <div class="modal-body">
     <div class="discover-toolbar">
       <button id="discover-downloaded-btn" class="btn" type="button" onclick="showDiscoverMode('downloaded')">Downloaded</button>
+      <button id="discover-latest-btn" class="btn secondary" type="button" onclick="showDiscoverMode('latest')">Latest Subscriptions</button>
       <button id="discover-liked-btn" class="btn secondary" type="button" onclick="showDiscoverMode('liked')">Liked Videos</button>
       <button id="discover-disliked-btn" class="btn secondary" type="button" onclick="showDiscoverMode('disliked')">Disliked Videos</button>
       <button id="discover-videos-btn" class="btn secondary" type="button" onclick="showDiscoverMode('videos')">Random Videos</button>
@@ -4961,8 +5007,8 @@
             <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
               <span class="page-order-handle" aria-hidden="true">☰</span>
               <span>
-                <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}subscription downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
-                <small>{% if item == "summary" %}Connection, subscription, storage and latest-download cards.{% elif item == "pinchflat" %}Current subscription downloads and queue state.{% elif item == "latest" %}Newest videos and Shorts from your subscriptions.{% elif item == "subscriptions" %}Channel management table.{% endif %}</small>
+                <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Current Downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+                <small>{% if item == "summary" %}Connection, subscription, storage and latest-download cards.{% elif item == "pinchflat" %}Subscription and one-time downloads, processing and queue state.{% elif item == "latest" %}Newest videos and Shorts from your subscriptions.{% elif item == "subscriptions" %}Channel management table.{% endif %}</small>
               </span>
             </div>
             {% endfor %}
@@ -4975,7 +5021,7 @@
           {% for item in page_section_order %}
           <div class="settings-order-card">
             <div>
-              <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}subscription downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+              <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Current Downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
               <small>{% if item == "summary" %}Small dashboard cards loaded first.{% elif item == "pinchflat" %}Poll Downloader for active and queued jobs.{% elif item == "latest" %}Use YouTube to load recent subscription videos.{% elif item == "subscriptions" %}Render and manage the full subscription list.{% endif %}</small>
             </div>
             {% if item == "summary" %}
@@ -5018,8 +5064,8 @@
           <div class="setting-box">
             <h3>4. Header buttons</h3>
             <p class="muted small">Settings always stays visible so the interface remains recoverable.</p>
-            <label><input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}> YouTube Subscription Downloader</label>
-            <label><input type="checkbox" name="page_button_refresh_youtube" value="1" {% if page_view.button_refresh_youtube %}checked{% endif %}> Refresh YouTube</label>
+            <label><input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}> Downloader tile: Sync &amp; Scan</label>
+            <label><input type="checkbox" name="page_button_refresh_youtube" value="1" {% if page_view.button_refresh_youtube %}checked{% endif %}> Google tile: Refresh YouTube</label>
             <label><input type="checkbox" name="page_button_single_download" value="1" {% if page_view.button_single_download %}checked{% endif %}> Single Download</label>
             <label><input type="checkbox" name="page_button_discover" value="1" {% if page_view.button_discover %}checked{% endif %}> Discover</label>
             <label><input type="checkbox" name="page_button_favourites" value="1" {% if page_view.button_favourites %}checked{% endif %}> Favourites</label>
@@ -5246,26 +5292,26 @@
         <details class="settings-details" open style="margin-top:14px">
           <summary>Media &amp; Emby</summary>
           <div>
-            <div class="page-view-grid">
-              <label class="page-view-option"><input type="checkbox" name="downloader_download_subtitles" value="1" {% if downloader_download_subtitles %}checked{% endif %}><span><strong>Subtitles</strong><small>Download subtitle tracks.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_embed_subtitles" value="1" {% if downloader_embed_subtitles %}checked{% endif %}><span><strong>Embed subtitles</strong><small>Embed where supported.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_download_thumbnail" value="1" {% if downloader_download_thumbnail %}checked{% endif %}><span><strong>Thumbnails</strong><small>Keep video thumbnails.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_embed_thumbnail" value="1" {% if downloader_embed_thumbnail %}checked{% endif %}><span><strong>Embed thumbnail</strong><small>Embed where supported.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_download_metadata" value="1" {% if downloader_download_metadata %}checked{% endif %}><span><strong>Info JSON</strong><small>Keep yt-dlp metadata.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_embed_metadata" value="1" {% if downloader_embed_metadata %}checked{% endif %}><span><strong>Embed metadata</strong><small>Write into media files.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_write_nfo" value="1" {% if downloader_write_nfo %}checked{% endif %}><span><strong>Emby NFO</strong><small>Create channel metadata.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_series_images" value="1" {% if downloader_series_images %}checked{% endif %}><span><strong>Channel artwork</strong><small>Use the YouTube channel avatar/banner.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_include_shorts" value="1" {% if downloader_include_shorts %}checked{% endif %}><span><strong>Shorts</strong><small>Include Shorts.</small></span></label>
-              <label class="page-view-option"><input type="checkbox" name="downloader_include_livestreams" value="1" {% if downloader_include_livestreams %}checked{% endif %}><span><strong>Livestreams</strong><small>Include live/previous live.</small></span></label>
+            <div class="media-toggle-grid">
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_download_subtitles" value="1" {% if downloader_download_subtitles %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Subtitles</strong><small>Download subtitle tracks.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_embed_subtitles" value="1" {% if downloader_embed_subtitles %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Embed subtitles</strong><small>Embed where supported.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_download_thumbnail" value="1" {% if downloader_download_thumbnail %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Thumbnails</strong><small>Keep video thumbnails.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_embed_thumbnail" value="1" {% if downloader_embed_thumbnail %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Embed thumbnail</strong><small>Embed where supported.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_download_metadata" value="1" {% if downloader_download_metadata %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Info JSON</strong><small>Keep yt-dlp metadata.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_embed_metadata" value="1" {% if downloader_embed_metadata %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Embed metadata</strong><small>Write into media files.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_write_nfo" value="1" {% if downloader_write_nfo %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Emby NFO</strong><small>Create channel metadata.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_series_images" value="1" {% if downloader_series_images %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Channel artwork</strong><small>Use the YouTube channel avatar/banner.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_include_shorts" value="1" {% if downloader_include_shorts %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Shorts</strong><small>Include Shorts.</small></span></label>
+              <label class="source-toggle media-option"><input type="checkbox" role="switch" name="downloader_include_livestreams" value="1" {% if downloader_include_livestreams %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span class="media-option-copy"><strong>Livestreams</strong><small>Include live/previous live.</small></span></label>
             </div>
-            <div class="settings-grid" style="margin-top:12px">
+            <div class="media-language-options">
               <label>Subtitle languages<input type="text" name="downloader_subtitle_languages" value="{{ downloader_subtitle_languages }}" placeholder="en.*,en"></label>
               <label>SponsorBlock<select name="downloader_sponsorblock_behaviour"><option value="disabled" {% if downloader_sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option><option value="mark" {% if downloader_sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark chapters</option><option value="remove" {% if downloader_sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove segments</option></select></label>
             </div>
             {% set sponsor_categories = downloader_sponsorblock_categories.split(',') %}
-            <div class="actions" style="margin-top:10px">
+            <div class="sponsor-toggle-grid">
               {% for value,label in [('sponsor','Sponsor'),('outro','Outro'),('preview','Preview'),('intro','Intro'),('selfpromo','Self promo'),('interaction','Interaction')] %}
-              <label class="retention-pill"><input type="checkbox" name="downloader_sponsorblock_categories" value="{{ value }}" {% if value in sponsor_categories %}checked{% endif %}> {{ label }}</label>
+              <label class="source-toggle sponsor-option"><input type="checkbox" role="switch" name="downloader_sponsorblock_categories" value="{{ value }}" {% if value in sponsor_categories %}checked{% endif %}><span class="toggle-track" aria-hidden="true"></span><span>{{ label }}</span></label>
               {% endfor %}
             </div>
           </div>
@@ -5851,12 +5897,13 @@ const googleWriteReady = {{ 'true' if google_write_ready else 'false' }};
 let returnToDownloaderQueueAfterPlayer = false;
 let pinchflatQueueReturnScrollTop = 0;
 let singleDownloadTimer = null;
+let singleDownloadJobId = null;
 let singleDownloadedVideoIds = new Set();
 let latestSubscriptionVideos = [];
 let latestSubscriptionShorts = [];
 let latestPopupVideo = null;
 let discoverMode = "downloaded";
-let discoverResults = {downloaded: [], liked: [], disliked: [], videos: [], shorts: [], top100: []};
+let discoverResults = {downloaded: [], latest: [], liked: [], disliked: [], videos: [], shorts: [], top100: []};
 let discoverDownloadedTimer = null;
 let discoverDownloadedRefreshInFlight = false;
 let discoverDownloadedSignature = "";
@@ -5976,8 +6023,8 @@ function setDownloaderDownloadMinimised(minimised) {
        </svg>`;
 
   button.title = minimised
-    ? "Restore subscription downloads"
-    : "Minimise subscription downloads";
+    ? "Restore current downloads"
+    : "Minimise current downloads";
 
   button.setAttribute(
     "aria-label",
@@ -6211,17 +6258,14 @@ function renderDownloaderActiveDownloads(data) {
   const summary = document.getElementById("pinchflat-download-summary");
   const badge = document.getElementById("pinchflat-queue-badge");
 
-  if (!target || !summary || !badge) return;
-
-  const active = Array.isArray(data.active)
-    ? data.active
-    : [];
+  const allActive = Array.isArray(data.active) ? data.active : [];
+  const active = allActive.filter(item => !(singleDownloadDialog?.open && singleDownloadJobId === item.job_id));
 
   const waiting = Number(
     data.summary?.waiting || 0
   );
 
-  summary.textContent = active.length
+  if (summary) summary.textContent = active.length
     ? `${active.length} active · ${waiting} waiting`
     : `No active downloads · ${waiting} waiting`;
 
@@ -6231,8 +6275,12 @@ function renderDownloaderActiveDownloads(data) {
     completedMetric.textContent = String(Number(data.summary.completed || 0));
   }
   if (queueStatus) {
-    queueStatus.textContent = `${active.length} active · ${waiting} queued`;
+    queueStatus.textContent = `${allActive.length} active · ${waiting} queued`;
   }
+
+  const videoSize = document.getElementById("dashboard-downloads-video-size");
+  if (videoSize && data.summary?.video_size_text) videoSize.textContent = data.summary.video_size_text;
+  if (!target || !summary || !badge) return;
 
   badge.textContent = String(waiting);
   badge.classList.toggle(
@@ -6247,7 +6295,7 @@ function renderDownloaderActiveDownloads(data) {
     empty.className = "pinchflat-download-empty";
     empty.textContent = waiting
       ? `${waiting} download${waiting === 1 ? "" : "s"} waiting.`
-      : "No active subscription downloads.";
+      : (allActive.length ? "One-time download progress is open in the popup." : "No active downloads.");
     target.appendChild(empty);
     return;
   }
@@ -6268,7 +6316,8 @@ function renderDownloaderActiveDownloads(data) {
 
     const label = document.createElement("div");
     label.className = "pinchflat-last-label";
-    label.textContent = "Downloading";
+    const source = item.source_type === "single" ? "One-time" : item.source_type === "emby_download" ? "Emby playlist" : "Subscription";
+    label.textContent = `${source} · ${item.status || (item.state === "processing" ? "Processing media" : "Downloading")}`;
 
     const title = pinchflatMediaTitleButton(
       item,
@@ -6480,7 +6529,7 @@ function renderDownloaderLastDownload(data) {
   const target = document.getElementById("pinchflat-last-download");
   if (!target) return;
 
-  const item = data.last_downloaded;
+  const item = data.latest_download || data.last_downloaded;
 
   target.innerHTML = "";
 
@@ -6508,7 +6557,7 @@ function renderDownloaderLastDownload(data) {
 
   const label = document.createElement("div");
   label.className = "pinchflat-last-label";
-  label.textContent = "Last downloaded";
+  label.textContent = item.state === "processing" ? (item.status || "Processing media") : "Last downloaded";
 
   const title = pinchflatMediaTitleButton(
     item,
@@ -6523,7 +6572,7 @@ function renderDownloaderLastDownload(data) {
   const completed = document.createElement("span");
   completed.textContent = item.completed_at
     ? `Completed ${safeDateTime(item.completed_at)}`
-    : "Completed";
+    : (item.state === "processing" ? "Processing media" : "Completed");
 
   meta.append(
     channel,
@@ -6553,7 +6602,19 @@ function renderLatestDownloadSummary(item) {
   const thumb = document.getElementById("latest-download-summary-thumb");
   const title = document.getElementById("latest-download-summary-title");
   const channel = document.getElementById("latest-download-summary-channel");
+  const status = document.getElementById("latest-download-summary-status");
+  const progress = document.getElementById("latest-download-summary-progress");
   if (!button || !thumb || !title || !channel) return;
+  const processing = item?.state === "processing";
+  if (status) {
+    status.textContent = item ? (processing ? (item.status || "FFmpeg · processing media") : "Completed") : "";
+    status.classList.toggle("warn", processing);
+    status.classList.toggle("ok", !!item && !processing);
+  }
+  if (progress) {
+    progress.classList.toggle("hidden", !processing);
+    progress.value = Math.max(0, Math.min(100, Number(item?.progress || 0)));
+  }
 
   if (!item) {
     button.disabled = true;
@@ -6576,8 +6637,8 @@ function renderLatestDownloadSummary(item) {
     event.stopPropagation();
     openChannelDetails(item.channel_id);
   } : null;
-  button.disabled = !item.youtube_id;
-  button.onclick = item.youtube_id ? event => {
+  button.disabled = processing || !item.youtube_id;
+  button.onclick = !processing && item.youtube_id ? event => {
     if (event?.target === channel) return;
     openDownloaderMedia(item);
   } : null;
@@ -6721,7 +6782,7 @@ async function loadDownloaderDownloadOverview(force=false) {
     renderDownloaderActiveDownloads(data);
     renderDownloaderTasks(data);
     renderDownloaderLastDownload(data);
-    renderLatestDownloadSummary(data.last_downloaded || null);
+    renderLatestDownloadSummary(data.latest_download || data.last_downloaded || null);
 
     const newLastDownloadedId =
       data?.last_downloaded?.youtube_id
@@ -7173,6 +7234,11 @@ function resetSingleDownloadDialog(url="") {
   const status = document.getElementById("single-download-status");
   const button = document.getElementById("single-download-start");
 
+  if (url) {
+    singleDownloadJobId = null;
+    if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+    singleDownloadTimer = null;
+  }
   if (input && url) input.value = url;
   if (status) status.classList.add("hidden");
   if (button) button.disabled = false;
@@ -7188,12 +7254,30 @@ function resetSingleDownloadDialog(url="") {
 function openSingleDownload(url="") {
   if (url) resetSingleDownloadDialog(url);
   if (!singleDownloadDialog.open) singleDownloadDialog.showModal();
+  if (singleDownloadJobId && !url) resumeSingleDownloadPolling();
+  if (pinchflatDownloadSnapshot) renderDownloaderActiveDownloads(pinchflatDownloadSnapshot);
+}
+
+function resumeSingleDownloadPolling() {
+  if (!singleDownloadJobId) return;
+  if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+  singleDownloadTimer = setInterval(() => pollSingleDownload(singleDownloadJobId), 1000);
+  pollSingleDownload(singleDownloadJobId);
 }
 
 function closeSingleDownload() {
   singleDownloadDialog.close();
-  if (singleDownloadTimer) clearInterval(singleDownloadTimer);
 }
+
+singleDownloadDialog.addEventListener("close", () => {
+  if (singleDownloadTimer) clearInterval(singleDownloadTimer);
+  singleDownloadTimer = null;
+  if (singleDownloadJobId && pinchflatDownloadSnapshot?.active?.some(item => item.job_id === singleDownloadJobId)) {
+    setDownloaderDownloadMinimised(false);
+  }
+  if (pinchflatDownloadSnapshot) renderDownloaderActiveDownloads(pinchflatDownloadSnapshot);
+  loadDownloaderDownloadOverview(true);
+});
 
 function queueOneTimeDownload(url) {
   if (!url) return;
@@ -7770,6 +7854,7 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
 
     [
       discoverResults.downloaded,
+      discoverResults.latest,
       discoverResults.liked,
       discoverResults.disliked,
       discoverResults.videos,
@@ -7833,7 +7918,7 @@ async function toggleVideoFavourite(button, item) {
         button.textContent = data.favourite ? "♥ Video" : "♡ Video";
       }
     }
-    [discoverResults.downloaded, discoverResults.liked, discoverResults.disliked, discoverResults.videos, discoverResults.shorts, latestSubscriptionVideos].forEach(items => items.forEach(v => {
+    [discoverResults.downloaded, discoverResults.latest, discoverResults.liked, discoverResults.disliked, discoverResults.videos, discoverResults.shorts, latestSubscriptionVideos].forEach(items => items.forEach(v => {
       if (v.video_id === item.video_id) v.is_favourite_video = data.favourite;
     }));
     if (latestPopupVideo?.video_id === item.video_id) {
@@ -9078,12 +9163,18 @@ function downloadedDiscoverSignature(items) {
 function renderCurrentDiscoverMode() {
   if (discoverMode === "downloaded") {
     document.getElementById("discover-quota").textContent =
-      `${discoverResults.downloaded.length} most recent completed subscription downloads`;
+      `${discoverResults.downloaded.length} most recent completed videos`;
 
     renderDiscoverTiles(
       discoverResults.downloaded
     );
 
+    return;
+  }
+
+  if (discoverMode === "latest") {
+    document.getElementById("discover-quota").textContent = `${discoverResults.latest.length} latest subscription videos and Shorts`;
+    renderDiscoverTiles(discoverResults.latest);
     return;
   }
 
@@ -9184,7 +9275,7 @@ async function refreshDownloadedDiscoverIfChanged(forceRender=false) {
 }
 
 async function showDiscoverMode(mode) {
-  discoverMode = ["downloaded", "liked", "disliked", "videos", "shorts", "top100"].includes(mode)
+  discoverMode = ["downloaded", "latest", "liked", "disliked", "videos", "shorts", "top100"].includes(mode)
     ? mode
     : "downloaded";
 
@@ -9195,7 +9286,7 @@ async function showDiscoverMode(mode) {
 
   document.getElementById("discover-videos-panel").classList.toggle(
     "hidden",
-    !["downloaded", "liked", "disliked", "videos"].includes(discoverMode)
+    !["downloaded", "latest", "liked", "disliked", "videos"].includes(discoverMode)
   );
 
   document.getElementById("discover-shorts-panel").classList.toggle(
@@ -9212,6 +9303,8 @@ async function showDiscoverMode(mode) {
     "secondary",
     discoverMode !== "downloaded"
   );
+
+  document.getElementById("discover-latest-btn").classList.toggle("secondary", discoverMode !== "latest");
 
   document.getElementById("discover-liked-btn").classList.toggle(
     "secondary",
@@ -9249,6 +9342,15 @@ async function showDiscoverMode(mode) {
       await loadDiscover("downloaded");
     }
 
+    return;
+  }
+
+  if (discoverMode === "latest") {
+    if (discoverResults.latest.length) renderCurrentDiscoverMode();
+    else {
+      clearDiscoverPanelForLoading("latest");
+      await loadDiscover("latest");
+    }
     return;
   }
 
@@ -9308,7 +9410,7 @@ function clearDiscoverPanelForLoading(mode) {
   const grid = document.getElementById("discover-grid");
   const top100 = document.getElementById("discover-top100-grid");
 
-  if (["downloaded", "liked", "disliked", "videos"].includes(mode) && grid) {
+  if (["downloaded", "latest", "liked", "disliked", "videos"].includes(mode) && grid) {
     grid.replaceChildren();
   }
 
@@ -9325,7 +9427,7 @@ async function refreshDiscover() {
 async function loadDiscover(mode, force=false) {
   const loading = document.getElementById("discover-loading");
   const error = document.getElementById("discover-error");
-  loading.textContent = mode === "liked"
+  loading.textContent = mode === "latest" ? "Loading your latest subscriptions…" : mode === "liked"
     ? "Loading your liked videos…"
     : mode === "disliked"
       ? "Loading your disliked videos…"
@@ -9346,6 +9448,7 @@ async function loadDiscover(mode, force=false) {
     if (!data.ok) throw new Error(data.error || "YouTube discovery failed.");
 
     discoverResults[mode] = data.results || [];
+    if (discoverMode !== mode) return;
 
     if (mode === "downloaded") {
       discoverDownloadedSignature =
@@ -9354,11 +9457,13 @@ async function loadDiscover(mode, force=false) {
         );
 
       document.getElementById("discover-quota").textContent =
-        `${discoverResults.downloaded.length} most recent completed subscription downloads`;
+        `${discoverResults.downloaded.length} most recent completed videos`;
 
       renderDiscoverTiles(
         discoverResults.downloaded
       );
+    } else if (mode === "latest") {
+      renderCurrentDiscoverMode();
     } else if (mode === "liked") {
       document.getElementById("discover-quota").textContent =
         `${discoverResults.liked.length} videos liked on your YouTube account · no YouTube search quota used`;
@@ -9406,16 +9511,18 @@ async function loadDiscover(mode, force=false) {
       }
     }
   } catch (err) {
+    if (discoverMode !== mode) return;
     error.textContent = err.message || String(err);
     error.classList.remove("hidden");
   } finally {
-    loading.classList.add("hidden");
+    if (discoverMode === mode) loading.classList.add("hidden");
   }
 }
 
 function syncDiscoverSubscriptionState(channelId, subscribed=true) {
   [
     discoverResults.downloaded,
+    discoverResults.latest,
     discoverResults.liked,
     discoverResults.disliked,
     discoverResults.videos,
@@ -9588,7 +9695,7 @@ function renderDiscoverTiles(items) {
   if (!items.length) {
     grid.appendChild(
       emptyMessage(
-        "No discovery results were returned. Press Refresh to try another search."
+        "No videos to show in this view. Refresh after new videos become available."
       )
     );
     return;
@@ -9651,7 +9758,7 @@ function renderDiscoverTiles(items) {
       } else {
         openLatestVideo({
           ...item,
-          is_short: false,
+          is_short: !!item.is_short,
           channel_thumbnail_url: item.channel_thumbnail_url || item.channel_avatar_url || ""
         });
       }
@@ -12530,7 +12637,7 @@ async function submitBulkActionAjax(event) {
           `.heart-btn[data-channel-id="${CSS.escape(item.channel_id)}"], .discover-channel-heart[data-channel-id="${CSS.escape(item.channel_id)}"]`
         ).forEach(btn => setHeartButton(btn, favourite, "channel"));
 
-        [discoverResults.downloaded, discoverResults.liked, discoverResults.disliked, discoverResults.videos, discoverResults.shorts, discoverResults.top100]
+        [discoverResults.downloaded, discoverResults.latest, discoverResults.liked, discoverResults.disliked, discoverResults.videos, discoverResults.shorts, discoverResults.top100]
           .forEach(items => items.forEach(video => {
             if (video.channel_id === item.channel_id) video.is_favourite_channel = favourite;
           }));
@@ -12731,9 +12838,9 @@ async function startSingleDownload(event) {
   document.getElementById("single-download-progress").removeAttribute("value");
   document.getElementById("single-download-percent").textContent = "Preparing";
   document.getElementById("single-download-bytes").textContent = "";
-  pollSingleDownload(data.job_id);
-  if (singleDownloadTimer) clearInterval(singleDownloadTimer);
-  singleDownloadTimer = setInterval(() => pollSingleDownload(data.job_id), 1000);
+  singleDownloadJobId = data.job_id;
+  if (singleDownloadDialog.open) resumeSingleDownloadPolling();
+  loadDownloaderDownloadOverview(true);
 }
 
 async function pollSingleDownload(jobId) {
@@ -12744,6 +12851,7 @@ async function pollSingleDownload(jobId) {
       throw new Error(data.error || `Download status returned HTTP ${response.status}`);
     }
 
+    if (jobId !== singleDownloadJobId) return;
     const job = data.job;
     const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
     const progressEl = document.getElementById("single-download-progress");
@@ -12777,6 +12885,7 @@ async function pollSingleDownload(jobId) {
       clearInterval(singleDownloadTimer);
       singleDownloadTimer = null;
       document.getElementById("single-download-start").disabled = false;
+      loadDownloaderDownloadOverview(true);
       if (job.status === "completed" && job.source_type === "single" && job.video_id) {
         singleDownloadedVideoIds.add(String(job.video_id));
         refreshOneTimeDownloadButtonStates();
@@ -13062,7 +13171,7 @@ latestVideoDialog?.addEventListener(
   }
 );
 
-[settingsDialog, debugReferenceDialog, activityDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
+[settingsDialog, debugReferenceDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
   d?.addEventListener("click", event => {
     if (event.target === d) d.close();
   });
