@@ -5223,6 +5223,13 @@
             <label>Default quality
               <select name="downloader_default_profile">{% for profile in profiles %}<option value="{{ profile.id }}" {% if downloader_default_profile|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}</select>
             </label>
+            <label>Playback compatibility
+              <select name="downloader_compatibility_profile">
+                <option value="emby_tv" {% if downloader_compatibility_profile == 'emby_tv' %}selected{% endif %}>Emby / Smart TV · H.264 + AAC + MP4</option>
+                <option value="automatic" {% if downloader_compatibility_profile == 'automatic' %}selected{% endif %}>Best available · automatic codecs</option>
+              </select>
+              <span class="muted small">Emby / Smart TV prefers AVC/AAC from YouTube and verifies every completed subscription video with ffprobe. Non-compatible files are converted before Emby scans them.</span>
+            </label>
             <label>Concurrent downloads
               <select name="downloader_worker_concurrency">{% for value in range(1, 9) %}<option value="{{ value }}" {% if downloader_worker_concurrency|int == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
             </label>

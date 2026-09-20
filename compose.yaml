@@ -95,10 +95,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "3.0.1"
+  version: "3.0.2"
   update_at: "2026-09-20"
   release_notes:
-    en_US: v3.0.1 improves performance, favourites, download progress, existing-library import, cookie settings and YouTube channel artwork.
+    en_US: v3.0.2 improves dashboard performance, native media import, clickable/progress download UI, channel artwork, cookie refresh behaviour and H.264/AAC/MP4 Direct Play compatibility for subscription downloads.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues

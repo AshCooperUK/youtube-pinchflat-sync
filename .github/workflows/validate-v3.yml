@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - v3-youtube-subscription-downloader
-      - v3.0.1-performance-ui
+      - v3.0.2-performance-ui
 
 permissions:
   contents: read
@@ -38,8 +38,14 @@ jobs:
           mkdir -p "$DATA_DIR" "$DOWNLOAD_ROOT"
           PYTHONPATH=app python - <<'PY'
           import app
-          assert app.VERSION == "3.0.1"
+          assert app.VERSION == "3.0.2"
           assert app.YOUTUBE_COOKIE_PATH.name == "youtube-cookies.txt"
+          assert app.subscription_download_compatibility_profile() == "emby_tv"
+          profile = app._v3_profile_ydl_options("1080p")
+          assert "avc1" in profile["format"]
+          assert "mp4a" in profile["format"]
+          assert profile["merge_output_format"] == "mp4"
+          assert callable(app.ensure_download_emby_compatibility)
           print("Application import OK", app.VERSION)
           PY
 
@@ -92,15 +98,29 @@ jobs:
 
       - name: Stage clean source package
         run: |
-          mkdir -p /tmp/v13.0.1
-          git archive HEAD | tar -x -C /tmp/v13.0.1
-          rm -rf /tmp/v13.0.1/app/__pycache__
+          mkdir -p /tmp/v13.0.2
+          git archive HEAD | tar -x -C /tmp/v13.0.2
+          rm -rf /tmp/v13.0.2/app/__pycache__
 
-      - name: Upload v13.0.1 source package
+      - name: Upload v13.0.2 source package
         uses: actions/upload-artifact@v4
         with:
-          name: v13.0.1
-          path: /tmp/v13.0.1
+          name: v13.0.2
+          path: /tmp/v13.0.2
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+
+      - name: Package V3.0.2 source
+        run: |
+          zip -qr youtube-subscription-downloader-v3.0.2.zip . \
+            -x ".git/*" \
+            -x "youtube-subscription-downloader-v3.0.2.zip"
+
+      - name: Upload V3.0.2 source package
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-subscription-downloader-v3.0.2
+          path: youtube-subscription-downloader-v3.0.2.zip
+          if-no-files-found: error
