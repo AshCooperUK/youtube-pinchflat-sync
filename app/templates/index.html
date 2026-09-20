@@ -5265,6 +5265,78 @@
             </label>
           </div>
 
+          <div class="setting-box" style="margin-top:14px;padding:14px">
+            <h3>Subscription media profile</h3>
+            <p class="muted small">These replace the media options previously supplied by the external download manager and apply to native subscription downloads.</p>
+
+            <div class="page-view-grid">
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_download_subtitles" value="1" {% if downloader_download_subtitles %}checked{% endif %}>
+                <span><strong>Download subtitles</strong><small>Save available subtitle tracks alongside subscription media.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_embed_subtitles" value="1" {% if downloader_embed_subtitles %}checked{% endif %}>
+                <span><strong>Embed subtitles</strong><small>Embed downloaded subtitles into compatible output files.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_download_thumbnail" value="1" {% if downloader_download_thumbnail %}checked{% endif %}>
+                <span><strong>Download thumbnails</strong><small>Keep thumbnail artwork with downloaded media.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_embed_thumbnail" value="1" {% if downloader_embed_thumbnail %}checked{% endif %}>
+                <span><strong>Embed thumbnails</strong><small>Embed artwork into supported media containers.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_download_metadata" value="1" {% if downloader_download_metadata %}checked{% endif %}>
+                <span><strong>Download metadata</strong><small>Keep yt-dlp info JSON for history, migration and reconciliation.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_embed_metadata" value="1" {% if downloader_embed_metadata %}checked{% endif %}>
+                <span><strong>Embed metadata</strong><small>Embed YouTube metadata into compatible media files.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_write_nfo" value="1" {% if downloader_write_nfo %}checked{% endif %}>
+                <span><strong>Write Emby NFO</strong><small>Create media-centre metadata for subscription channels.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_series_images" value="1" {% if downloader_series_images %}checked{% endif %}>
+                <span><strong>Series artwork</strong><small>Create poster, fanart and banner artwork for Emby.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_include_shorts" value="1" {% if downloader_include_shorts %}checked{% endif %}>
+                <span><strong>Include Shorts</strong><small>Allow native subscription jobs identified as YouTube Shorts.</small></span>
+              </label>
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_include_livestreams" value="1" {% if downloader_include_livestreams %}checked{% endif %}>
+                <span><strong>Include livestreams</strong><small>Allow live and previously-live videos when yt-dlp exposes them.</small></span>
+              </label>
+            </div>
+
+            <div class="settings-grid" style="margin-top:12px">
+              <label>Subtitle languages
+                <input type="text" name="downloader_subtitle_languages" value="{{ downloader_subtitle_languages }}" placeholder="en.*,en">
+                <span class="muted small">Comma-separated yt-dlp language selectors.</span>
+              </label>
+              <label>SponsorBlock behaviour
+                <select name="downloader_sponsorblock_behaviour">
+                  <option value="disabled" {% if downloader_sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option>
+                  <option value="mark" {% if downloader_sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark as chapters</option>
+                  <option value="remove" {% if downloader_sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove segments</option>
+                </select>
+              </label>
+            </div>
+
+            {% set sponsor_categories = downloader_sponsorblock_categories.split(',') %}
+            <div class="page-view-grid" style="margin-top:10px">
+              {% for value,label in [('sponsor','Sponsor'),('outro','Outro / credits'),('preview','Preview'),('intro','Intro'),('selfpromo','Self promotion'),('interaction','Interaction')] %}
+              <label class="page-view-option">
+                <input type="checkbox" name="downloader_sponsorblock_categories" value="{{ value }}" {% if value in sponsor_categories %}checked{% endif %}>
+                <span><strong>{{ label }}</strong><small>SponsorBlock category</small></span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+
           <details class="settings-details" style="margin-top:14px">
             <summary>Advanced yt-dlp options</summary>
             <div>
@@ -5282,6 +5354,39 @@
           <div class="actions" style="margin-top:14px">
             <button class="btn" type="submit">Save Downloader Settings</button>
           </div>
+        </form>
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <div class="profile-editor-heading">
+          <div>
+            <h3>Scheduled Channel Scans</h3>
+            <div class="muted small">Favourite and non-favourite channels can be deep-scanned on different schedules. Work is staggered and queued rather than launched in one large burst.</div>
+          </div>
+        </div>
+
+        <form method="post" action="/settings/downloader/scan-schedule">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <div class="settings-grid">
+            <label>Favourite channels
+              <select name="pinchflat_force_index_favourite_minutes">
+                {% for value, label in pinchflat_force_index_favourite_options %}
+                  <option value="{{ value }}" {% if pinchflat_force_index_favourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="muted small">{{ pinchflat_force_index_status.favourites.eligible }} enabled favourite channel(s).</span>
+            </label>
+            <label>Non-favourite channels
+              <select name="pinchflat_force_index_nonfavourite_minutes">
+                {% for value, label in pinchflat_force_index_nonfavourite_options %}
+                  <option value="{{ value }}" {% if pinchflat_force_index_nonfavourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="muted small">{{ pinchflat_force_index_status.non_favourites.eligible }} enabled non-favourite channel(s).</span>
+            </label>
+          </div>
+          <div class="profile-control-help" style="margin-top:10px">Each due channel is placed into the native serial deep-scan queue. It no longer creates external Force Index or Oban jobs.</div>
+          <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Save Scan Schedule</button></div>
         </form>
       </div>
 
@@ -6924,12 +7029,8 @@ function settingsActionNeedsPageRefresh(path) {
     "/settings/configuration",
     "/settings/youtube",
     "/settings/apis",
-    "/settings/pinchflat",
-    "/settings/pinchflat/advanced",
-    "/settings/pinchflat/force-index",
-    "/settings/pinchflat/profile/create",
-    "/settings/pinchflat/profile/delete",
-    "/settings/pinchflat/profile",
+    "/settings/downloader/advanced",
+    "/settings/downloader/scan-schedule",
     "/settings/single-download",
     "/settings/history",
     "/settings/video-retention",
@@ -6939,9 +7040,8 @@ function settingsActionNeedsPageRefresh(path) {
 
 function settingsActionNeedsDialogRefresh(path) {
   return new Set([
-    "/settings/pinchflat",
-    "/settings/pinchflat/profile/create",
-    "/settings/pinchflat/profile/delete"
+    "/settings/downloader/advanced",
+    "/settings/downloader/scan-schedule"
   ]).has(path);
 }
 
