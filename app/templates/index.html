@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <title>Pinchflat Sync</title>
+  <title>YouTube Subscription Downloader</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
   <style>
     :root {
@@ -3297,13 +3297,13 @@
 <div class="wrap">
   <div class="header">
     <div>
-      <h1>Pinchflat Sync</h1>
+      <h1>YouTube Subscription Downloader</h1>
       <div class="version">v{{ version }}</div>
     </div>
     <div class="header-actions">
       {% if is_admin and page_view.button_sync %}
       <form method="post" action="/sync"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-        <button class="btn" {% if not google_connected %}disabled{% endif %}>Pinchflat Sync</button>
+        <button class="btn" {% if not google_connected %}disabled{% endif %}>Sync &amp; Scan</button>
       </form>
       {% endif %}
 
@@ -3380,62 +3380,28 @@
 
     {% if page_view.show_summary_pinchflat %}
     <div class="card" id="top" data-summary-tile="pinchflat">
-      <div class="muted small">Pinchflat</div>
-      {% if is_admin %}
-        <a class="pinchflat-icon-link" href="{{ pinchflat_open_url }}" target="_blank" rel="noopener" title="Open Pinchflat" aria-label="Open Pinchflat">
-          <img src="https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Pinchflat/icon.png" alt="Pinchflat" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">
-          <span class="pinchflat-icon-fallback" aria-hidden="true">P</span>
-        </a>
-      {% endif %}
-      {% if pinchflat_online %}
-        <div class="pinchflat-online-row">
-          <div class="metric ok">Online</div>
-        </div>
-      {% elif pinchflat_container.control_available and not pinchflat_container.running %}
-        <div class="metric bad">Stopped</div>
+      <div class="muted small">Downloader</div>
+      <div class="metric ok">Online</div>
+      <div class="muted small">Native yt-dlp · {{ downloader_worker_concurrency }} worker{{ '' if downloader_worker_concurrency == 1 else 's' }}</div>
+      {% if downloader_auth_status.configured and downloader_auth_status.valid %}
+        <div class="muted small ok" style="margin-top:6px">Authenticated retry ready</div>
       {% else %}
-        <div class="metric bad">Offline</div>
-      {% endif %}
-
-      {% if is_admin and pinchflat_container.control_available and pinchflat_container.exists %}
-        <div class="power-toggle-wrap">
-          <form method="post" action="/pinchflat/power">
-            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <input
-              type="hidden"
-              name="action"
-              value="{{ 'stop' if pinchflat_container.running else 'start' }}"
-            >
-            <label class="source-toggle" title="Start or stop the Pinchflat Docker container">
-              <input
-                type="checkbox"
-                {% if pinchflat_container.running %}checked{% endif %}
-                onchange="this.form.submit()"
-              >
-              <span class="toggle-track"></span>
-              <span class="source-toggle-text">
-                {{ 'Enabled' if pinchflat_container.running else 'Disabled' }}
-              </span>
-            </label>
-          </form>
-        </div>
-      {% elif is_admin %}
-        <div class="muted small">Docker power control unavailable</div>
+        <div class="muted small" style="margin-top:6px">Anonymous downloads</div>
       {% endif %}
     </div>
     {% endif %}
 
     {% if page_view.show_summary_pinchflat_tasks %}
     <div class="card" data-summary-tile="pinchflat_tasks" id="pinchflat-tasks-summary-card">
-      <div class="muted small">Pinchflat tasks</div>
+      <div class="muted small">Tasks</div>
       <div class="metric" id="pinchflat-tasks-active">0</div>
       <div class="muted small" id="pinchflat-tasks-status">No active non-download tasks</div>
       <div class="warn small hidden" id="pinchflat-tasks-membership-errors"></div>
       <div class="muted small" id="pinchflat-tasks-current"></div>
       {% if is_admin %}
       <div class="pinchflat-task-block-wrap">
-        <label class="source-toggle" title="When enabled, stop and delete all current Pinchflat Oban tasks and automatically cancel any new tasks until switched off.">
-          <input id="pinchflat-task-block-toggle" type="checkbox" onchange="setPinchflatTaskBlock(this.checked)">
+        <label class="source-toggle" title="When enabled, stop and delete all current native tasks and automatically cancel any new tasks until switched off.">
+          <input id="pinchflat-task-block-toggle" type="checkbox" onchange="setDownloaderTaskBlock(this.checked)">
           <span class="toggle-track"></span>
           <span class="source-toggle-text">Delete all tasks</span>
         </label>
@@ -3452,7 +3418,7 @@
         <img id="latest-download-summary-thumb" src="{{ url_for('static', filename='channel-placeholder.svg') }}" alt="Latest downloaded video">
         <span class="latest-download-summary-copy">
           <strong id="latest-download-summary-title">No completed download yet</strong>
-          <span id="latest-download-summary-channel">Pinchflat</span>
+          <span id="latest-download-summary-channel">YouTube</span>
         </span>
       </button>
     </div>
@@ -3495,17 +3461,17 @@
   >
     <div class="pinchflat-download-head">
       <div>
-        <h2>Pinchflat downloads</h2>
+        <h2>subscription downloads</h2>
         <div class="muted small" id="pinchflat-download-summary">
-          Loading current Pinchflat download activity…
+          Loading current Downloader download activity…
         </div>
       </div>
 
-      <div class="pinchflat-download-controls" aria-label="Pinchflat download controls">
+      <div class="pinchflat-download-controls" aria-label="Downloader download controls">
         <button
           class="pinchflat-download-control"
           type="button"
-          onclick="openPinchflatQueue()"
+          onclick="openDownloaderQueue()"
           title="Show waiting downloads"
           aria-label="Show waiting downloads"
         >
@@ -3524,9 +3490,9 @@
           class="pinchflat-download-control"
           type="button"
           id="pinchflat-download-refresh"
-          onclick="loadPinchflatDownloadOverview(true)"
-          title="Refresh Pinchflat downloads"
-          aria-label="Refresh Pinchflat downloads"
+          onclick="loadDownloaderDownloadOverview(true)"
+          title="Refresh subscription downloads"
+          aria-label="Refresh subscription downloads"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20 11a8 8 0 1 0-2.34 5.66"></path>
@@ -3538,9 +3504,9 @@
           class="pinchflat-download-control"
           type="button"
           id="pinchflat-download-minimise"
-          onclick="togglePinchflatDownloadSection()"
-          title="Minimise Pinchflat downloads"
-          aria-label="Minimise Pinchflat downloads"
+          onclick="toggleDownloaderDownloadSection()"
+          title="Minimise subscription downloads"
+          aria-label="Minimise subscription downloads"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M6 17h12"></path>
@@ -3551,7 +3517,7 @@
 
     <div class="pinchflat-download-body" id="pinchflat-download-body">
       <div id="pinchflat-active-downloads" class="pinchflat-active-list">
-        <div class="pinchflat-download-empty">Checking Pinchflat for active downloads…</div>
+        <div class="pinchflat-download-empty">Checking Downloader for active downloads…</div>
       </div>
 
       {% if not (page_view.load_summary and page_view.show_summary_latest_download) %}
@@ -3773,7 +3739,7 @@
                     type="button"
                     class="channel-image-control channel-control-scan"
                     aria-label="Force scan {{ sub['title'] }}"
-                    title="{{ 'Force Pinchflat scan' if sub['pinchflat_source_id'] else 'Enable downloads before scanning' }}"
+                    title="{{ 'Force Downloader scan' if sub['pinchflat_source_id'] else 'Enable downloads before scanning' }}"
                     data-channel-scan-control="1"
                     data-channel-id="{{ sub['channel_id'] }}"
                     onclick="forceScanChannelFromControl(this)"
@@ -3932,7 +3898,7 @@
     href="https://github.com/AshCooperUK/youtube-pinchflat-sync"
     target="_blank"
     rel="noopener"
-    title="Open the Pinchflat Sync GitHub repository"
+    title="Open the YouTube Subscription Downloader GitHub repository"
   >
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 .7A11.5 11.5 0 0 0 8.36 23.1c.58.11.79-.25.79-.56v-2.2c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.78 1.19 1.78 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.57-.29-5.27-1.29-5.27-5.73 0-1.27.45-2.3 1.19-3.11-.12-.29-.52-1.47.11-3.07 0 0 .97-.31 3.16 1.19A11 11 0 0 1 12 6.07a11 11 0 0 1 2.88.39c2.19-1.5 3.16-1.19 3.16-1.19.63 1.6.23 2.78.11 3.07.74.81 1.19 1.84 1.19 3.11 0 4.45-2.71 5.43-5.29 5.72.42.36.79 1.06.79 2.14v3.18c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .7z"></path>
@@ -3967,40 +3933,40 @@
       <section class="debug-function-group">
         <h3>Dashboard &amp; account</h3>
         <div class="debug-function-list">
-          <div class="debug-function-row" data-debug-search="pinchflat sync youtube subscriptions sources"><div class="debug-function-name">Pinchflat Sync</div><div class="debug-service-badge">YouTube + Pinchflat</div><div class="debug-function-description">Synchronises the app's subscription state with Pinchflat sources and applies the configured source rules.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat sync youtube subscriptions sources"><div class="debug-function-name">YouTube Subscription Downloader</div><div class="debug-service-badge">YouTube + Downloader</div><div class="debug-function-description">Synchronises the app's subscription state with Downloader sources and applies the configured source rules.</div></div>
           <div class="debug-function-row" data-debug-search="refresh youtube subscriptions google data api"><div class="debug-function-name">Refresh YouTube</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Reloads the connected account's current YouTube subscriptions and updates local subscription records.</div></div>
           <div class="debug-function-row" data-debug-search="single download yt-dlp one-time"><div class="debug-function-name">Single Download</div><div class="debug-service-badge">yt-dlp / Local app</div><div class="debug-function-description">Downloads one supplied YouTube URL using the selected One-time Download options. The Emby / Smart TV profile prefers H.264 + AAC in MP4 and converts incompatible streams before the detected Emby One-time Download library is scanned.</div></div>
           <div class="debug-function-row" data-debug-search="google status oauth cloud console"><div class="debug-function-name">Google status tile</div><div class="debug-service-badge">Google OAuth</div><div class="debug-function-description">Shows whether Google is connected and whether the token has read/write access. The logo opens Google Cloud Console.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat online power start stop docker"><div class="debug-function-name">Pinchflat power</div><div class="debug-service-badge">Docker</div><div class="debug-function-description">Starts or stops the Pinchflat container through the mounted Docker socket.</div></div>
-          <div class="debug-function-row" data-debug-search="latest download tile player"><div class="debug-function-name">Latest download tile</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Shows the newest completed Pinchflat download. Clicking the video opens the in-app media player.</div></div>
-          <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Opens the complete list of waiting Pinchflat jobs and refreshes the queue while the popup remains open.</div></div>
-          <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Immediately reloads current Pinchflat workers, waiting count and recent completed download data.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background membership members only join this channel"><div class="debug-function-name">Pinchflat tasks tile</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Shows active and waiting Pinchflat background work other than media downloads, such as source indexing or metadata jobs. It also counts non-completed download jobs whose stored yt-dlp error contains “Join this channel”, shown as membership errors. Download jobs remain in the dedicated Pinchflat Downloads section.</div></div>
-          <div class="debug-function-row" data-debug-search="delete all tasks block cancel stop persistent oban"><div class="debug-function-name">Delete all Pinchflat tasks</div><div class="debug-service-badge">Pinchflat / Oban</div><div class="debug-function-description">Cancels running Pinchflat jobs, deletes queued non-completed jobs and pauses Pinchflat queues. While the toggle stays enabled the app removes any new tasks which are created. Switching it off resumes Pinchflat queues.</div></div>
-          <div class="debug-function-row" data-debug-search="download speed live transfer yt-dlp"><div class="debug-function-name">Pinchflat download speed</div><div class="debug-service-badge">Pinchflat / yt-dlp</div><div class="debug-function-description">Shows a best-effort live transfer rate for active Pinchflat downloads. The app uses yt-dlp progress output when available and otherwise estimates speed from the growing download file.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat online power start stop docker"><div class="debug-function-name">Downloader power</div><div class="debug-service-badge">Docker</div><div class="debug-function-description">Starts or stops the application container through the mounted Docker socket.</div></div>
+          <div class="debug-function-row" data-debug-search="latest download tile player"><div class="debug-function-name">Latest download tile</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Shows the newest completed Downloader download. Clicking the video opens the in-app media player.</div></div>
+          <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Opens the complete list of waiting Downloader jobs and refreshes the queue while the popup remains open.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Immediately reloads current Downloader workers, waiting count and recent completed download data.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background membership members only join this channel"><div class="debug-function-name">Tasks tile</div><div class="debug-service-badge">Native queue</div><div class="debug-function-description">Shows active and waiting Downloader background work other than media downloads, such as source indexing or metadata jobs. It also counts non-completed download jobs whose stored yt-dlp error contains “Join this channel”, shown as membership errors. Download jobs remain in the dedicated Downloads section.</div></div>
+          <div class="debug-function-row" data-debug-search="delete all tasks block cancel stop persistent oban"><div class="debug-function-name">Delete all Tasks</div><div class="debug-service-badge">Native queue</div><div class="debug-function-description">Cancels running Downloader jobs, deletes queued non-completed jobs and pauses Downloader queues. While the toggle stays enabled the app removes any new tasks which are created. Switching it off resumes Downloader queues.</div></div>
+          <div class="debug-function-row" data-debug-search="download speed live transfer yt-dlp"><div class="debug-function-name">Downloader download speed</div><div class="debug-service-badge">Downloader / yt-dlp</div><div class="debug-function-description">Shows a best-effort live transfer rate for active subscription downloads. The app uses yt-dlp progress output when available and otherwise estimates speed from the growing download file.</div></div>
         </div>
       </section>
 
       <section class="debug-function-group">
         <h3>Subscriptions &amp; channel actions</h3>
         <div class="debug-function-list">
-          <div class="debug-function-row" data-debug-search="enable disable downloads source toggle"><div class="debug-function-name">Enable / Disable</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Immediately creates or removes the channel's Pinchflat source according to the Enabled switch.</div></div>
-          <div class="debug-function-row" data-debug-search="save range profile history"><div class="debug-function-name">Save changes</div><div class="debug-service-badge">Local app + Pinchflat</div><div class="debug-function-description">Saves changed download range or media profile settings and applies them to the channel source.</div></div>
-          <div class="debug-function-row" data-debug-search="download pending action"><div class="debug-function-name">Download Pending</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Requests Pinchflat to process media which is pending for the selected source.</div></div>
-          <div class="debug-function-row" data-debug-search="re-download existing redownload"><div class="debug-function-name">Re-Download Existing</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Requests Pinchflat to download media again for items already known to that source.</div></div>
-          <div class="debug-function-row" data-debug-search="force scan source"><div class="debug-function-name">Force Scan</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Forces Pinchflat to check the channel now rather than waiting for its normal source schedule.</div></div>
-          <div class="debug-function-row" data-debug-search="refresh media metadata"><div class="debug-function-name">Refresh Media</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Refreshes Pinchflat's media information for the selected source.</div></div>
-          <div class="debug-function-row" data-debug-search="sync files disk"><div class="debug-function-name">Sync Files on Disk</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Asks Pinchflat to reconcile its media records with files currently present on disk.</div></div>
+          <div class="debug-function-row" data-debug-search="enable disable downloads source toggle"><div class="debug-function-name">Enable / Disable</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Immediately creates or removes the channel's Downloader source according to the Enabled switch.</div></div>
+          <div class="debug-function-row" data-debug-search="save range profile history"><div class="debug-function-name">Save changes</div><div class="debug-service-badge">Local app + Downloader</div><div class="debug-function-description">Saves changed download range or media profile settings and applies them to the channel source.</div></div>
+          <div class="debug-function-row" data-debug-search="download pending action"><div class="debug-function-name">Download Pending</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Requests Downloader to process media which is pending for the selected source.</div></div>
+          <div class="debug-function-row" data-debug-search="re-download existing redownload"><div class="debug-function-name">Re-Download Existing</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Requests Downloader to download media again for items already known to that source.</div></div>
+          <div class="debug-function-row" data-debug-search="force scan source"><div class="debug-function-name">Force Scan</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Forces Downloader to check the channel now rather than waiting for its normal source schedule.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh media metadata"><div class="debug-function-name">Refresh Media</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Refreshes Downloader's media information for the selected source.</div></div>
+          <div class="debug-function-row" data-debug-search="sync files disk"><div class="debug-function-name">Sync Files on Disk</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Asks Downloader to reconcile its media records with files currently present on disk.</div></div>
           <div class="debug-function-row" data-debug-search="refresh emby channel scan"><div class="debug-function-name">Refresh Emby</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Scans the matching channel folder in the auto-detected YouTube library, then runs a delayed Replace all metadata refresh. If the folder is not indexed yet, the same two-stage refresh runs against only the YouTube library.</div></div>
           <div class="debug-function-row" data-debug-search="unsubscribe youtube"><div class="debug-function-name">Unsubscribe</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Unsubscribes the connected Google account from the channel while retaining the local channel record.</div></div>
-          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove source"><div class="debug-function-name">Unsubscribe &amp; Delete Channel</div><div class="debug-service-badge">YouTube + Pinchflat</div><div class="debug-function-description">Unsubscribes, removes the Pinchflat source and removes the channel from the normal local subscription list while keeping downloaded media.</div></div>
-          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove media destructive"><div class="debug-function-name">Unsubscribe, Delete Channel &amp; Remove Media</div><div class="debug-service-badge">YouTube + Pinchflat + Storage</div><div class="debug-function-description">Performs the destructive channel removal and also deletes downloaded media belonging to the channel.</div></div>
+          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove source"><div class="debug-function-name">Unsubscribe &amp; Delete Channel</div><div class="debug-service-badge">YouTube + Downloader</div><div class="debug-function-description">Unsubscribes, removes the Downloader source and removes the channel from the normal local subscription list while keeping downloaded media.</div></div>
+          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove media destructive"><div class="debug-function-name">Unsubscribe, Delete Channel &amp; Remove Media</div><div class="debug-service-badge">YouTube + Downloader + Storage</div><div class="debug-function-description">Performs the destructive channel removal and also deletes downloaded media belonging to the channel.</div></div>
           <div class="debug-function-row" data-debug-search="bulk actions selected channels"><div class="debug-function-name">Bulk actions</div><div class="debug-service-badge">Multiple services</div><div class="debug-function-description">Runs the chosen channel action across every selected subscription. Destructive actions ask for confirmation first.</div></div>
           <div class="debug-function-row" data-debug-search="channel name details popup stats"><div class="debug-function-name">Channel name</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Opens the rich Channel popup with YouTube statistics, videos, featured channels, local source details and history.</div></div>
           <div class="debug-function-row" data-debug-search="heart favourite channel"><div class="debug-function-name">Heart icon</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Adds or removes the channel from Favourite Channels. The same state is reflected throughout the interface.</div></div>
-          <div class="debug-function-row" data-debug-search="tick enabled downloads"><div class="debug-function-name">Download tick icon</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Enables or disables Pinchflat downloads for the channel directly from channel artwork.</div></div>
-          <div class="debug-function-row" data-debug-search="refresh icon force scan artwork"><div class="debug-function-name">Channel refresh icon</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Runs Force Scan for the channel directly from the channel-image overlay.</div></div>
-          <div class="debug-function-row" data-debug-search="delete remove trash channel icon unsubscribe pinchflat sync everything"><div class="debug-function-name">Channel delete icon</div><div class="debug-service-badge">Pinchflat Sync + Pinchflat + YouTube</div><div class="debug-function-description">Opens the channel removal menu. Choose whether to unsubscribe, remove only the Pinchflat Sync record, remove the Pinchflat source too, or remove the channel and downloaded media.</div></div>
+          <div class="debug-function-row" data-debug-search="tick enabled downloads"><div class="debug-function-name">Download tick icon</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Enables or disables subscription downloads for the channel directly from channel artwork.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh icon force scan artwork"><div class="debug-function-name">Channel refresh icon</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Runs Force Scan for the channel directly from the channel-image overlay.</div></div>
+          <div class="debug-function-row" data-debug-search="delete remove trash channel icon unsubscribe pinchflat sync everything"><div class="debug-function-name">Channel delete icon</div><div class="debug-service-badge">YouTube Subscription Downloader + Downloader + YouTube</div><div class="debug-function-description">Opens the channel removal menu. Choose whether to unsubscribe, remove only the YouTube Subscription Downloader record, remove the Downloader source too, or remove the channel and downloaded media.</div></div>
         </div>
       </section>
 
@@ -4008,7 +3974,7 @@
         <h3>Channel details &amp; media player</h3>
         <div class="debug-function-list">
           <div class="debug-function-row" data-debug-search="youtube logo channel"><div class="debug-function-name">YouTube logo</div><div class="debug-service-badge">YouTube</div><div class="debug-function-description">Opens the current channel directly on YouTube in a new browser tab.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat logo source"><div class="debug-function-name">Pinchflat logo</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Opens the associated Pinchflat source when a source exists.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat logo source"><div class="debug-function-name">Downloader logo</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Opens the associated Downloader source when a source exists.</div></div>
           <div class="debug-function-row" data-debug-search="popular latest channel videos"><div class="debug-function-name">Popular / Latest videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Switches the channel video strip between popular results and recent uploads.</div></div>
           <div class="debug-function-row" data-debug-search="featured channels"><div class="debug-function-name">Featured Channels</div><div class="debug-service-badge">YouTube</div><div class="debug-function-description">Shows channels featured by the current channel where YouTube exposes that public channel section.</div></div>
           <div class="debug-function-row" data-debug-search="growth history chart snapshots"><div class="debug-function-name">Growth history</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Charts public YouTube totals stored by the app as daily channel snapshots.</div></div>
@@ -4023,7 +3989,7 @@
       <section class="debug-function-group">
         <h3>Discover</h3>
         <div class="debug-function-list">
-          <div class="debug-function-row" data-debug-search="discover downloaded pinchflat"><div class="debug-function-name">Downloaded</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Shows recently completed Pinchflat downloads and refreshes while this Discover view is open.</div></div>
+          <div class="debug-function-row" data-debug-search="discover downloaded pinchflat"><div class="debug-function-name">Downloaded</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Shows recently completed subscription downloads and refreshes while this Discover view is open.</div></div>
           <div class="debug-function-row" data-debug-search="liked videos discover youtube"><div class="debug-function-name">Liked Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads videos liked by the connected YouTube account, following YouTube pagination.</div></div>
           <div class="debug-function-row" data-debug-search="disliked videos discover youtube rating"><div class="debug-function-name">Disliked Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Loads videos disliked by the connected YouTube account from its YouTube rating history.</div></div>
           <div class="debug-function-row" data-debug-search="random videos discover recommendations"><div class="debug-function-name">Random Videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Builds a larger recommendation-style selection influenced by subscriptions, favourites and liked videos.</div></div>
@@ -4036,25 +4002,25 @@
       </section>
 
       <section class="debug-function-group">
-        <h3>Emby, automation &amp; Pinchflat settings</h3>
+        <h3>Emby, automation &amp; Downloader settings</h3>
         <div class="debug-function-list">
           <div class="debug-function-row" data-debug-search="test emby connection api"><div class="debug-function-name">Test Emby connection</div><div class="debug-service-badge">Emby API</div><div class="debug-function-description">Checks the configured Emby server URL and API key and reports whether the server responds.</div></div>
-          <div class="debug-function-row" data-debug-search="emby scan library files youtube single downloads playlist"><div class="debug-function-name">Emby targeted scans</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Detects the Emby library associated with Pinchflat media, One-time Downloads or the Emby Download playlist, scans only that target, then runs the delayed Replace all metadata refresh.</div></div>
-          <div class="debug-function-row" data-debug-search="auto refresh emby downloads"><div class="debug-function-name">Automatic Emby refresh</div><div class="debug-service-badge">Pinchflat + Emby</div><div class="debug-function-description">Detects a newly completed Pinchflat download, scans its channel in Emby and follows with a delayed metadata refresh automatically.</div></div>
+          <div class="debug-function-row" data-debug-search="emby scan library files youtube single downloads playlist"><div class="debug-function-name">Emby targeted scans</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Detects the Emby library associated with subscription media, One-time Downloads or the Emby Download playlist, scans only that target, then runs the delayed Replace all metadata refresh.</div></div>
+          <div class="debug-function-row" data-debug-search="auto refresh emby downloads"><div class="debug-function-name">Automatic Emby refresh</div><div class="debug-service-badge">Downloader + Emby</div><div class="debug-function-description">Detects a newly completed Downloader download, scans its channel in Emby and follows with a delayed metadata refresh automatically.</div></div>
           <div class="debug-function-row" data-debug-search="subscription sync schedule automation youtube"><div class="debug-function-name">YouTube subscription sync</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Controls the scheduled refresh of YouTube subscriptions.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat sync schedule automation"><div class="debug-function-name">Pinchflat sync schedule</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Controls scheduled reconciliation between local subscription settings and Pinchflat sources.</div></div>
-          <div class="debug-function-row" data-debug-search="scheduled force index favourites non favourites source scan"><div class="debug-function-name">Scheduled Force Index</div><div class="debug-service-badge">Pinchflat + YouTube</div><div class="debug-function-description">Force Indexes enabled Pinchflat sources automatically. Favourite and non-favourite channels have separate intervals, and scans are staggered source by source across each interval to avoid one large request burst.</div></div>
-          <div class="debug-function-row" data-debug-search="video retention cleanup delete old media age storage"><div class="debug-function-name">Video Retention</div><div class="debug-service-badge">Pinchflat + Local app</div><div class="debug-function-description">Removes old Pinchflat-downloaded media by YouTube upload age using favourite, non-favourite and per-channel policies. It keeps the configured newest videos and uses Pinchflat's own deletion logic to stop removed media being immediately downloaded again.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat sync schedule automation"><div class="debug-function-name">Downloader sync schedule</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Controls scheduled reconciliation between local subscription settings and Downloader sources.</div></div>
+          <div class="debug-function-row" data-debug-search="scheduled force index favourites non favourites source scan"><div class="debug-function-name">Scheduled Force Index</div><div class="debug-service-badge">Downloader + YouTube</div><div class="debug-function-description">Force Indexes enabled Downloader sources automatically. Favourite and non-favourite channels have separate intervals, and scans are staggered source by source across each interval to avoid one large request burst.</div></div>
+          <div class="debug-function-row" data-debug-search="video retention cleanup delete old media age storage"><div class="debug-function-name">Video Retention</div><div class="debug-service-badge">Downloader + Local app</div><div class="debug-function-description">Removes old subscription media by YouTube upload age using favourite, non-favourite and per-channel policies. It keeps the configured newest videos and uses Downloader's own deletion logic to stop removed media being immediately downloaded again.</div></div>
           <div class="debug-function-row" data-debug-search="retention shield channel policy override"><div class="debug-function-name">Retention shield</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Opens Video Retention settings for the selected channel so its inherited policy can be viewed or overridden.</div></div>
           <div class="debug-function-row" data-debug-search="protect video retention shield keep permanently"><div class="debug-function-name">Protect video from retention</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Marks an individual YouTube video as protected so Video Retention will keep it regardless of the channel age policy.</div></div>
-          <div class="debug-function-row" data-debug-search="retention preview cleanup reclaim storage"><div class="debug-function-name">Retention cleanup preview</div><div class="debug-service-badge">Pinchflat + Local storage</div><div class="debug-function-description">Calculates which downloaded videos would be removed and how much storage would be reclaimed without deleting anything.</div></div>
+          <div class="debug-function-row" data-debug-search="retention preview cleanup reclaim storage"><div class="debug-function-name">Retention cleanup preview</div><div class="debug-service-badge">Downloader + Local storage</div><div class="debug-function-description">Calculates which downloaded videos would be removed and how much storage would be reclaimed without deleting anything.</div></div>
           <div class="debug-function-row" data-debug-search="emby download playlist automation"><div class="debug-function-name">Emby Download playlist</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Checks the private Emby Download playlist and sends requested videos through the automatic download workflow.</div></div>
-          <div class="debug-function-row" data-debug-search="concurrent downloads workers yt-dlp docker"><div class="debug-function-name">Concurrent downloads</div><div class="debug-service-badge">Pinchflat + Docker</div><div class="debug-function-description">Changes Pinchflat's yt-dlp worker concurrency and recreates the container while preserving its configuration.</div></div>
-          <div class="debug-function-row" data-debug-search="media profiles pinchflat settings"><div class="debug-function-name">Media Profiles</div><div class="debug-service-badge">Pinchflat</div><div class="debug-function-description">Creates, edits and deletes Pinchflat media profiles including path, quality, metadata, artwork and SponsorBlock options.</div></div>
+          <div class="debug-function-row" data-debug-search="concurrent downloads workers yt-dlp docker"><div class="debug-function-name">Concurrent downloads</div><div class="debug-service-badge">Downloader + Docker</div><div class="debug-function-description">Changes Downloader's yt-dlp worker concurrency and recreates the container while preserving its configuration.</div></div>
+          <div class="debug-function-row" data-debug-search="media profiles pinchflat settings"><div class="debug-function-name">Media Profiles</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Creates, edits and deletes subscription media profiles including path, quality, metadata, artwork and SponsorBlock options.</div></div>
           <div class="debug-function-row" data-debug-search="dashboard page view settings show hide load minimise"><div class="debug-function-name">Dashboard settings</div><div class="debug-service-badge">Local app / Browser</div><div class="debug-function-description">Controls dashboard order, section visibility, minimised state, status tiles, header buttons and the shared channel-image controls.</div></div>
-          <div class="debug-function-row" data-debug-search="channel image controls icons heart tick scan delete global"><div class="debug-function-name">Channel image controls</div><div class="debug-service-badge">Local app + YouTube + Pinchflat</div><div class="debug-function-description">Global Dashboard switches control whether Favourite, download enable, Force Scan, retention and remove icons appear around channel artwork throughout the web app.</div></div>
-          <div class="debug-function-row" data-debug-search="429 too many requests bot yt-dlp rate limit concurrency"><div class="debug-function-name">YouTube HTTP 429</div><div class="debug-service-badge">YouTube / yt-dlp / Pinchflat</div><div class="debug-function-description">YouTube is rate-limiting the downloader. Reduce Pinchflat concurrent downloads to 1 first. Cookies or a current yt-dlp PO Token provider may also be required when YouTube asks for bot confirmation.</div></div>
-          <div class="debug-function-row" data-debug-search="diagnostics logs activity sync pinchflat direct downloads"><div class="debug-function-name">Diagnostics</div><div class="debug-service-badge">Local app + Pinchflat</div><div class="debug-function-description">Combines application health, activity, direct-download history, sync runs and Pinchflat logs in one troubleshooting view.</div></div>
+          <div class="debug-function-row" data-debug-search="channel image controls icons heart tick scan delete global"><div class="debug-function-name">Channel image controls</div><div class="debug-service-badge">Local app + YouTube + Downloader</div><div class="debug-function-description">Global Dashboard switches control whether Favourite, download enable, Force Scan, retention and remove icons appear around channel artwork throughout the web app.</div></div>
+          <div class="debug-function-row" data-debug-search="429 too many requests bot yt-dlp rate limit concurrency"><div class="debug-function-name">YouTube HTTP 429</div><div class="debug-service-badge">YouTube / yt-dlp / Downloader</div><div class="debug-function-description">YouTube is rate-limiting the downloader. Reduce Downloader concurrent downloads to 1 first. Cookies or a current yt-dlp PO Token provider may also be required when YouTube asks for bot confirmation.</div></div>
+          <div class="debug-function-row" data-debug-search="diagnostics logs activity sync pinchflat direct downloads"><div class="debug-function-name">Diagnostics</div><div class="debug-service-badge">Local app + Downloader</div><div class="debug-function-description">Combines application health, activity, direct-download history, sync runs and Downloader logs in one troubleshooting view.</div></div>
         </div>
       </section>
 
@@ -4138,7 +4104,7 @@
                 <option value="unfavourite">Remove favourite</option>
                 <option value="retry">Retry errors</option>
               </optgroup>
-              <optgroup label="Pinchflat source actions">
+              <optgroup label="Downloader source actions">
                 <option value="download_pending">Download Pending</option>
                 <option value="redownload_existing">Re-Download Existing</option>
                 <option value="force_scan">Force Scan</option>
@@ -4150,8 +4116,8 @@
               </optgroup>
               <optgroup label="YouTube and channel removal">
                 <option value="unsubscribe">Unsubscribe</option>
-                <option value="delete_local">Delete Channel from Pinchflat Sync</option>
-                <option value="delete_local_pinchflat">Delete Channel from Pinchflat Sync &amp; Pinchflat</option>
+                <option value="delete_local">Delete Channel from YouTube Subscription Downloader</option>
+                <option value="delete_local_pinchflat">Delete Channel from YouTube Subscription Downloader &amp; Downloader</option>
                 <option value="delete_unsubscribe">Unsubscribe &amp; Delete Channel</option>
                 <option value="delete_unsubscribe_media">Unsubscribe, Delete Channel &amp; Remove Media</option>
               </optgroup>
@@ -4216,7 +4182,7 @@
             <button id="subscription-channel-favourite-badge" class="channel-image-control channel-control-favourite" type="button" title="Add to favourites" aria-label="Toggle favourite">♡</button>
             <button id="subscription-channel-enabled-badge" class="channel-image-control channel-control-enabled" type="button" title="Enable downloads" aria-label="Toggle downloads">✓</button>
             {% if is_admin %}
-            <button id="subscription-channel-force-scan" class="channel-image-control channel-control-scan" type="button" onclick="forceScanFromChannelPopup()" title="Force Pinchflat to scan this channel" aria-label="Force Pinchflat scan">↻</button>
+            <button id="subscription-channel-force-scan" class="channel-image-control channel-control-scan" type="button" onclick="forceScanFromChannelPopup()" title="Force Downloader to scan this channel" aria-label="Force Downloader scan">↻</button>
             <button id="subscription-channel-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(currentSubscriptionChannelId)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
             <button id="subscription-channel-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
             {% endif %}
@@ -4235,8 +4201,8 @@
             <a id="subscription-channel-youtube-link" class="channel-service-icon-link" href="https://www.youtube.com" target="_blank" rel="noopener" title="Open YouTube channel" aria-label="Open YouTube channel">
               <img src="https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png" alt="YouTube">
             </a>
-            <a id="subscription-channel-pinchflat-link" class="channel-service-icon-link hidden" href="#" target="_blank" rel="noopener" title="Open Pinchflat source" aria-label="Open Pinchflat source">
-              <img src="https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Pinchflat/icon.png" alt="Pinchflat">
+            <a id="subscription-channel-pinchflat-link" class="channel-service-icon-link hidden" href="#" target="_blank" rel="noopener" title="Open Downloader source" aria-label="Open Downloader source">
+              <img src="https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Downloader/icon.png" alt="Downloader">
             </a>
           </div>
         </div>
@@ -4316,14 +4282,14 @@
 
         <div id="subscription-channel-local-stats" class="channel-stats-section">
           <div class="channel-stats-heading">
-            <h3>Pinchflat</h3>
+            <h3>Downloader</h3>
           </div>
           <div class="channel-detail-grid">
             <div class="channel-detail-card"><span>Status</span><strong id="subscription-channel-status">—</strong></div>
             <div class="channel-detail-card"><span>Media Profile</span><strong id="subscription-channel-profile">—</strong></div>
             <div class="channel-detail-card"><span>Download range</span><strong id="subscription-channel-range">—</strong></div>
             <div class="channel-detail-card"><span>Disk usage</span><strong id="subscription-channel-storage">—</strong></div>
-            <div class="channel-detail-card"><span>Pinchflat source</span><strong id="subscription-channel-source">—</strong></div>
+            <div class="channel-detail-card"><span>Downloader source</span><strong id="subscription-channel-source">—</strong></div>
           </div>
         </div>
 
@@ -4338,7 +4304,7 @@
           <div class="channel-detail-grid">
             <div class="channel-detail-card"><span>Keep videos for</span><strong id="subscription-channel-retention-policy">—</strong></div>
             <div class="channel-detail-card"><span>Minimum kept</span><strong id="subscription-channel-retention-minimum">—</strong></div>
-            <div class="channel-detail-card"><span>Stored by Pinchflat</span><strong id="subscription-channel-retention-stored">—</strong></div>
+            <div class="channel-detail-card"><span>Stored by Downloader</span><strong id="subscription-channel-retention-stored">—</strong></div>
             <div class="channel-detail-card"><span>Eligible for cleanup</span><strong id="subscription-channel-retention-eligible">—</strong></div>
             <div class="channel-detail-card"><span>Space reclaimable</span><strong id="subscription-channel-retention-space">—</strong></div>
           </div>
@@ -4380,7 +4346,7 @@
     <span id="subscription-actions-menu-subtitle">Choose an action</span>
   </div>
   <div class="subscription-actions-menu-section">
-    <div class="subscription-actions-menu-label">Pinchflat</div>
+    <div class="subscription-actions-menu-label">Downloader</div>
     <button type="button" data-action-source-action="download_pending" onclick="runSubscriptionSourceActionFromMenu('download_pending')">Download Pending</button>
     <button type="button" data-action-source-action="redownload_existing" onclick="runSubscriptionSourceActionFromMenu('redownload_existing')">Re-Download Existing</button>
     <button type="button" data-action-source-action="force_scan" onclick="runSubscriptionSourceActionFromMenu('force_scan')">Force Scan</button>
@@ -4397,8 +4363,8 @@
   </div>
   <div class="subscription-actions-menu-section">
     <div class="subscription-actions-menu-label">Remove channel</div>
-    <button class="danger-item" type="button" onclick="confirmDeleteLocalCurrentChannel(false)">Delete Channel from Pinchflat Sync</button>
-    <button class="danger-item" type="button" onclick="confirmDeleteLocalCurrentChannel(true)">Delete Channel from Pinchflat Sync &amp; Pinchflat</button>
+    <button class="danger-item" type="button" onclick="confirmDeleteLocalCurrentChannel(false)">Delete Channel from YouTube Subscription Downloader</button>
+    <button class="danger-item" type="button" onclick="confirmDeleteLocalCurrentChannel(true)">Delete Channel from YouTube Subscription Downloader &amp; Downloader</button>
     <button class="danger-item" type="button" onclick="confirmRemoveCurrentChannel(false)">Unsubscribe &amp; Delete Channel</button>
     <button class="danger-item" type="button" onclick="confirmRemoveCurrentChannel(true)">Unsubscribe, Delete Channel &amp; Remove Media</button>
   </div>
@@ -4414,9 +4380,9 @@
     <button id="channel-delete-unsubscribe" type="button" onclick="runChannelDeleteMenuAction('unsubscribe')">Unsubscribe</button>
   </div>
   <div class="subscription-actions-menu-section">
-    <div class="subscription-actions-menu-label">Pinchflat Sync</div>
-    <button id="channel-delete-local" class="danger-item" type="button" onclick="runChannelDeleteMenuAction('local')">Delete Channel from Pinchflat Sync</button>
-    <button id="channel-delete-pinchflat" class="danger-item" type="button" onclick="runChannelDeleteMenuAction('local_pinchflat')">Delete Channel from Pinchflat Sync &amp; Pinchflat</button>
+    <div class="subscription-actions-menu-label">YouTube Subscription Downloader</div>
+    <button id="channel-delete-local" class="danger-item" type="button" onclick="runChannelDeleteMenuAction('local')">Delete Channel from YouTube Subscription Downloader</button>
+    <button id="channel-delete-pinchflat" class="danger-item" type="button" onclick="runChannelDeleteMenuAction('local_pinchflat')">Delete Channel from YouTube Subscription Downloader &amp; Downloader</button>
   </div>
   <div class="subscription-actions-menu-section">
     <div class="subscription-actions-menu-label">Everything</div>
@@ -4532,7 +4498,7 @@
               <button id="latest-popup-channel-avatar-heart" class="channel-image-control channel-control-favourite" type="button" data-channel-favourite-control="1" title="Toggle favourite">♡</button>
               {% if is_admin %}
               <button id="latest-popup-channel-avatar-enabled" class="channel-image-control channel-control-enabled" type="button" data-channel-enabled-control="1" title="Toggle downloads">✓</button>
-              <button id="latest-popup-channel-avatar-scan" class="channel-image-control channel-control-scan" type="button" data-channel-scan-control="1" title="Force Pinchflat scan">↻</button>
+              <button id="latest-popup-channel-avatar-scan" class="channel-image-control channel-control-scan" type="button" data-channel-scan-control="1" title="Force Downloader scan">↻</button>
               <button id="latest-popup-channel-avatar-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(latestPopupVideo?.channel_id || '')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
               <button id="latest-popup-channel-avatar-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
               {% endif %}
@@ -4574,13 +4540,13 @@
 <dialog id="pinchflat-queue-dialog">
   <div class="modal-head">
     <div>
-      <h2 style="margin:0">Pinchflat Download Queue</h2>
+      <h2 style="margin:0">Downloader Download Queue</h2>
     </div>
 
     <button
       class="modal-close"
       type="button"
-      onclick="closePinchflatQueue()"
+      onclick="closeDownloaderQueue()"
       aria-label="Close"
     >×</button>
   </div>
@@ -4602,7 +4568,7 @@
       <button
         class="btn secondary"
         type="button"
-        onclick="loadPinchflatQueue(true)"
+        onclick="loadDownloaderQueue(true)"
       >Refresh queue</button>
     </div>
 
@@ -4777,7 +4743,7 @@
   <div class="modal-head">
     <div>
       <h2 style="margin:0">Output Template Help</h2>
-      <div class="muted small">Pinchflat output-path syntax and useful template variables.</div>
+      <div class="muted small">Downloader output-path syntax and useful template variables.</div>
     </div>
     <button class="modal-close" type="button" onclick="closeProfileTemplateHelp()" aria-label="Close">×</button>
   </div>
@@ -4870,7 +4836,7 @@
         <div class="settings-nav-group">
           <span class="settings-nav-title">Connections</span>
           <button type="button" class="tab-btn" data-tab="youtube" onclick="showTab('youtube')"><strong>YouTube</strong><small>Google account and API quota</small></button>
-          <button type="button" class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')"><strong>Pinchflat</strong><small>Profiles, scans and workers</small></button>
+          <button type="button" class="tab-btn" data-tab="pinchflat" onclick="showTab('pinchflat')"><strong>Downloader</strong><small>Profiles, scans and workers</small></button>
           <button type="button" class="tab-btn" data-tab="emby" onclick="showTab('emby')"><strong>Emby</strong><small>Server, libraries and refresh</small></button>
         </div>
         <div class="settings-nav-group">
@@ -4903,17 +4869,17 @@
           <form method="post" action="/settings/general"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>When a new YouTube subscription appears
               <select name="new_subscription_policy">
-                <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable Pinchflat downloads</option>
+                <option value="auto_enable" {% if new_subscription_policy == "auto_enable" %}selected{% endif %}>Automatically enable subscription downloads</option>
                 <option value="disabled" {% if new_subscription_policy == "disabled" %}selected{% endif %}>Add to Subscriptions, downloads disabled</option>
               </select>
             </label>
             <div class="settings-note">This only sets the starting state for newly discovered subscriptions. You can enable or disable any channel later from the dashboard.</div>
             <label>When you unsubscribe on YouTube
               <select name="unsubscribe_policy">
-                <option value="keep" {% if unsubscribe_policy == "keep" %}selected{% endif %}>Keep Pinchflat source</option>
-                <option value="disable" {% if unsubscribe_policy == "disable" %}selected{% endif %}>Disable Pinchflat downloads</option>
-                <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove Pinchflat source, keep media</option>
-                <option value="remove_delete" {% if unsubscribe_policy == "remove_delete" %}selected{% endif %}>Remove Pinchflat source and media</option>
+                <option value="keep" {% if unsubscribe_policy == "keep" %}selected{% endif %}>Keep Downloader source</option>
+                <option value="disable" {% if unsubscribe_policy == "disable" %}selected{% endif %}>Disable subscription downloads</option>
+                <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove Downloader source, keep media</option>
+                <option value="remove_delete" {% if unsubscribe_policy == "remove_delete" %}selected{% endif %}>Remove Downloader source and media</option>
               </select>
             </label>
             <label><input type="checkbox" name="show_removed" value="1" {% if show_removed %}checked{% endif %}> Show removed subscriptions in the main list by default</label>
@@ -4928,7 +4894,7 @@
             <div class="settings-status-row"><strong>Version</strong><span>{{ version }}</span></div>
             <div class="settings-status-row"><strong>New subscriptions</strong><span>{{ 'Downloads enabled automatically' if new_subscription_policy == 'auto_enable' else 'Added with downloads disabled' }}</span></div>
             <div class="settings-status-row"><strong>YouTube sync</strong><span>Every {{ youtube_sync_interval }} minutes</span></div>
-            <div class="settings-status-row"><strong>Pinchflat sync</strong><span>Every {{ pinchflat_sync_interval }} minutes</span></div>
+            <div class="settings-status-row"><strong>Downloader sync</strong><span>Every {{ pinchflat_sync_interval }} minutes</span></div>
             <div class="settings-status-row"><strong>Download storage</strong><span>{{ storage_total }} used</span></div>
             <div class="settings-status-row"><strong>Dry run</strong><span>{{ 'Enabled' if dry_run else 'Disabled' }}</span></div>
           </div>
@@ -4957,8 +4923,8 @@
             <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
               <span class="page-order-handle" aria-hidden="true">☰</span>
               <span>
-                <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Pinchflat downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
-                <small>{% if item == "summary" %}Connection, subscription, storage and latest-download cards.{% elif item == "pinchflat" %}Current Pinchflat downloads and queue state.{% elif item == "latest" %}Newest videos and Shorts from your subscriptions.{% elif item == "subscriptions" %}Channel management table.{% endif %}</small>
+                <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}subscription downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+                <small>{% if item == "summary" %}Connection, subscription, storage and latest-download cards.{% elif item == "pinchflat" %}Current subscription downloads and queue state.{% elif item == "latest" %}Newest videos and Shorts from your subscriptions.{% elif item == "subscriptions" %}Channel management table.{% endif %}</small>
               </span>
             </div>
             {% endfor %}
@@ -4971,8 +4937,8 @@
           {% for item in page_section_order %}
           <div class="settings-order-card">
             <div>
-              <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}Pinchflat downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
-              <small>{% if item == "summary" %}Small dashboard cards loaded first.{% elif item == "pinchflat" %}Poll Pinchflat for active and queued jobs.{% elif item == "latest" %}Use YouTube to load recent subscription videos.{% elif item == "subscriptions" %}Render and manage the full subscription list.{% endif %}</small>
+              <strong>{% if item == "summary" %}Status tiles{% elif item == "pinchflat" %}subscription downloads{% elif item == "latest" %}Latest from subscriptions{% elif item == "subscriptions" %}Subscriptions{% endif %}</strong>
+              <small>{% if item == "summary" %}Small dashboard cards loaded first.{% elif item == "pinchflat" %}Poll Downloader for active and queued jobs.{% elif item == "latest" %}Use YouTube to load recent subscription videos.{% elif item == "subscriptions" %}Render and manage the full subscription list.{% endif %}</small>
             </div>
             {% if item == "summary" %}
               <label><input type="checkbox" name="page_load_summary" value="1" {% if page_view.load_summary %}checked{% endif %}> Show</label>
@@ -4999,7 +4965,7 @@
               {% for item in page_summary_order %}
               <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
                 <span class="page-order-handle" aria-hidden="true">☰</span>
-                <span style="flex:1"><strong>{% if item == "google" %}Google{% elif item == "pinchflat" %}Pinchflat{% elif item == "pinchflat_tasks" %}Pinchflat tasks{% elif item == "latest_download" %}Latest download{% elif item == "subscriptions" %}Subscriptions{% elif item == "downloads" %}Downloads{% elif item == "errors" %}Errors{% endif %}</strong></span>
+                <span style="flex:1"><strong>{% if item == "google" %}Google{% elif item == "pinchflat" %}Downloader{% elif item == "pinchflat_tasks" %}Tasks{% elif item == "latest_download" %}Latest download{% elif item == "subscriptions" %}Subscriptions{% elif item == "downloads" %}Downloads{% elif item == "errors" %}Errors{% endif %}</strong></span>
                 {% if item == "google" %}<label><input type="checkbox" name="page_show_summary_google" value="1" {% if page_view.show_summary_google %}checked{% endif %}> Show</label>
                 {% elif item == "pinchflat" %}<label><input type="checkbox" name="page_show_summary_pinchflat" value="1" {% if page_view.show_summary_pinchflat %}checked{% endif %}> Show</label>
                 {% elif item == "pinchflat_tasks" %}<label><input type="checkbox" name="page_show_summary_pinchflat_tasks" value="1" {% if page_view.show_summary_pinchflat_tasks %}checked{% endif %}> Show</label>
@@ -5015,7 +4981,7 @@
           <div class="setting-box">
             <h3>4. Header buttons</h3>
             <p class="muted small">Settings always stays visible so the interface remains recoverable.</p>
-            <label><input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}> Pinchflat Sync</label>
+            <label><input type="checkbox" name="page_button_sync" value="1" {% if page_view.button_sync %}checked{% endif %}> YouTube Subscription Downloader</label>
             <label><input type="checkbox" name="page_button_refresh_youtube" value="1" {% if page_view.button_refresh_youtube %}checked{% endif %}> Refresh YouTube</label>
             <label><input type="checkbox" name="page_button_single_download" value="1" {% if page_view.button_single_download %}checked{% endif %}> Single Download</label>
             <label><input type="checkbox" name="page_button_discover" value="1" {% if page_view.button_discover %}checked{% endif %}> Discover</label>
@@ -5030,8 +4996,8 @@
           <div class="page-view-grid">
             <label class="page-view-option"><input type="checkbox" name="page_channel_controls" value="1" {% if page_view.channel_controls %}checked{% endif %}><span><strong>Show controls</strong><span class="muted small">Master switch for the controls around channel images.</span></span></label>
             <label class="page-view-option"><input type="checkbox" name="page_channel_control_favourite" value="1" {% if page_view.channel_control_favourite %}checked{% endif %}><span><strong>Favourite heart</strong><span class="muted small">Favourite or unfavourite a channel.</span></span></label>
-            <label class="page-view-option"><input type="checkbox" name="page_channel_control_downloads" value="1" {% if page_view.channel_control_downloads %}checked{% endif %}><span><strong>Downloads tick</strong><span class="muted small">Enable or disable Pinchflat downloads.</span></span></label>
-            <label class="page-view-option"><input type="checkbox" name="page_channel_control_scan" value="1" {% if page_view.channel_control_scan %}checked{% endif %}><span><strong>Force Scan</strong><span class="muted small">Ask Pinchflat to scan the channel now.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_downloads" value="1" {% if page_view.channel_control_downloads %}checked{% endif %}><span><strong>Downloads tick</strong><span class="muted small">Enable or disable subscription downloads.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_scan" value="1" {% if page_view.channel_control_scan %}checked{% endif %}><span><strong>Force Scan</strong><span class="muted small">Ask Downloader to scan the channel now.</span></span></label>
             <label class="page-view-option"><input type="checkbox" name="page_channel_control_delete" value="1" {% if page_view.channel_control_delete %}checked{% endif %}><span><strong>Remove / Delete</strong><span class="muted small">Open channel removal options.</span></span></label>
             <label class="page-view-option"><input type="checkbox" name="page_channel_control_retention" value="1" {% if page_view.channel_control_retention %}checked{% endif %}><span><strong>Retention shield</strong><span class="muted small">Open the channel's Video Retention settings.</span></span></label>
           </div>
@@ -5089,7 +5055,7 @@
 
         <div class="setting-box" style="grid-column:1/-1">
           <h3>Account information</h3>
-          <p class="muted small">Useful account and library information used by Pinchflat Sync. Creator statistics for your own uploaded channel are not shown.</p>
+          <p class="muted small">Useful account and library information used by YouTube Subscription Downloader. Creator statistics for your own uploaded channel are not shown.</p>
           {% if youtube_account_stats.available %}
             <div class="youtube-stat-grid">
               <div class="youtube-stat-tile"><div class="muted small">Subscriptions</div><div class="youtube-stat-value">{{ youtube_account_stats.subscription_count_text }}</div><div class="youtube-stat-note">Channels your account currently subscribes to.</div></div>
@@ -5113,7 +5079,7 @@
 
     <section class="tab-panel" data-panel="emby">
       <div class="settings-panel-intro">
-        <div><h3>Emby</h3><p>Connect the app to Emby and automatically target the correct library for Pinchflat, One-time Downloads and the Emby Download playlist.</p></div>
+        <div><h3>Emby</h3><p>Connect the app to Emby and automatically target the correct library for Downloader, One-time Downloads and the Emby Download playlist.</p></div>
       </div>
       <div class="settings-grid">
         <div class="setting-box">
@@ -5127,7 +5093,7 @@
               <input type="password" name="emby_api_key" value="" placeholder="{{ 'Saved. Leave blank to keep current key' if emby_api_key_saved else 'Paste an Emby API key' }}" autocomplete="new-password">
             </label>
             {% if emby_api_key_saved %}<label><input type="checkbox" name="emby_clear_api_key" value="1"> Clear the saved Emby API key</label>{% endif %}
-            <label><input type="checkbox" name="emby_auto_refresh_after_download" value="1" {% if emby_auto_refresh_after_download %}checked{% endif %}> Refresh the matching Emby channel after new Pinchflat content completes</label>
+            <label><input type="checkbox" name="emby_auto_refresh_after_download" value="1" {% if emby_auto_refresh_after_download %}checked{% endif %}> Refresh the matching Emby channel after new Downloader content completes</label>
             <div class="actions"><button class="btn" type="submit">Save Emby</button><button class="btn secondary" type="button" onclick="testEmbyConnection()">Test & detect libraries</button></div>
           </form>
           <div id="emby-api-status" class="muted small" style="margin-top:10px">{% if emby_api_configured %}Emby API is configured.{% else %}Enter the Emby Server URL and API key to enable refresh actions.{% endif %}</div>
@@ -5137,7 +5103,7 @@
           <h3>Automatic library matching</h3>
           <p class="muted small">The app reads its Docker <code>/downloads</code> bind and compares the same host folders with Emby's configured libraries. No manual library ID is required.</p>
           <div class="settings-status-list">
-            <div class="settings-status-row"><strong>Pinchflat media</strong><span id="emby-library-status">Press Test & detect libraries to resolve <code>/downloads</code>.</span></div>
+            <div class="settings-status-row"><strong>subscription media</strong><span id="emby-library-status">Press Test & detect libraries to resolve <code>/downloads</code>.</span></div>
             <div class="settings-status-row"><strong>One-time Downloads</strong><span id="emby-single-library-status">Press Test & detect libraries to resolve <code>/downloads/{{ single_download_folder }}</code>.</span></div>
             <div class="settings-status-row"><strong>Emby Download playlist</strong><span id="emby-playlist-library-status">Press Test & detect libraries to resolve <code>/downloads/{{ emby_download_folder }}</code>.</span></div>
           </div>
@@ -5148,7 +5114,7 @@
         <h3>Manual library scans</h3>
         <p class="muted small">Each button scans only the detected library or folder shown above, then runs the delayed Replace all metadata pass. These actions never request a whole-server Emby scan.</p>
         <div class="actions">
-          <button class="btn secondary" type="button" onclick="refreshEmbyLibrary('pinchflat')">Scan Pinchflat media</button>
+          <button class="btn secondary" type="button" onclick="refreshEmbyLibrary('pinchflat')">Scan subscription media</button>
           <button class="btn secondary" type="button" onclick="refreshEmbyLibrary('single')">Scan One-time Downloads</button>
           <button class="btn secondary" type="button" onclick="refreshEmbyLibrary('emby_download')">Scan Emby Download playlist</button>
         </div>
@@ -5157,7 +5123,7 @@
       <div class="setting-box" style="margin-top:14px">
         <h3>What each refresh targets</h3>
         <div class="api-feature-list">
-          <div><strong>Pinchflat channel refresh</strong><span>Finds the matching channel folder in the main Pinchflat YouTube library and refreshes that channel recursively.</span></div>
+          <div><strong>Downloader channel refresh</strong><span>Finds the matching channel folder in the main Downloader YouTube library and refreshes that channel recursively.</span></div>
           <div><strong>One-time Download</strong><span>Uses the folder configured in Downloads. If that folder is a separate Emby library, only that library is scanned.</span></div>
           <div><strong>Emby Download playlist</strong><span>Uses the folder configured in Automation and targets its matching Emby library or subfolder.</span></div>
           <div><strong>Metadata pass</strong><span>After the filesystem scan, the app waits briefly and runs Replace all metadata without replacing existing images or preview thumbnails.</span></div>
@@ -5166,468 +5132,176 @@
     </section>
 
     <section class="tab-panel" data-panel="pinchflat">
-      <div class="settings-panel-intro"><div><h3>Pinchflat</h3><p>Source scanning, media profiles, yt-dlp worker concurrency and Pinchflat-specific behaviour.</p></div></div>
-      <div class="setting-box">
-        <div class="profile-editor-heading">
-          <div>
-            <h3>Scheduled Force Index</h3>
-            <div class="muted small">Automatically ask Pinchflat to Force Index linked sources, with separate schedules for favourite and non-favourite channels.</div>
-          </div>
+      <div class="settings-panel-intro">
+        <div>
+          <h3>Downloader</h3>
+          <p>Native yt-dlp subscription scanning, download profiles and YouTube authentication. V3 no longer requires Downloader.</p>
         </div>
-
-        <form method="post" action="/settings/pinchflat/force-index" style="margin-top:14px">
-          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-
-          <div class="settings-grid">
-            <label>Favourite channels
-              <select name="pinchflat_force_index_favourite_minutes">
-                {% for value, label in pinchflat_force_index_favourite_options %}
-                  <option value="{{ value }}" {% if pinchflat_force_index_favourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              <span class="muted small">Applies only to favourite channels which currently have an enabled Pinchflat source.</span>
-            </label>
-
-            <label>Non-favourite channels
-              <select name="pinchflat_force_index_nonfavourite_minutes">
-                {% for value, label in pinchflat_force_index_nonfavourite_options %}
-                  <option value="{{ value }}" {% if pinchflat_force_index_nonfavourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              <span class="muted small">Applies to the remaining enabled Pinchflat sources.</span>
-            </label>
-          </div>
-
-          <div class="mini-stat-grid" style="margin-top:14px">
-            <div>
-              <span class="muted small">Favourite sources</span>
-              <strong>{{ pinchflat_force_index_status.favourites.eligible }}</strong>
-            </div>
-            <div>
-              <span class="muted small">Non-favourite sources</span>
-              <strong>{{ pinchflat_force_index_status.non_favourites.eligible }}</strong>
-            </div>
-          </div>
-
-          <div class="profile-control-help" style="margin-top:12px">
-            The interval applies per channel. Pinchflat Sync spreads a full pass across the selected period and Force Indexes sources one at a time instead of sending every request together. Favourite and non-favourite schedules run independently.
-          </div>
-          <div class="profile-control-help" style="margin-top:8px">
-            Short intervals across hundreds of sources increase YouTube traffic and may contribute to HTTP 429 rate limiting. Longer intervals are recommended for non-favourite channels.
-          </div>
-
-          <div class="actions" style="margin-top:14px">
-            <button class="btn" type="submit">Save Force Index schedule</button>
-          </div>
-        </form>
       </div>
 
       <div class="setting-box">
         <div class="profile-editor-heading">
           <div>
-            <h3>Media Profile Manager</h3>
-            <div class="muted small">Create, select, edit and delete Pinchflat Media Profiles without leaving this app.</div>
+            <h3>YouTube Authentication</h3>
+            <div class="muted small">Public videos are downloaded anonymously first. Cookies are used only when YouTube requires an authenticated account.</div>
           </div>
-          <button class="btn ghost" type="button" onclick="openProfileTemplateHelp()">? Template help</button>
+          {% if downloader_auth_status.configured and downloader_auth_status.valid %}
+            <span class="retention-pill">Cookies configured</span>
+          {% elif downloader_auth_status.configured %}
+            <span class="retention-pill warn">Cookies need attention</span>
+          {% else %}
+            <span class="retention-pill">Anonymous only</span>
+          {% endif %}
         </div>
 
-        <div class="profile-manager-toolbar">
-          <form method="post" action="/settings/pinchflat">
-            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <label>Selected profile
-              <select name="pinchflat_media_profile_id" onchange="this.form.requestSubmit()">
-                {% for profile in profiles %}
-                  <option value="{{ profile.id }}" {% if media_profile_id|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <input type="hidden" name="auto_create_media_profile" value="{{ '1' if auto_create_media_profile else '0' }}">
-          </form>
-
-          <div class="profile-manager-actions">
-            <button class="btn secondary" type="button" onclick="toggleCreateProfilePanel()">＋ New Profile</button>
-            <form
-              method="post"
-              action="/settings/pinchflat/profile/delete"
-              onsubmit="return confirm('Delete the selected Media Profile? This is blocked while enabled Pinchflat sources still use it.');"
-            >
-              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-              <input type="hidden" name="pinchflat_media_profile_id" value="{{ media_profile_id }}">
-              <button class="btn danger" type="submit" {% if profiles|length <= 1 %}disabled{% endif %}>Delete Profile</button>
-            </form>
-          </div>
-        </div>
-
-        <div id="create-profile-panel" class="profile-create-panel hidden">
-          <h3>Create Media Profile</h3>
-          <form method="post" action="/settings/pinchflat/profile/create">
-            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <div class="settings-grid">
-              <label>Profile name
-                <input type="text" name="profile_name" placeholder="My YouTube Profile" required maxlength="100">
-              </label>
-              <label>Starting quality
-                <select name="preferred_resolution">
-                  <option value="2160p">2160p / 4K</option>
-                  <option value="1440p">1440p</option>
-                  <option value="1080p" selected>1080p</option>
-                  <option value="720p">720p</option>
-                  <option value="480p">480p</option>
-                  <option value="360p">360p</option>
-                  <option value="audio">Audio Only</option>
-                </select>
-              </label>
-            </div>
-            <div class="actions">
-              <button class="btn">Create Profile</button>
-              <button class="btn ghost" type="button" onclick="toggleCreateProfilePanel()">Cancel</button>
-            </div>
-          </form>
-        </div>
-
-        <div style="margin-top:12px">
-          <label>
-            <input
-              type="checkbox"
-              id="auto-create-media-profiles"
-              {% if auto_create_media_profile %}checked{% endif %}
-              onchange="saveAutoCreateProfiles(this)"
-            >
-            Automatically create the standard YouTube Sync, 1080p, 720p, Audio Only and 4K profiles on a fresh Pinchflat install
-          </label>
-        </div>
-
-        {% if media_profile_settings.error %}
-          <div class="flash error" style="margin-top:14px">{{ media_profile_settings.error }}</div>
-        {% else %}
-          <div class="profile-editor-heading" style="margin-top:22px">
-            <div>
-              <h3>Edit {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</h3>
-              <div class="muted small">Editing mode: Standard · Changes are written directly to Pinchflat when you press Save Profile.</div>
-            </div>
-          </div>
-
-          <form method="post" action="/settings/pinchflat/profile" id="pinchflat-media-profile-form">
-            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-
-            <div class="profile-section" style="margin-bottom:14px">
-              <h3>Use a preset</h3>
-              <div class="section-help">Choose a starting point, review the values below, then press Save Profile. Applying a preset does not save immediately.</div>
-              <div class="profile-preset-row">
-                <label>Preset
-                  <select id="media-profile-preset">
-                    <option value="">Select preset</option>
-                    <option value="default">Default</option>
-                    <option value="media_center">Media Center / Emby</option>
-                    <option value="music">Music</option>
-                    <option value="archiving">Archiving</option>
-                  </select>
-                </label>
-                <button class="btn secondary" type="button" onclick="applyMediaProfilePreset()">Apply Preset</button>
-              </div>
-            </div>
-
-            <div class="profile-section" style="margin-bottom:14px">
-              <h3>General Options</h3>
-              <div class="section-help">Name the profile and control how downloaded files are arranged on disk.</div>
-
-              <label>Name
-                <input type="text" name="profile_name" value="{{ media_profile_settings.name }}" autocomplete="off">
-              </label>
-              <div class="profile-control-help">Something descriptive. The name does not change indexing or downloading.</div>
-
-              <label>Output path template
-                <div style="display:flex;gap:8px;align-items:center">
-                  <input
-                    id="media-profile-output-template"
-                    type="text"
-                    name="output_path_template"
-                    value="{{ media_profile_settings.output_path_template or emby_output_path_template }}"
-                    placeholder="{{ emby_output_path_template }}"
-                    autocomplete="off"
-                    style="flex:1"
-                  >
-                  <button class="btn ghost template-help-button" type="button" onclick="openProfileTemplateHelp()" title="Output template help">?</button>
-                </div>
-              </label>
-              <div class="profile-control-help">Must end with <code>.{{ '{{ ext }}' }}</code> or the yt-dlp equivalent. Press ? for syntax and aliases.</div>
-            </div>
-
-            <div class="settings-grid profile-settings-grid">
-              <div class="profile-section">
-                <h3>Subtitle Options</h3>
-                <div class="section-help">Download subtitle files, embed them into supported media, and configure language behaviour.</div>
-                <label><input type="checkbox" name="download_subs" value="1" {% if media_profile_settings.download_subs %}checked{% endif %} {% if not media_profile_settings.available.download_subs %}disabled{% endif %}> Download Subtitles</label>
-                <div class="profile-control-help">Downloads subtitle files alongside the media file.</div>
-                <label><input type="checkbox" name="embed_subs" value="1" {% if media_profile_settings.embed_subs %}checked{% endif %} {% if not media_profile_settings.available.embed_subs %}disabled{% endif %}> Embed Subtitles</label>
-                <div class="profile-control-help">Downloads and embeds subtitles into the media file where supported.</div>
-                {% for field in media_profile_settings.extra_fields if field.category == 'subtitles' %}
-                  {% if field.type == 'select' %}
-                    <label>{{ field.label }}
-                      <select name="pf_extra::{{ field.name }}">
-                        {% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
-                      </select>
-                    </label>
-                  {% elif field.type == 'checkbox' %}
-                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                  {% else %}
-                    <label>{{ field.label }}<input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}"></label>
-                  {% endif %}
-                {% endfor %}
-              </div>
-
-              <div class="profile-section">
-                <h3>Thumbnail Options</h3>
-                <div class="section-help">Keep thumbnails beside the file, embed them, or both.</div>
-                <label><input type="checkbox" name="download_thumbnail" value="1" {% if media_profile_settings.download_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.download_thumbnail %}disabled{% endif %}> Download Thumbnail</label>
-                <div class="profile-control-help">Downloads the thumbnail alongside the media file.</div>
-                <label><input type="checkbox" name="embed_thumbnail" value="1" {% if media_profile_settings.embed_thumbnail %}checked{% endif %} {% if not media_profile_settings.available.embed_thumbnail %}disabled{% endif %}> Embed Thumbnail</label>
-                <div class="profile-control-help">Embeds the thumbnail into supported media. Recommended for media-centre profiles.</div>
-                {% for field in media_profile_settings.extra_fields if field.category == 'thumbnails' %}
-                  {% if field.type == 'checkbox' %}
-                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                  {% endif %}
-                {% endfor %}
-              </div>
-
-              <div class="profile-section">
-                <h3>Metadata Options</h3>
-                <div class="section-help">Save or embed metadata used by players and archive tools.</div>
-                <label><input type="checkbox" name="download_metadata" value="1" {% if media_profile_settings.download_metadata %}checked{% endif %} {% if not media_profile_settings.available.download_metadata %}disabled{% endif %}> Download Metadata</label>
-                <div class="profile-control-help">Downloads metadata alongside the media file.</div>
-                <label><input type="checkbox" name="embed_metadata" value="1" {% if media_profile_settings.embed_metadata %}checked{% endif %} {% if not media_profile_settings.available.embed_metadata %}disabled{% endif %}> Embed Metadata</label>
-                <div class="profile-control-help">Embeds metadata into supported media. Recommended.</div>
-                {% for field in media_profile_settings.extra_fields if field.category == 'metadata' %}
-                  {% if field.type == 'checkbox' %}
-                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                  {% elif field.type == 'select' %}
-                    <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
-                  {% else %}
-                    <label>{{ field.label }}<input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}"></label>
-                  {% endif %}
-                {% endfor %}
-              </div>
-
-              <div class="profile-section">
-                <h3>Release Format Options</h3>
-                <div class="section-help">Choose whether Shorts and past livestreams are included in this profile.</div>
-                <label><input type="checkbox" name="include_shorts" value="1" {% if media_profile_settings.include_shorts %}checked{% endif %} {% if not media_profile_settings.available.shorts_behaviour %}disabled{% endif %}> Include Shorts</label>
-                <label><input type="checkbox" name="include_livestreams" value="1" {% if media_profile_settings.include_livestreams %}checked{% endif %} {% if not media_profile_settings.available.livestream_behaviour %}disabled{% endif %}> Include Livestreams</label>
-                {% for field in media_profile_settings.extra_fields if field.category == 'content' %}
-                  {% if field.type == 'select' %}
-                    <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
-                  {% elif field.type == 'checkbox' %}
-                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                  {% endif %}
-                {% endfor %}
-              </div>
-
-              <div class="profile-section">
-                <h3>Quality Options</h3>
-                <div class="section-help">Pinchflat selects the closest available quality when the exact resolution is unavailable.</div>
-                <label>Preferred Resolution
-                  <select name="preferred_resolution" {% if not media_profile_settings.available.preferred_resolution %}disabled{% endif %}>
-                    {% for option in media_profile_settings.resolution_options %}
-                      <option value="{{ option.value }}" {% if media_profile_settings.preferred_resolution|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-                <label>Redownload Delay (days)
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    name="redownload_delay_days"
-                    value="{{ media_profile_settings.redownload_delay_days }}"
-                    placeholder="Leave blank to disable"
-                    {% if not media_profile_settings.available.redownload_delay_days %}disabled{% endif %}
-                  >
-                </label>
-                <div class="profile-control-help">Redownloading recent media can improve quality or refresh SponsorBlock data.</div>
-                {% for field in media_profile_settings.extra_fields if field.category == 'quality' %}
-                  {% if field.type == 'select' %}
-                    <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
-                  {% elif field.type == 'checkbox' %}
-                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                  {% endif %}
-                {% endfor %}
-              </div>
-
-              <div class="profile-section">
-                <h3>Media Center Options</h3>
-                <div class="section-help">These work best when the output template splits each channel into seasons.</div>
-                <label><input type="checkbox" name="download_nfo" value="1" {% if media_profile_settings.download_nfo %}checked{% endif %} {% if not media_profile_settings.available.download_nfo %}disabled{% endif %}> Download NFO data</label>
-                <div class="profile-control-help">Writes NFO data for Emby, Jellyfin, Kodi and compatible media centres.</div>
-                <label><input type="checkbox" name="download_source_images" value="1" {% if media_profile_settings.download_source_images %}checked{% endif %} {% if not media_profile_settings.available.download_source_images %}disabled{% endif %}> Download Series Images</label>
-                <div class="profile-control-help">Downloads poster and banner images for full channel sources.</div>
-              </div>
-            </div>
-
-            <div class="profile-section" style="margin-top:14px">
-              <h3>SponsorBlock Options</h3>
-              <div class="section-help">Choose whether SponsorBlock segments are ignored, marked as chapters, or removed.</div>
-              <label>SponsorBlock Behaviour
-                <select name="sponsorblock_behaviour" id="sponsorblock-behaviour" onchange="toggleSponsorBlockCategories()" {% if not media_profile_settings.available.sponsorblock_behaviour %}disabled{% endif %}>
-                  <option value="disabled" {% if media_profile_settings.sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option>
-                  <option value="mark" {% if media_profile_settings.sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark Segments as Chapters</option>
-                  <option value="remove" {% if media_profile_settings.sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove Segments</option>
-                </select>
-              </label>
-              <div id="sponsorblock-categories">
-                <div class="muted small" style="margin-bottom:8px">Categories to remove or mark</div>
-                {% for value, label in sponsorblock_common_categories %}
-                  <label><input type="checkbox" name="sponsorblock_categories" value="{{ value }}" {% if value in media_profile_settings.sponsorblock_categories %}checked{% endif %}> {{ label }}</label>
-                {% endfor %}
-              </div>
-
-              {% for field in media_profile_settings.extra_fields if field.category == 'sponsorblock' %}
-                {% if field.type == 'select' %}
-                  <label>{{ field.label }}<select name="pf_extra::{{ field.name }}">{% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></label>
-                {% elif field.type == 'checkbox' %}
-                  <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                  <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                {% endif %}
-              {% endfor %}
-            </div>
-
-            {% set advanced_fields = media_profile_settings.extra_fields | selectattr('category', 'equalto', 'advanced') | list %}
-            {% if advanced_fields %}
-            <details class="profile-section" style="margin-top:14px">
-              <summary><strong>Advanced Pinchflat Options</strong> <span class="muted small">({{ advanced_fields|length }} detected)</span></summary>
-              <div class="section-help" style="margin-top:10px">These fields are read directly from your installed Pinchflat version so newer options remain available here.</div>
-              <div class="profile-settings-grid">
-                {% for field in advanced_fields %}
-                <div class="compact-setting">
-                  {% if field.type == 'select' %}
-                    <label>{{ field.label }}
-                      <select name="pf_extra::{{ field.name }}">
-                        {% for option in field.options %}<option value="{{ option.value }}" {% if field.value|string == option.value|string %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
-                      </select>
-                    </label>
-                  {% elif field.type == 'checkbox' %}
-                    <input type="hidden" name="pf_extra::{{ field.name }}" value="0">
-                    <label><input type="checkbox" name="pf_extra::{{ field.name }}" value="1" {% if field.checked %}checked{% endif %}> {{ field.label }}</label>
-                  {% elif field.type == 'textarea' %}
-                    <label>{{ field.label }}<textarea name="pf_extra::{{ field.name }}" rows="4">{{ field.value }}</textarea></label>
-                  {% else %}
-                    <label>{{ field.label }}<input type="text" name="pf_extra::{{ field.name }}" value="{{ field.value }}"></label>
-                  {% endif %}
-                </div>
-                {% endfor %}
-              </div>
-            </details>
+        <div class="settings-grid" style="margin-top:14px">
+          <div class="settings-path-card">
+            <span class="muted small">Cookie file</span>
+            <strong>
+              {% if downloader_auth_status.configured and downloader_auth_status.valid %}
+                Valid · {{ downloader_auth_status.youtube_cookies }} YouTube cookies
+              {% elif downloader_auth_status.configured %}
+                Invalid
+              {% else %}
+                Not configured
+              {% endif %}
+            </strong>
+            {% if downloader_auth_status.error %}
+              <span class="small bad">{{ downloader_auth_status.error }}</span>
+            {% else %}
+              <span class="muted small">Stored privately inside <code>/data/auth</code>. Cookie contents are never displayed.</span>
             {% endif %}
-
-            <div class="actions" style="margin-top:16px">
-              <button class="btn">Save Profile to {{ media_profile_settings.name or ("Media Profile " ~ media_profile_id) }}</button>
-              <span class="muted small">Existing files are not renamed when the output template changes.</span>
-            </div>
-          </form>
-        {% endif %}
-
-        <details class="profile-section" style="margin-top:14px">
-          <summary>
-            <strong>Advanced Pinchflat</strong>
-            <span class="muted small">Docker and download worker settings</span>
-          </summary>
-
-          <div class="section-help" style="margin-top:10px">
-            Settings here apply to the Pinchflat application rather than an individual Media Profile.
           </div>
 
-          <form
-            method="post"
-            action="/settings/pinchflat/advanced"
-            style="margin-top:12px"
-          >
-            <input
-              type="hidden"
-              name="_csrf"
-              value="{{ csrf_token() }}"
-            >
-
-            <div class="profile-settings-grid">
-              <div class="compact-setting">
-                <label>
-                  Concurrent downloads
-                  <select
-                    name="yt_dlp_worker_concurrency"
-                    {% if not pinchflat_container.control_available or not pinchflat_container.exists %}disabled{% endif %}
-                  >
-                    {% for value in pinchflat_worker_concurrency_options %}
-                      <option
-                        value="{{ value }}"
-                        {% if pinchflat_worker_concurrency|int == value %}selected{% endif %}
-                      >{{ value }}{% if value == 2 %} (Pinchflat default){% endif %}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-
-                <div class="profile-control-help">
-                  Controls Pinchflat's <code>YT_DLP_WORKER_CONCURRENCY</code>.
-                  Higher values allow more yt-dlp download jobs to run at the same time.
-                </div>
-                <div class="profile-control-help" style="margin-top:8px">
-                  If YouTube returns HTTP 429 or “Sign in to confirm you’re not a bot”, use <strong>1</strong> concurrent download first. Pinchflat recommends one worker when the IP is being limited.
-                </div>
-              </div>
-
-              <div class="compact-setting">
-                <div class="mini-stat-grid" style="grid-template-columns:1fr">
-                  <div>
-                    <span class="muted small">Currently applied</span>
-                    <strong>
-                      {% if pinchflat_container.worker_concurrency %}
-                        {{ pinchflat_container.worker_concurrency }} concurrent download{{ '' if pinchflat_container.worker_concurrency == 1 else 's' }}
-                      {% else %}
-                        Unavailable
-                      {% endif %}
-                    </strong>
-                  </div>
-                </div>
-
-                <div class="profile-control-help" style="margin-top:8px">
-                  Applying a new value recreates and restarts the Pinchflat Docker container while keeping its existing bind-mounted configuration and downloads.
-                </div>
-              </div>
-            </div>
-
-            <div class="actions" style="margin-top:12px">
-              <button
-                class="btn"
-                type="submit"
-                {% if not pinchflat_container.control_available or not pinchflat_container.exists %}disabled{% endif %}
-              >
-                Apply concurrent downloads
-              </button>
-            </div>
-          </form>
-        </details>
-
-        <div class="profile-stats-footer">
-          <h3>Pinchflat stats</h3>
-          <div class="mini-stat-grid">
-            <div><span class="muted small">Status</span><strong>{% if pinchflat_online %}Online{% else %}Offline{% endif %}</strong></div>
-            <div><span class="muted small">Media profiles</span><strong>{{ pinchflat_stats.profiles }}</strong></div>
-            <div><span class="muted small">Linked sources</span><strong>{{ pinchflat_stats.linked }}</strong></div>
-            <div><span class="muted small">Enabled</span><strong>{{ pinchflat_stats.enabled }}</strong></div>
-            <div><span class="muted small">Disabled</span><strong>{{ pinchflat_stats.disabled }}</strong></div>
-            <div><span class="muted small">Pending</span><strong>{{ pinchflat_stats.pending }}</strong></div>
-            <div><span class="muted small">Shared storage</span><strong>{{ pinchflat_stats.storage }}</strong></div>
+          <div class="settings-path-card">
+            <span class="muted small">Authenticated retry</span>
+            <strong>{{ 'Enabled' if downloader_auth_retry else 'Disabled' }}</strong>
+            <span class="muted small">Age-restricted or sign-in-required downloads can retry with the uploaded cookies. Members-only content still requires the account to have access.</span>
           </div>
-          {% if pinchflat_profile_message %}<p class="muted small">{{ pinchflat_profile_message }}</p>{% endif %}
         </div>
+
+        <form method="post" action="/settings/downloader/auth/upload" enctype="multipart/form-data" style="margin-top:14px">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <label>Upload YouTube cookies.txt
+            <input type="file" name="cookie_file" accept=".txt,text/plain" required>
+            <span class="muted small">Upload a Mozilla/Netscape format cookies.txt export. The app validates it before replacing the active cookie file.</span>
+          </label>
+          <div class="actions">
+            <button class="btn" type="submit">{{ 'Replace Cookies' if downloader_auth_status.configured else 'Upload Cookies' }}</button>
+          </div>
+        </form>
+
+        {% if downloader_auth_status.configured %}
+        <div class="actions" style="margin-top:10px">
+          <form method="post" action="/settings/downloader/auth/test">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <button class="btn secondary" type="submit">Test Authentication</button>
+          </form>
+          <form method="post" action="/settings/downloader/auth/remove" onsubmit="return confirm('Remove the stored YouTube cookie file?')">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <button class="btn ghost" type="submit">Remove Cookies</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <div class="profile-editor-heading">
+          <div>
+            <h3>Native yt-dlp Downloader</h3>
+            <div class="muted small">Subscription downloads and channel scans are now managed directly by this application.</div>
+          </div>
+        </div>
+
+        <form method="post" action="/settings/downloader/advanced">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+          <div class="profile-settings-grid">
+            <div class="compact-setting">
+              <label>Default quality
+                <select name="downloader_default_profile">
+                  {% for profile in profiles %}
+                    <option value="{{ profile.id }}" {% if downloader_default_profile|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <div class="profile-control-help">New channels use this profile unless an individual channel has its own selection.</div>
+            </div>
+
+            <div class="compact-setting">
+              <label>Concurrent downloads
+                <select name="downloader_worker_concurrency">
+                  {% for value in range(1, 9) %}
+                    <option value="{{ value }}" {% if downloader_worker_concurrency|int == value %}selected{% endif %}>{{ value }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <div class="profile-control-help">The number of native yt-dlp download workers. Start with 1 for the lightest load on BUTANE.</div>
+            </div>
+
+            <div class="compact-setting">
+              <label>Channel scan workers
+                <select name="downloader_scan_workers">
+                  {% for value in range(1, 13) %}
+                    <option value="{{ value }}" {% if downloader_scan_workers|int == value %}selected{% endif %}>{{ value }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <div class="profile-control-help">RSS checks are lightweight. Deep channel scans remain individually queued so they cannot create a large indexing storm.</div>
+            </div>
+
+            <div class="compact-setting">
+              <label>Deep scan maximum videos
+                <input type="number" min="25" max="5000" step="25" name="downloader_deep_scan_limit" value="{{ downloader_deep_scan_limit }}">
+              </label>
+              <div class="profile-control-help">Maximum number of channel entries inspected by a manual deep scan. The channel's Download Range is still enforced.</div>
+            </div>
+          </div>
+
+          <div class="page-view-grid" style="margin-top:12px">
+            <label class="page-view-option">
+              <input type="checkbox" name="downloader_auth_retry" value="1" {% if downloader_auth_retry %}checked{% endif %}>
+              <span><strong>Retry account-required videos with cookies</strong><small>Anonymous first, authenticated only when yt-dlp reports an account/sign-in restriction.</small></span>
+            </label>
+          </div>
+
+          <details class="settings-details" style="margin-top:14px">
+            <summary>Advanced yt-dlp options</summary>
+            <div>
+              <label>Custom yt-dlp options (JSON)
+                <textarea name="downloader_custom_yt_dlp_options" rows="7" spellcheck="false">{{ downloader_custom_options }}</textarea>
+                <span class="muted small">Advanced options are merged into native subscription downloads. Managed path, cookie and progress settings cannot be overridden here.</span>
+              </label>
+              <label style="margin-top:12px">Manual GVS PO token
+                <input type="password" name="downloader_po_token" value="{{ downloader_po_token }}" autocomplete="off">
+                <span class="muted small">Optional expert setting. Current yt-dlp guidance recommends a PO Token Provider plugin because YouTube increasingly binds tokens to individual videos.</span>
+              </label>
+            </div>
+          </details>
+
+          <div class="actions" style="margin-top:14px">
+            <button class="btn" type="submit">Save Downloader Settings</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="setting-box" style="margin-top:14px">
+        <h3>Downloader status</h3>
+        <div class="mini-stat-grid">
+          <div><span class="muted small">Engine</span><strong>yt-dlp</strong></div>
+          <div><span class="muted small">Enabled channels</span><strong>{{ pinchflat_stats.enabled }}</strong></div>
+          <div><span class="muted small">Disabled channels</span><strong>{{ pinchflat_stats.disabled }}</strong></div>
+          <div><span class="muted small">Pending scans</span><strong>{{ pinchflat_stats.pending }}</strong></div>
+          <div><span class="muted small">Download workers</span><strong>{{ downloader_worker_concurrency }}</strong></div>
+          <div><span class="muted small">Shared storage</span><strong>{{ pinchflat_stats.storage }}</strong></div>
+        </div>
+        <p class="muted small" style="margin-top:10px">No application container, Downloader database or Oban queue is used by V3.</p>
       </div>
     </section>
 
     <section class="tab-panel" data-panel="downloads">
       <div class="settings-panel-intro">
-        <div><h3>Downloads</h3><p>Control One-time Download behaviour, the default Pinchflat history window and storage. File locations owned by other features are shown here as read-only references.</p></div>
+        <div><h3>Downloads</h3><p>Control One-time Download behaviour, the default Downloader history window and storage. File locations owned by other features are shown here as read-only references.</p></div>
       </div>
 
       <div class="setting-box">
@@ -5700,7 +5374,7 @@
 
       <div class="settings-grid" style="margin-top:14px">
         <div class="setting-box">
-          <h3>Default Pinchflat download range</h3>
+          <h3>Default subscription download range</h3>
           <p class="muted small">Starting history range used when a channel is enabled unless that channel has its own range.</p>
           <form method="post" action="/settings/history"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Default range
@@ -5735,11 +5409,11 @@
         <h3>Where each download type is configured</h3>
         <p class="muted small">Older releases duplicated path settings here. Each path now lives with the feature which owns it, so there is one source of truth.</p>
         <div class="settings-status-list">
-          <div class="settings-status-row"><strong>Pinchflat subscriptions</strong><span>Media Profile <strong>{{ media_profile_settings.name or ('#' ~ media_profile_id) }}</strong> · <code>{{ subscription_download_template }}</code> · edit in Pinchflat</span></div>
+          <div class="settings-status-row"><strong>Subscription downloads</strong><span>Media Profile <strong>{{ media_profile_settings.name or ('#' ~ media_profile_id) }}</strong> · <code>{{ subscription_download_template }}</code> · edit in Downloader</span></div>
           <div class="settings-status-row"><strong>One-time Downloads</strong><span><code>/downloads/{{ single_download_folder }}</code> · edit above</span></div>
           <div class="settings-status-row"><strong>Emby Download playlist</strong><span><code>/downloads/{{ emby_download_folder }}</code> · edit in Automation</span></div>
         </div>
-        <div class="actions" style="margin-top:12px"><button class="btn ghost" type="button" onclick="showTab('pinchflat')">Open Pinchflat profile</button><button class="btn ghost" type="button" onclick="showTab('automation')">Open Automation</button></div>
+        <div class="actions" style="margin-top:12px"><button class="btn ghost" type="button" onclick="showTab('pinchflat')">Open Downloader settings</button><button class="btn ghost" type="button" onclick="showTab('automation')">Open Automation</button></div>
       </div>
     </section>
 
@@ -5750,7 +5424,7 @@
             <div class="retention-policy-icon" aria-hidden="true">🛡</div>
             <div>
               <h3>Video Retention</h3>
-              <div class="muted small">Control how long Pinchflat downloads stay on disk without changing how far back each channel is allowed to download.</div>
+              <div class="muted small">Control how long subscription downloads stay on disk without changing how far back each channel is allowed to download.</div>
             </div>
           </div>
           <p class="muted small" style="margin:10px 0 0">
@@ -5798,7 +5472,7 @@
               <div class="retention-policy-icon" aria-hidden="true">▶</div>
               <div>
                 <h3 style="margin:0">Non-favourite channels</h3>
-                <div class="muted small">Default policy for all other enabled Pinchflat channels.</div>
+                <div class="muted small">Default policy for all other enabled Downloader channels.</div>
               </div>
             </div>
             <div class="settings-grid" style="grid-template-columns:1fr 1fr">
@@ -5839,11 +5513,11 @@
             </label>
             <div class="page-view-option" aria-label="One-time Downloads are protected">
               <span style="display:grid;place-items:center;width:20px;height:20px;color:#a78bfa">🛡</span>
-              <span><strong>One-time Downloads</strong><small>Always kept. Retention only manages Pinchflat-downloaded media.</small></span>
+              <span><strong>One-time Downloads</strong><small>Always kept. Retention only manages subscription media.</small></span>
             </div>
           </div>
           <div class="profile-control-help" style="margin-top:12px">
-            Cleanup uses Pinchflat's own media deletion logic and marks removed items so a later Force Scan does not immediately download them again. Pinchflat's native Prevent Automatic Deletion flag is also respected.
+            Cleanup uses Downloader's own media deletion logic and marks removed items so a later Force Scan does not immediately download them again. Downloader's native Prevent Automatic Deletion flag is also respected.
           </div>
           <div class="actions" style="margin-top:14px">
             <button class="btn" type="submit">Save Video Retention</button>
@@ -5943,15 +5617,15 @@
           </div>
 
           <div class="setting-box compact-setting">
-            <h3>Pinchflat source sync</h3>
-            <label>Reconcile Pinchflat every
+            <h3>Downloader source sync</h3>
+            <label>Reconcile Downloader every
               <select name="pinchflat_sync_interval_minutes">
                 {% for value, label in schedule_options %}
                   <option value="{{ value }}" {% if pinchflat_sync_interval == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
             </label>
-            <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Retry failed Pinchflat source updates</label>
+            <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Retry failed Downloader source updates</label>
             <p class="muted small">Adds authorised sources, removes disabled sources and repairs mismatches.</p>
             <p class="muted small">Next run: {{ next_pinchflat_sync or "not available" }}</p>
           </div>
@@ -5991,7 +5665,7 @@
     </section>
 
     <section class="tab-panel" data-panel="diagnostics">
-      <div class="settings-panel-intro"><div><h3>Diagnostics</h3><p>Application health, recent activity, direct download history and Pinchflat container output in one place.</p></div></div>
+      <div class="settings-panel-intro"><div><h3>Diagnostics</h3><p>Application health, recent activity, direct download history and application container output in one place.</p></div></div>
 
       <div class="settings-grid">
         <div class="setting-box">
@@ -6022,10 +5696,10 @@
 
       <div class="setting-box" style="margin-top:14px">
         <div class="log-tile-head">
-          <div><h3>Pinchflat logs</h3><div class="muted small">Recent stdout and stderr from the Pinchflat Docker container.</div></div>
-          <div class="container-log-toolbar"><select id="pinchflat-log-tail" aria-label="Pinchflat log line count"><option value="100">100 lines</option><option value="250" selected>250 lines</option><option value="500">500 lines</option><option value="1000">1,000 lines</option></select><button class="btn secondary" type="button" id="pinchflat-log-refresh" onclick="loadPinchflatLogs(true)">Refresh logs</button></div>
+          <div><h3>Downloader logs</h3><div class="muted small">Recent stdout and stderr from the application.</div></div>
+          <div class="container-log-toolbar"><select id="pinchflat-log-tail" aria-label="Downloader log line count"><option value="100">100 lines</option><option value="250" selected>250 lines</option><option value="500">500 lines</option><option value="1000">1,000 lines</option></select><button class="btn secondary" type="button" id="pinchflat-log-refresh" onclick="loadDownloaderLogs(true)">Refresh logs</button></div>
         </div>
-        <pre id="pinchflat-log-output" class="container-log-output">Open Diagnostics to load the Pinchflat container log.</pre>
+        <pre id="pinchflat-log-output" class="container-log-output">Open Diagnostics to load the application container log.</pre>
         <div id="pinchflat-log-status" class="container-log-status muted small"></div>
       </div>
 
@@ -6179,7 +5853,7 @@ const userIsAdmin = {{ 'true' if is_admin else 'false' }};
 const embyApiConfigured = {{ 'true' if emby_api_configured else 'false' }};
 const googleWriteReady = {{ 'true' if google_write_ready else 'false' }};
 
-let returnToPinchflatQueueAfterPlayer = false;
+let returnToDownloaderQueueAfterPlayer = false;
 let pinchflatQueueReturnScrollTop = 0;
 let singleDownloadTimer = null;
 let singleDownloadedVideoIds = new Set();
@@ -6286,7 +5960,7 @@ function elapsedFrom(value) {
   return `${hours}h ${minutes % 60}m elapsed`;
 }
 
-function setPinchflatDownloadMinimised(minimised) {
+function setDownloaderDownloadMinimised(minimised) {
   const card = document.getElementById("pinchflat-download-card");
   const body = document.getElementById("pinchflat-download-body");
   const button = document.getElementById("pinchflat-download-minimise");
@@ -6305,8 +5979,8 @@ function setPinchflatDownloadMinimised(minimised) {
        </svg>`;
 
   button.title = minimised
-    ? "Restore Pinchflat downloads"
-    : "Minimise Pinchflat downloads";
+    ? "Restore subscription downloads"
+    : "Minimise subscription downloads";
 
   button.setAttribute(
     "aria-label",
@@ -6319,11 +5993,11 @@ function setPinchflatDownloadMinimised(minimised) {
   );
 }
 
-function togglePinchflatDownloadSection() {
+function toggleDownloaderDownloadSection() {
   const body = document.getElementById("pinchflat-download-body");
   if (!body) return;
 
-  setPinchflatDownloadMinimised(
+  setDownloaderDownloadMinimised(
     !body.classList.contains("hidden")
   );
 }
@@ -6420,7 +6094,7 @@ async function fetchCompleteVideoMetadata(item) {
   }
 }
 
-async function openPinchflatMedia(item) {
+async function openDownloaderMedia(item) {
   const videoId =
     item?.youtube_id
     || item?.video_id
@@ -6432,7 +6106,7 @@ async function openPinchflatMedia(item) {
     pinchflatQueueDialog?.open
   );
 
-  returnToPinchflatQueueAfterPlayer = openedFromQueue;
+  returnToDownloaderQueueAfterPlayer = openedFromQueue;
 
   if (openedFromQueue) {
     const queueBody = pinchflatQueueDialog.querySelector(
@@ -6482,7 +6156,7 @@ function pinchflatMediaThumbnailButton(item, classPrefix="pinchflat-download") {
   if (item?.youtube_id) {
     button.addEventListener(
       "click",
-      () => openPinchflatMedia(item)
+      () => openDownloaderMedia(item)
     );
   }
 
@@ -6502,7 +6176,7 @@ function pinchflatMediaTitleButton(item, className) {
   if (item?.youtube_id) {
     button.addEventListener(
       "click",
-      () => openPinchflatMedia(item)
+      () => openDownloaderMedia(item)
     );
   }
 
@@ -6513,7 +6187,7 @@ function pinchflatChannelElement(item) {
   const label =
     item?.channel
     || item?.channel_title
-    || "Pinchflat";
+    || "Downloader";
 
   if (item?.channel_id) {
     const button = document.createElement("button");
@@ -6535,7 +6209,7 @@ function pinchflatChannelElement(item) {
 }
 
 
-function renderPinchflatActiveDownloads(data) {
+function renderDownloaderActiveDownloads(data) {
   const target = document.getElementById("pinchflat-active-downloads");
   const summary = document.getElementById("pinchflat-download-summary");
   const badge = document.getElementById("pinchflat-queue-badge");
@@ -6566,8 +6240,8 @@ function renderPinchflatActiveDownloads(data) {
     const empty = document.createElement("div");
     empty.className = "pinchflat-download-empty";
     empty.textContent = waiting
-      ? `${waiting} download${waiting === 1 ? "" : "s"} waiting in Pinchflat.`
-      : "No active Pinchflat downloads.";
+      ? `${waiting} download${waiting === 1 ? "" : "s"} waiting in Downloader.`
+      : "No active subscription downloads.";
     target.appendChild(empty);
     return;
   }
@@ -6616,7 +6290,7 @@ function renderPinchflatActiveDownloads(data) {
       const speed = document.createElement("span");
       speed.className = "pinchflat-download-speed";
       speed.textContent = `↓ ${item.speed}`;
-      speed.title = "Current Pinchflat download speed";
+      speed.title = "Current Downloader download speed";
       meta.appendChild(speed);
     }
 
@@ -6650,7 +6324,7 @@ function renderPinchflatActiveDownloads(data) {
 }
 
 
-function renderPinchflatTasks(data) {
+function renderDownloaderTasks(data) {
   const activeTarget = document.getElementById("pinchflat-tasks-active");
   const statusTarget = document.getElementById("pinchflat-tasks-status");
   const membershipTarget = document.getElementById("pinchflat-tasks-membership-errors");
@@ -6674,7 +6348,7 @@ function renderPinchflatTasks(data) {
   if (blockEnabled) {
     statusTarget.textContent = activeCount || waitingCount
       ? `Stopping · ${activeCount} active · ${waitingCount} waiting`
-      : "All Pinchflat tasks blocked";
+      : "All Tasks blocked";
   } else if (activeCount > 0) {
     statusTarget.textContent = `${activeCount} active · ${waitingCount} waiting`;
   } else if (waitingCount > 0) {
@@ -6687,7 +6361,7 @@ function renderPinchflatTasks(data) {
     if (membershipErrors > 0) {
       membershipTarget.textContent = `${membershipErrors} membership error${membershipErrors === 1 ? "" : "s"}`;
       membershipTarget.classList.remove("hidden");
-      membershipTarget.title = "Pinchflat download failures containing ‘Join this channel’, usually members-only YouTube videos.";
+      membershipTarget.title = "Downloader download failures containing ‘Join this channel’, usually members-only YouTube videos.";
     } else {
       membershipTarget.textContent = "";
       membershipTarget.classList.add("hidden");
@@ -6714,7 +6388,7 @@ function renderPinchflatTasks(data) {
       } else if (Number(last.cancelled || 0) || Number(last.deleted || 0)) {
         blockStatus.textContent = `Blocking enabled · last pass cancelled ${Number(last.cancelled || 0)}, deleted ${Number(last.deleted || 0)}`;
       } else {
-        blockStatus.textContent = "Blocking enabled · new Pinchflat tasks are cancelled automatically";
+        blockStatus.textContent = "Blocking enabled · new Tasks are cancelled automatically";
       }
     } else {
       blockStatus.textContent = "";
@@ -6722,15 +6396,15 @@ function renderPinchflatTasks(data) {
   }
 }
 
-async function setPinchflatTaskBlock(enabled) {
+async function setDownloaderTaskBlock(enabled) {
   const toggle = document.getElementById("pinchflat-task-block-toggle");
   const status = document.getElementById("pinchflat-task-block-status");
   const previous = !enabled;
   if (toggle) toggle.disabled = true;
   if (status) {
     status.textContent = enabled
-      ? "Stopping and deleting all Pinchflat tasks…"
-      : "Resuming Pinchflat queues…";
+      ? "Stopping and deleting all Tasks…"
+      : "Resuming Downloader queues…";
     status.classList.toggle("active", enabled);
   }
 
@@ -6745,11 +6419,11 @@ async function setPinchflatTaskBlock(enabled) {
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || `Pinchflat task control returned HTTP ${response.status}`);
+      throw new Error(data.error || `Downloader task control returned HTTP ${response.status}`);
     }
     if (toggle) toggle.checked = !!data.enabled;
-    showAjaxToast(data.message || (data.enabled ? "Pinchflat task blocking enabled." : "Pinchflat task blocking disabled."), "success");
-    await loadPinchflatDownloadOverview(true);
+    showAjaxToast(data.message || (data.enabled ? "Downloader task blocking enabled." : "Downloader task blocking disabled."), "success");
+    await loadDownloaderDownloadOverview(true);
   } catch (error) {
     if (toggle) toggle.checked = previous;
     if (status) {
@@ -6763,7 +6437,7 @@ async function setPinchflatTaskBlock(enabled) {
 }
 
 
-function renderPinchflatLastDownload(data) {
+function renderDownloaderLastDownload(data) {
   const target = document.getElementById("pinchflat-last-download");
   if (!target) return;
 
@@ -6847,7 +6521,7 @@ function renderLatestDownloadSummary(item) {
     button.onclick = null;
     thumb.src = "{{ url_for('static', filename='channel-placeholder.svg') }}";
     title.textContent = "No completed download yet";
-    channel.textContent = "Pinchflat";
+    channel.textContent = "Downloader";
     return;
   }
 
@@ -6855,7 +6529,7 @@ function renderLatestDownloadSummary(item) {
   thumb.onerror = () => { thumb.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
   title.textContent = item.title || "YouTube video";
   title.title = item.title || "YouTube video";
-  channel.textContent = item.channel || item.channel_title || "Pinchflat";
+  channel.textContent = item.channel || item.channel_title || "Downloader";
   channel.title = item.channel_id ? `View ${channel.textContent} channel details` : channel.textContent;
   channel.style.cursor = item.channel_id ? "pointer" : "default";
   channel.onclick = item.channel_id ? event => {
@@ -6866,11 +6540,11 @@ function renderLatestDownloadSummary(item) {
   button.disabled = !item.youtube_id;
   button.onclick = item.youtube_id ? event => {
     if (event?.target === channel) return;
-    openPinchflatMedia(item);
+    openDownloaderMedia(item);
   } : null;
 }
 
-function renderPinchflatQueue(data) {
+function renderDownloaderQueue(data) {
   const waitingTarget = document.getElementById("queue-summary-waiting");
   const activeTarget = document.getElementById("queue-summary-active");
   const body = document.getElementById("pinchflat-queue-body");
@@ -6898,7 +6572,7 @@ function renderPinchflatQueue(data) {
   if (!waiting.length) {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
-    empty.textContent = "There are no waiting Pinchflat media downloads.";
+    empty.textContent = "There are no waiting subscription media downloads.";
     body.appendChild(empty);
     return;
   }
@@ -6966,7 +6640,7 @@ function renderPinchflatQueue(data) {
 }
 
 
-async function loadPinchflatDownloadOverview(force=false) {
+async function loadDownloaderDownloadOverview(force=false) {
   if (
     !force
     && document.hidden
@@ -6995,7 +6669,7 @@ async function loadPinchflatDownloadOverview(force=false) {
     if (!response.ok || !data.ok) {
       throw new Error(
         data.error
-        || `Pinchflat download status returned HTTP ${response.status}`
+        || `Downloader download status returned HTTP ${response.status}`
       );
     }
 
@@ -7005,9 +6679,9 @@ async function loadPinchflatDownloadOverview(force=false) {
 
     pinchflatDownloadSnapshot = data;
 
-    renderPinchflatActiveDownloads(data);
-    renderPinchflatTasks(data);
-    renderPinchflatLastDownload(data);
+    renderDownloaderActiveDownloads(data);
+    renderDownloaderTasks(data);
+    renderDownloaderLastDownload(data);
     renderLatestDownloadSummary(data.last_downloaded || null);
 
     const newLastDownloadedId =
@@ -7029,7 +6703,7 @@ async function loadPinchflatDownloadOverview(force=false) {
     const message = error.message || String(error);
 
     if (summary) {
-      summary.textContent = "Pinchflat download status unavailable";
+      summary.textContent = "Downloader download status unavailable";
     }
 
     const taskActive = document.getElementById("pinchflat-tasks-active");
@@ -7037,7 +6711,7 @@ async function loadPinchflatDownloadOverview(force=false) {
     const taskMembership = document.getElementById("pinchflat-tasks-membership-errors");
     const taskCurrent = document.getElementById("pinchflat-tasks-current");
     if (taskActive) taskActive.textContent = "—";
-    if (taskStatus) taskStatus.textContent = "Pinchflat task status unavailable";
+    if (taskStatus) taskStatus.textContent = "Downloader task status unavailable";
     if (taskMembership) {
       taskMembership.textContent = "";
       taskMembership.classList.add("hidden");
@@ -7060,7 +6734,7 @@ async function loadPinchflatDownloadOverview(force=false) {
   }
 }
 
-async function loadPinchflatQueue(force=false) {
+async function loadDownloaderQueue(force=false) {
   const body = document.getElementById(
     "pinchflat-queue-body"
   );
@@ -7072,7 +6746,7 @@ async function loadPinchflatQueue(force=false) {
 
     const loading = document.createElement("div");
     loading.className = "queue-empty";
-    loading.textContent = "Loading complete Pinchflat queue…";
+    loading.textContent = "Loading complete Downloader queue…";
     body.appendChild(loading);
   }
 
@@ -7094,11 +6768,11 @@ async function loadPinchflatQueue(force=false) {
     ) {
       throw new Error(
         data.error
-        || "The Pinchflat queue could not be loaded."
+        || "The Downloader queue could not be loaded."
       );
     }
 
-    renderPinchflatQueue(data);
+    renderDownloaderQueue(data);
   } catch (error) {
     body.innerHTML = "";
 
@@ -7111,12 +6785,12 @@ async function loadPinchflatQueue(force=false) {
   }
 }
 
-function openPinchflatQueue() {
+function openDownloaderQueue() {
   if (!pinchflatQueueDialog.open) {
     pinchflatQueueDialog.showModal();
   }
 
-  loadPinchflatQueue(true);
+  loadDownloaderQueue(true);
 
   if (pinchflatQueueTimer) {
     clearInterval(
@@ -7127,14 +6801,14 @@ function openPinchflatQueue() {
   pinchflatQueueTimer = setInterval(
     () => {
       if (pinchflatQueueDialog.open) {
-        loadPinchflatQueue(false);
+        loadDownloaderQueue(false);
       }
     },
     10000
   );
 }
 
-function closePinchflatQueue() {
+function closeDownloaderQueue() {
   if (pinchflatQueueTimer) {
     clearInterval(
       pinchflatQueueTimer
@@ -7146,7 +6820,7 @@ function closePinchflatQueue() {
 }
 
 
-function startPinchflatDownloadPolling() {
+function startDownloaderDownloadPolling() {
   if (pinchflatDownloadTimer) {
     clearInterval(
       pinchflatDownloadTimer
@@ -7154,7 +6828,7 @@ function startPinchflatDownloadPolling() {
   }
 
   pinchflatDownloadTimer = setInterval(
-    () => loadPinchflatDownloadOverview(false),
+    () => loadDownloaderDownloadOverview(false),
     4000
   );
 }
@@ -7163,12 +6837,12 @@ document.addEventListener(
   "visibilitychange",
   () => {
     if (!document.hidden) {
-      loadPinchflatDownloadOverview(true);
+      loadDownloaderDownloadOverview(true);
     }
   }
 );
 
-function refreshPinchflatElapsedLabels() {
+function refreshDownloaderElapsedLabels() {
   document.querySelectorAll(
     ".pinchflat-active-meta [data-started-at]"
   ).forEach(element => {
@@ -7179,7 +6853,7 @@ function refreshPinchflatElapsedLabels() {
 }
 
 setInterval(
-  refreshPinchflatElapsedLabels,
+  refreshDownloaderElapsedLabels,
   1000
 );
 
@@ -7311,7 +6985,7 @@ function bindSettingsDynamicListeners() {
     logTail.dataset.listenerBound = "1";
     logTail.addEventListener("change", () => {
       pinchflatLogsLoaded = false;
-      loadPinchflatLogs(true);
+      loadDownloaderLogs(true);
     });
   }
 }
@@ -7759,12 +7433,12 @@ function syncChannelAvatarControls(channelId, override={}) {
     button.disabled = !state.subscribed;
     button.title = !state.subscribed
       ? "Subscribe to this channel before enabling downloads"
-      : (state.enabled ? "Disable Pinchflat downloads" : "Enable Pinchflat downloads");
+      : (state.enabled ? "Disable subscription downloads" : "Enable subscription downloads");
   });
 
   document.querySelectorAll(`[data-channel-scan-control="1"][data-channel-id="${CSS.escape(channelId)}"]`).forEach(button => {
     button.disabled = !state.sourceId;
-    button.title = state.sourceId ? "Force Pinchflat scan" : "Enable downloads before scanning";
+    button.title = state.sourceId ? "Force Downloader scan" : "Enable downloads before scanning";
   });
 
   document.querySelectorAll(`[data-channel-delete-control="1"][data-channel-id="${CSS.escape(channelId)}"]`).forEach(button => {
@@ -7836,7 +7510,7 @@ function makeChannelAvatarWidget(item, options={}) {
     enabled.textContent = "✓";
     enabled.setAttribute("aria-pressed", state.enabled ? "true" : "false");
     enabled.disabled = !state.subscribed;
-    enabled.title = !state.subscribed ? "Subscribe to this channel before enabling downloads" : (state.enabled ? "Disable Pinchflat downloads" : "Enable Pinchflat downloads");
+    enabled.title = !state.subscribed ? "Subscribe to this channel before enabling downloads" : (state.enabled ? "Disable subscription downloads" : "Enable subscription downloads");
     enabled.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -7851,7 +7525,7 @@ function makeChannelAvatarWidget(item, options={}) {
     scan.dataset.channelId = channelId;
     scan.textContent = "↻";
     scan.disabled = !state.sourceId;
-    scan.title = state.sourceId ? "Force Pinchflat scan" : "Enable downloads before scanning";
+    scan.title = state.sourceId ? "Force Downloader scan" : "Enable downloads before scanning";
     scan.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -7930,7 +7604,7 @@ async function toggleChannelDownloadFromControl(button) {
       currentSubscriptionChannelData.subscription.pinchflat_source_id = updated.pinchflat_source_id || "";
       currentSubscriptionChannelData.subscription.pinchflat_added = !!updated.pinchflat_added;
       document.getElementById("subscription-channel-status").textContent = `${updated.active ? "Subscribed" : "Unsubscribed"} · ${updated.download_enabled ? "Enabled" : "Disabled"}`;
-      document.getElementById("subscription-channel-source").textContent = updated.pinchflat_source_id ? `#${updated.pinchflat_source_id}` : "Not in Pinchflat";
+      document.getElementById("subscription-channel-source").textContent = updated.pinchflat_source_id ? `#${updated.pinchflat_source_id}` : "Not in Downloader";
     }
 
     const finalState = syncChannelAvatarControls(channelId, {
@@ -8496,27 +8170,27 @@ function openLatestVideo(item) {
 
 function closeLatestVideo() {
   const player = document.getElementById("latest-video-player");
-  const reopenPinchflatQueue =
-    returnToPinchflatQueueAfterPlayer;
+  const reopenDownloaderQueue =
+    returnToDownloaderQueueAfterPlayer;
 
   if (player) {
     player.src = "";
   }
 
   latestPopupVideo = null;
-  returnToPinchflatQueueAfterPlayer = false;
+  returnToDownloaderQueueAfterPlayer = false;
 
   if (latestVideoDialog.open) {
     latestVideoDialog.close();
   }
 
   if (
-    reopenPinchflatQueue
+    reopenDownloaderQueue
     && pinchflatQueueDialog
     && !pinchflatQueueDialog.open
   ) {
     pinchflatQueueDialog.showModal();
-    loadPinchflatQueue(false);
+    loadDownloaderQueue(false);
 
     if (pinchflatQueueTimer) {
       clearInterval(pinchflatQueueTimer);
@@ -8525,7 +8199,7 @@ function closeLatestVideo() {
     pinchflatQueueTimer = setInterval(
       () => {
         if (pinchflatQueueDialog.open) {
-          loadPinchflatQueue(false);
+          loadDownloaderQueue(false);
         }
       },
       10000
@@ -9371,7 +9045,7 @@ function downloadedDiscoverSignature(items) {
 function renderCurrentDiscoverMode() {
   if (discoverMode === "downloaded") {
     document.getElementById("discover-quota").textContent =
-      `${discoverResults.downloaded.length} most recent completed Pinchflat downloads`;
+      `${discoverResults.downloaded.length} most recent completed subscription downloads`;
 
     renderDiscoverTiles(
       discoverResults.downloaded
@@ -9532,7 +9206,7 @@ async function showDiscoverMode(mode) {
   );
 
   if (discoverMode === "downloaded") {
-    // Replace any Random Videos tiles immediately, then check Pinchflat
+    // Replace any Random Videos tiles immediately, then check Downloader
     // silently for a newer completed download.
     if (discoverResults.downloaded.length) {
       renderCurrentDiscoverMode();
@@ -9647,7 +9321,7 @@ async function loadDiscover(mode, force=false) {
         );
 
       document.getElementById("discover-quota").textContent =
-        `${discoverResults.downloaded.length} most recent completed Pinchflat downloads`;
+        `${discoverResults.downloaded.length} most recent completed subscription downloads`;
 
       renderDiscoverTiles(
         discoverResults.downloaded
@@ -9940,7 +9614,7 @@ function renderDiscoverTiles(items) {
 
     const openVideo = () => {
       if (item.from_pinchflat || item.metadata_complete === false) {
-        openPinchflatMedia(item);
+        openDownloaderMedia(item);
       } else {
         openLatestVideo({
           ...item,
@@ -10450,7 +10124,7 @@ function toggleShortsSound() {
 
 let pinchflatLogsLoaded = false;
 
-async function loadPinchflatLogs(force=false) {
+async function loadDownloaderLogs(force=false) {
   const output = document.getElementById("pinchflat-log-output");
   const status = document.getElementById("pinchflat-log-status");
   const refresh = document.getElementById("pinchflat-log-refresh");
@@ -10460,7 +10134,7 @@ async function loadPinchflatLogs(force=false) {
   if (pinchflatLogsLoaded && !force) return;
 
   if (refresh) refresh.disabled = true;
-  if (status) status.textContent = "Loading Pinchflat logs…";
+  if (status) status.textContent = "Loading Downloader logs…";
 
   try {
     const response = await fetch(
@@ -10476,25 +10150,25 @@ async function loadPinchflatLogs(force=false) {
 
     if (!response.ok || !data.ok) {
       throw new Error(
-        data.error || `Pinchflat logs returned HTTP ${response.status}`
+        data.error || `Downloader logs returned HTTP ${response.status}`
       );
     }
 
     output.textContent =
       data.logs?.trim()
         ? data.logs
-        : "No Pinchflat log output was returned.";
+        : "No Downloader log output was returned.";
 
     output.scrollTop = output.scrollHeight;
     pinchflatLogsLoaded = true;
 
     if (status) {
       status.textContent =
-        `Showing the latest ${tail} lines from ${data.container || "Pinchflat"}.`;
+        `Showing the latest ${tail} lines from ${data.container || "Downloader"}.`;
     }
   } catch (error) {
     output.textContent =
-      `Pinchflat logs are unavailable.\n\n${error.message || String(error)}`;
+      `Downloader logs are unavailable.\n\n${error.message || String(error)}`;
 
     if (status) {
       status.textContent = "";
@@ -10897,7 +10571,7 @@ async function loadRetentionRunStatus() {
     if (runButton) runButton.disabled = !!data.running;
     if (status) {
       if (data.running) {
-        status.textContent = "Cleanup is running. Pinchflat media is being removed safely and Emby will be refreshed afterwards.";
+        status.textContent = "Cleanup is running. subscription media is being removed safely and Emby will be refreshed afterwards.";
       } else if (data.last_run) {
         const deleted = Number(data.last_run.deleted_count || 0).toLocaleString("en-GB");
         status.textContent = `Last cleanup: ${deleted} videos removed · ${data.last_run.reclaimed_size || "0 B"} reclaimed · ${data.last_run.status || "finished"}.`;
@@ -10925,7 +10599,7 @@ async function runRetentionCleanup() {
     showAjaxToast("Enable Video Retention and save the settings before running cleanup.", "error");
     return;
   }
-  if (!confirm("Run video retention cleanup now? Eligible Pinchflat media files will be deleted according to the preview.")) return;
+  if (!confirm("Run video retention cleanup now? Eligible subscription media files will be deleted according to the preview.")) return;
   const button = document.getElementById("retention-run-button");
   if (button) button.disabled = true;
   try {
@@ -11033,7 +10707,7 @@ function showTab(name) {
     loadRetentionChannels(false);
     loadRetentionRunStatus();
   }
-  if (name === "diagnostics") loadPinchflatLogs();
+  if (name === "diagnostics") loadDownloaderLogs();
 }
 
 bindSettingsDynamicListeners();
@@ -11273,7 +10947,7 @@ function openSubscriptionChannelActions(button) {
 
   subscriptionActionsMenu.querySelectorAll("[data-action-source-action]").forEach(actionButton => {
     actionButton.disabled = !sourceId;
-    actionButton.title = sourceId ? "" : "This channel is not currently a Pinchflat source";
+    actionButton.title = sourceId ? "" : "This channel is not currently a Downloader source";
   });
 
   subscriptionActionsMenu.classList.remove("hidden");
@@ -11318,25 +10992,25 @@ function updateChannelDeleteMenuAvailability(state) {
   }
   if (local) {
     local.disabled = !state.inApp;
-    local.title = state.inApp ? "Remove the channel from Pinchflat Sync only" : "This channel is not stored in Pinchflat Sync";
+    local.title = state.inApp ? "Remove the channel from YouTube Subscription Downloader only" : "This channel is not stored in YouTube Subscription Downloader";
   }
   if (pinchflat) {
     pinchflat.disabled = !state.inApp;
     pinchflat.title = !state.inApp
-      ? "This channel is not stored in Pinchflat Sync"
-      : (state.sourceId ? "Remove the channel from Pinchflat Sync and remove its Pinchflat source" : "Remove the channel from Pinchflat Sync. No Pinchflat source currently exists");
+      ? "This channel is not stored in YouTube Subscription Downloader"
+      : (state.sourceId ? "Remove the channel from YouTube Subscription Downloader and remove its Downloader source" : "Remove the channel from YouTube Subscription Downloader. No Downloader source currently exists");
   }
   if (everything) {
     everything.disabled = !state.inApp;
     everything.title = state.inApp
-      ? "Unsubscribe, remove the channel from Pinchflat Sync and Pinchflat, and delete downloaded media"
-      : "This channel is not stored in Pinchflat Sync";
+      ? "Unsubscribe, remove the channel from YouTube Subscription Downloader and Downloader, and delete downloaded media"
+      : "This channel is not stored in YouTube Subscription Downloader";
   }
   if (subtitle) {
     const parts = [];
     parts.push(state.subscribed ? "Subscribed" : "Not subscribed");
-    parts.push(state.inApp ? "In Pinchflat Sync" : "Not in Pinchflat Sync");
-    parts.push(state.sourceId ? "In Pinchflat" : "No Pinchflat source");
+    parts.push(state.inApp ? "In YouTube Subscription Downloader" : "Not in YouTube Subscription Downloader");
+    parts.push(state.sourceId ? "In Downloader" : "No Downloader source");
     subtitle.textContent = parts.join(" · ");
   }
 }
@@ -11450,7 +11124,7 @@ async function runChannelDeleteMenuAction(mode) {
   }
 }
 
-function confirmDeleteLocalCurrentChannel(removePinchflat) {
+function confirmDeleteLocalCurrentChannel(removeDownloader) {
   const channelId = String(currentActionChannelId || "").trim();
   if (!channelId) return;
   const state = getChannelControlState(channelId);
@@ -11461,14 +11135,14 @@ function confirmDeleteLocalCurrentChannel(removePinchflat) {
 
   closeSubscriptionChannelActions(false);
   closeChannelDeleteMenu(false);
-  document.getElementById("subscription-confirm-message").textContent = removePinchflat
-    ? `Delete ${title} from Pinchflat Sync and remove its Pinchflat source? Downloaded media and your YouTube subscription will be kept.`
-    : `Delete ${title} from Pinchflat Sync only? Its Pinchflat source, downloaded media and YouTube subscription will be kept.`;
-  subscriptionConfirmAction = () => deleteCurrentChannelFromPinchflatSync(removePinchflat);
+  document.getElementById("subscription-confirm-message").textContent = removeDownloader
+    ? `Delete ${title} from YouTube Subscription Downloader and remove its Downloader source? Downloaded media and your YouTube subscription will be kept.`
+    : `Delete ${title} from YouTube Subscription Downloader only? Its Downloader source, downloaded media and YouTube subscription will be kept.`;
+  subscriptionConfirmAction = () => deleteCurrentChannelFromDownloaderSync(removeDownloader);
   if (!subscriptionConfirmDialog.open) subscriptionConfirmDialog.showModal();
 }
 
-async function deleteCurrentChannelFromPinchflatSync(removePinchflat) {
+async function deleteCurrentChannelFromDownloaderSync(removeDownloader) {
   const channelId = String(currentActionChannelId || "").trim();
   if (!channelId) {
     closeSubscriptionConfirm();
@@ -11486,13 +11160,13 @@ async function deleteCurrentChannelFromPinchflatSync(removePinchflat) {
 
   if (confirmButton) {
     confirmButton.disabled = true;
-    confirmButton.textContent = removePinchflat ? "Removing source…" : "Removing…";
+    confirmButton.textContent = removeDownloader ? "Removing source…" : "Removing…";
   }
   if (cancelButton) cancelButton.disabled = true;
 
   try {
     const data = await apiPost(`/api/subscriptions/${encodeURIComponent(channelId)}/delete-local`, {
-      remove_pinchflat: !!removePinchflat
+      remove_pinchflat: !!removeDownloader
     });
     closeSubscriptionConfirm();
 
@@ -11508,7 +11182,7 @@ async function deleteCurrentChannelFromPinchflatSync(removePinchflat) {
     if (currentSubscriptionChannelId === channelId) closeChannelDetails();
     closeSubscriptionChannelActions();
     closeChannelDeleteMenu();
-    showAjaxToast(data.message || "Channel removed from Pinchflat Sync.", "success");
+    showAjaxToast(data.message || "Channel removed from YouTube Subscription Downloader.", "success");
 
     if (favouritesDialog?.open || document.querySelector('.tab-panel[data-panel="favourites"].active')) {
       await loadFavourites();
@@ -11889,7 +11563,7 @@ async function openChannelDetails(channelId) {
     document.getElementById("subscription-channel-profile").textContent = sub?.media_profile_name || "—";
     document.getElementById("subscription-channel-range").textContent = sub?.history_label || sub?.cutoff || "—";
     document.getElementById("subscription-channel-storage").textContent = sub?.disk_usage || "—";
-    document.getElementById("subscription-channel-source").textContent = sub?.pinchflat_source_id ? `#${sub.pinchflat_source_id}` : "Not in Pinchflat";
+    document.getElementById("subscription-channel-source").textContent = sub?.pinchflat_source_id ? `#${sub.pinchflat_source_id}` : "Not in Downloader";
 
     const retentionInfo = data.retention || {};
     document.getElementById("subscription-channel-retention-policy").textContent = retentionInfo.label || "—";
@@ -11987,7 +11661,7 @@ async function runSubscriptionSourceAction(action, channelIdOverride="") {
       `/api/subscriptions/${encodeURIComponent(channelId)}/source-action`,
       {action}
     );
-    showAjaxToast(data.message || "Pinchflat action started.", "success");
+    showAjaxToast(data.message || "Downloader action started.", "success");
     return data;
   } catch (error) {
     const message = error.message || String(error);
@@ -12049,7 +11723,7 @@ async function testEmbyConnection() {
       "emby-library-status",
       data.youtube_library || {},
       data.youtube_library_error || "",
-      "Connected, but the Pinchflat media library has not been matched."
+      "Connected, but the subscription media library has not been matched."
     );
     renderLibrary(
       "emby-single-library-status",
@@ -12077,7 +11751,7 @@ async function testEmbyConnection() {
 async function refreshEmbyLibrary(target="pinchflat") {
   const status = document.getElementById("emby-api-status");
   const labels = {
-    pinchflat:"Pinchflat media",
+    pinchflat:"subscription media",
     single:"One-time Downloads",
     emby_download:"Emby Download playlist"
   };
@@ -12191,8 +11865,8 @@ function confirmRemoveCurrentChannel(deleteMedia) {
     || "this channel";
   closeSubscriptionChannelActions(false);
   const message = deleteMedia
-    ? `Delete ${title} from Pinchflat, unsubscribe from YouTube and permanently remove its downloaded media?`
-    : `Delete ${title} from Pinchflat and unsubscribe from YouTube? Existing downloaded media will be kept.`;
+    ? `Delete ${title} from Downloader, unsubscribe from YouTube and permanently remove its downloaded media?`
+    : `Delete ${title} from Downloader and unsubscribe from YouTube? Existing downloaded media will be kept.`;
 
   document.getElementById("subscription-confirm-message").textContent = message;
   subscriptionConfirmAction = () => deleteCurrentChannelAndUnsubscribe(deleteMedia);
@@ -12595,7 +12269,7 @@ async function processSubscriptionSaveQueue() {
       reject(error);
     }
 
-    // Give Pinchflat a small gap between source mutations. This avoids several
+    // Give Downloader a small gap between source mutations. This avoids several
     // expensive source-form updates hitting it at exactly the same time.
     if (subscriptionSaveQueue.length) {
       await new Promise(resolveDelay => setTimeout(resolveDelay, 150));
@@ -12970,7 +12644,7 @@ async function sourceToggleChanged(input) {
         currentSubscriptionChannelData.subscription.pinchflat_added = !!updated.pinchflat_added;
       }
       document.getElementById("subscription-channel-status").textContent = `${updated?.active ?? (row.dataset.active === "1") ? "Subscribed" : "Unsubscribed"} · ${finalEnabled ? "Enabled" : "Disabled"}`;
-      document.getElementById("subscription-channel-source").textContent = (updated?.pinchflat_source_id || row.dataset.sourceId) ? `#${updated?.pinchflat_source_id || row.dataset.sourceId}` : "Not in Pinchflat";
+      document.getElementById("subscription-channel-source").textContent = (updated?.pinchflat_source_id || row.dataset.sourceId) ? `#${updated?.pinchflat_source_id || row.dataset.sourceId}` : "Not in Downloader";
     }
 
     const favItem = (favouritesState.channels || []).find(item => item.channel_id === channelId);
@@ -13221,7 +12895,7 @@ function confirmBulkAction() {
 
 // Apply the saved layout immediately because this is cheap and prevents a
 // visible layout jump. Everything which scans hundreds of subscription rows,
-// polls Pinchflat or calls YouTube starts only after the browser has painted
+// polls Downloader or calls YouTube starts only after the browser has painted
 // the header and summary tiles once.
 applyConfiguredPageOrder();
 
@@ -13232,17 +12906,17 @@ function startDeferredDashboardWork() {
   loadSingleDownloadedVideoIds();
 
   {% if page_view.load_pinchflat_downloads %}
-  setPinchflatDownloadMinimised(
+  setDownloaderDownloadMinimised(
     {{ 'true' if page_view.min_pinchflat_downloads else 'false' }}
   );
   // Start the summary/download request first. Fetch is asynchronous, so the
   // already-rendered status tiles stay responsive while the request runs.
-  Promise.resolve(loadPinchflatDownloadOverview(true))
-    .finally(() => startPinchflatDownloadPolling());
+  Promise.resolve(loadDownloaderDownloadOverview(true))
+    .finally(() => startDownloaderDownloadPolling());
   {% elif page_view.load_summary and (page_view.show_summary_latest_download or page_view.show_summary_pinchflat_tasks) %}
-  Promise.resolve(loadPinchflatDownloadOverview(true));
+  Promise.resolve(loadDownloaderDownloadOverview(true));
   setInterval(
-    () => loadPinchflatDownloadOverview(false),
+    () => loadDownloaderDownloadOverview(false),
     {{ '4000' if page_view.show_summary_pinchflat_tasks else '15000' }}
   );
   {% endif %}
