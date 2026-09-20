@@ -712,6 +712,19 @@ def init_db():
             "downloader_po_token": "",
             "downloader_custom_yt_dlp_options": "{}",
             "downloader_auth_retry": "1",
+            "downloader_download_subtitles": "1",
+            "downloader_embed_subtitles": "1",
+            "downloader_subtitle_languages": "en.*,en",
+            "downloader_download_thumbnail": "1",
+            "downloader_embed_thumbnail": "1",
+            "downloader_download_metadata": "1",
+            "downloader_embed_metadata": "1",
+            "downloader_write_nfo": "1",
+            "downloader_series_images": "1",
+            "downloader_include_shorts": "0",
+            "downloader_include_livestreams": "1",
+            "downloader_sponsorblock_behaviour": "mark",
+            "downloader_sponsorblock_categories": "sponsor,outro,preview,intro",
             "retention_enabled": "0",
             "retention_favourite_days": "365",
             "retention_favourite_min_videos": "20",
@@ -6107,15 +6120,25 @@ def run_download_job(job_id):
 
         if source_type in {"single", "emby_download"} or subscription_job:
             try:
+                if subscription_job and not (
+                    setting_bool("downloader_write_nfo", True)
+                    or setting_bool("downloader_series_images", True)
+                ):
+                    raise StopIteration
                 write_direct_download_series_metadata(
                     info,
                     output_path,
                     write_nfo=(
                         setting_bool("single_download_write_nfo", True)
                         if source_type == "single"
-                        else True
+                        else (
+                            setting_bool("downloader_write_nfo", True)
+                            if subscription_job else True
+                        )
                     ),
                 )
+            except StopIteration:
+                pass
             except Exception as exc:
                 log_activity(
                     "download_metadata",
@@ -7080,6 +7103,61 @@ def pinchflat_container_logs(tail=250):
             f"{row['category']}: {row['title']} - {row['message']}"
         )
     return "\n".join(lines)
+
+
+def pinchflat_recent_downloaded_videos(limit=100):
+    """Compatibility name: return native V3 completed downloads for Discover."""
+    limit = max(1, min(int(limit or 100), 500))
+    with db() as conn:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT d.*, s.channel_url
+                FROM downloads d
+                LEFT JOIN subscriptions s ON s.channel_id=d.channel_id
+                WHERE d.status='completed'
+                  AND COALESCE(d.video_id,'')!=''
+                  AND COALESCE(d.output_path,'')!=''
+                ORDER BY d.finished_at DESC, d.id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        ]
+
+    results = []
+    for row in rows:
+        path = Path(str(row.get("output_path") or ""))
+        if not path.exists():
+            continue
+        video_id = str(row.get("video_id") or "").strip()
+        channel_id = str(row.get("channel_id") or "").strip()
+        published = str(row.get("published_at") or row.get("finished_at") or "")
+        results.append({
+            "video_id": video_id,
+            "title": row.get("title") or "YouTube video",
+            "description": "",
+            "video_url": f"https://www.youtube.com/watch?v={video_id}",
+            "shorts_url": f"https://www.youtube.com/shorts/{video_id}",
+            "channel_id": channel_id,
+            "channel_title": row.get("channel_title") or "YouTube channel",
+            "channel_url": row.get("channel_url") or (
+                f"https://www.youtube.com/channel/{channel_id}" if channel_id else "https://www.youtube.com"
+            ),
+            "channel_thumbnail_url": "",
+            "thumbnail_url": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+            "published_at": published,
+            "downloaded_at": row.get("finished_at") or "",
+            "view_count": 0,
+            "duration": "",
+            "duration_seconds": 0,
+            "is_short": False,
+            "metadata_complete": False,
+            "from_pinchflat": False,
+            "from_downloader": True,
+        })
+    return annotate_favourites(results)
 
 
 def pinchflat_retention_inventory(channel_id=""):
@@ -14115,19 +14193,78 @@ def _v3_authenticated_options(base):
 
 def _v3_profile_ydl_options(profile_id):
     profile_id = v3_profile_id(profile_id)
+    options = {}
+
     if profile_id == "audio":
-        return {
+        options.update({
             "format": "bestaudio/best",
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "0"}
             ],
-        }
-    height = int(profile_id[:-1]) if profile_id.endswith("p") else 1080
-    return {
-        "format": f"bestvideo*[height<={height}]+bestaudio/best[height<={height}]/best",
-        "merge_output_format": "mp4",
-    }
+        })
+    else:
+        height = int(profile_id[:-1]) if profile_id.endswith("p") else 1080
+        options.update({
+            "format": f"bestvideo*[height<={height}]+bestaudio/best[height<={height}]/best",
+            "merge_output_format": "mp4",
+        })
 
+    download_subs = setting_bool("downloader_download_subtitles", True)
+    embed_subs = setting_bool("downloader_embed_subtitles", True)
+    subtitle_langs = [
+        value.strip()
+        for value in get_setting("downloader_subtitle_languages", "en.*,en").split(",")
+        if value.strip()
+    ]
+    if download_subs or embed_subs:
+        options.update({
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": subtitle_langs or ["en.*", "en"],
+            "embedsubtitles": embed_subs,
+        })
+
+    options["writethumbnail"] = setting_bool("downloader_download_thumbnail", True)
+    options["embedthumbnail"] = setting_bool("downloader_embed_thumbnail", True)
+    options["writeinfojson"] = setting_bool("downloader_download_metadata", True)
+    options["embedmetadata"] = setting_bool("downloader_embed_metadata", True)
+
+    sponsor_mode = get_setting("downloader_sponsorblock_behaviour", "mark").strip().lower()
+    categories = [
+        value.strip()
+        for value in get_setting(
+            "downloader_sponsorblock_categories",
+            "sponsor,outro,preview,intro",
+        ).split(",")
+        if value.strip()
+    ]
+    if sponsor_mode == "mark" and categories:
+        options["sponsorblock_mark"] = categories
+    elif sponsor_mode == "remove" and categories:
+        options["sponsorblock_remove"] = categories
+
+    include_shorts = setting_bool("downloader_include_shorts", False)
+    include_livestreams = setting_bool("downloader_include_livestreams", True)
+
+    def match_filter(info, incomplete=False):
+        live_status = str((info or {}).get("live_status") or "")
+        if not include_livestreams and (
+            (info or {}).get("is_live")
+            or live_status in {"is_live", "was_live", "post_live"}
+        ):
+            return "Livestream excluded by Downloader profile"
+        if not include_shorts:
+            url = str((info or {}).get("webpage_url") or (info or {}).get("original_url") or "")
+            duration = (info or {}).get("duration")
+            # YouTube does not expose a durable "is_short" flag through every
+            # extractor client. A /shorts/ URL is authoritative; very short
+            # normal videos are not rejected solely because of duration.
+            if "/shorts/" in url:
+                return "Short excluded by Downloader profile"
+        return None
+
+    options["match_filter"] = match_filter
+    return options
 
 def _v3_subscription_template():
     return str(
@@ -14592,31 +14729,41 @@ def pinchflat_sync_once():
 
 
 def scheduled_pinchflat_force_index():
-    # V2 compatibility scheduler: scheduled channel scans are lightweight RSS
-    # checks. Deep scans are explicit/manual so hundreds of channels can never
-    # create the force-index storm that prompted the V3 rewrite.
-    return {"status": "native", "message": "Native scheduled scans are handled by the downloader sync."}
+    # Compatibility name only. V3 uses the existing staggered scheduler to
+    # enqueue native deep channel scans rather than external Force Index jobs.
+    if pinchflat_task_block_enabled():
+        return {"status": "blocked", "message": "Task suppression is enabled."}
+    favourite = _scheduled_pinchflat_force_index_group(True)
+    non_favourite = _scheduled_pinchflat_force_index_group(False)
+    return {
+        "status": "native",
+        "favourites": favourite,
+        "non_favourites": non_favourite,
+    }
 
 
 def pinchflat_force_index_status():
-    with db() as conn:
-        fav = conn.execute(
-            """
-            SELECT COUNT(*) AS c FROM subscriptions s
-            WHERE s.active=1 AND s.download_enabled=1
-              AND EXISTS (SELECT 1 FROM favourite_channels f WHERE f.channel_id=s.channel_id)
-            """
-        ).fetchone()["c"]
-        other = conn.execute(
-            """
-            SELECT COUNT(*) AS c FROM subscriptions s
-            WHERE s.active=1 AND s.download_enabled=1
-              AND NOT EXISTS (SELECT 1 FROM favourite_channels f WHERE f.channel_id=s.channel_id)
-            """
-        ).fetchone()["c"]
+    favourite_rows = _pinchflat_force_index_group_rows(True)
+    other_rows = _pinchflat_force_index_group_rows(False)
+
+    def summarise(rows):
+        timestamps = [
+            float(row.get("last_forced_at") or 0)
+            for row in rows
+            if float(row.get("last_forced_at") or 0) > 0
+        ]
+        last_ts = max(timestamps) if timestamps else 0
+        return {
+            "eligible": len(rows),
+            "last_forced_at": (
+                datetime.fromtimestamp(last_ts, timezone.utc).isoformat()
+                if last_ts else ""
+            ),
+        }
+
     return {
-        "favourites": {"eligible": int(fav or 0)},
-        "non_favourites": {"eligible": int(other or 0)},
+        "favourites": summarise(favourite_rows),
+        "non_favourites": summarise(other_rows),
     }
 
 
@@ -14948,6 +15095,32 @@ def save_downloader_advanced():
     set_setting("downloader_po_token", str(request.form.get("downloader_po_token", "") or "").strip())
     set_setting("downloader_custom_yt_dlp_options", custom or "{}")
     set_setting("downloader_auth_retry", "1" if request.form.get("downloader_auth_retry") == "1" else "0")
+    for key in (
+        "downloader_download_subtitles",
+        "downloader_embed_subtitles",
+        "downloader_download_thumbnail",
+        "downloader_embed_thumbnail",
+        "downloader_download_metadata",
+        "downloader_embed_metadata",
+        "downloader_write_nfo",
+        "downloader_series_images",
+        "downloader_include_shorts",
+        "downloader_include_livestreams",
+    ):
+        set_setting(key, "1" if request.form.get(key) == "1" else "0")
+    set_setting(
+        "downloader_subtitle_languages",
+        str(request.form.get("downloader_subtitle_languages", "en.*,en") or "en.*,en").strip(),
+    )
+    sponsor_mode = str(request.form.get("downloader_sponsorblock_behaviour", "mark") or "mark").strip().lower()
+    if sponsor_mode not in {"disabled", "mark", "remove"}:
+        sponsor_mode = "mark"
+    set_setting("downloader_sponsorblock_behaviour", sponsor_mode)
+    categories = [
+        value for value in request.form.getlist("downloader_sponsorblock_categories")
+        if value in {"sponsor", "outro", "preview", "intro", "selfpromo", "interaction", "music_offtopic", "filler"}
+    ]
+    set_setting("downloader_sponsorblock_categories", ",".join(categories))
     start_download_worker()
     flash("Downloader settings saved.", "success")
     return redirect(url_for("index") + "#pinchflat")
@@ -15814,6 +15987,19 @@ def index():
         downloader_worker_concurrency=setting_int("downloader_worker_concurrency", 1, 1, 8),
         downloader_scan_workers=setting_int("downloader_scan_workers", 4, 1, 12),
         downloader_deep_scan_limit=setting_int("downloader_deep_scan_limit", 500, 25, 5000),
+        downloader_download_subtitles=setting_bool("downloader_download_subtitles", True),
+        downloader_embed_subtitles=setting_bool("downloader_embed_subtitles", True),
+        downloader_subtitle_languages=get_setting("downloader_subtitle_languages", "en.*,en"),
+        downloader_download_thumbnail=setting_bool("downloader_download_thumbnail", True),
+        downloader_embed_thumbnail=setting_bool("downloader_embed_thumbnail", True),
+        downloader_download_metadata=setting_bool("downloader_download_metadata", True),
+        downloader_embed_metadata=setting_bool("downloader_embed_metadata", True),
+        downloader_write_nfo=setting_bool("downloader_write_nfo", True),
+        downloader_series_images=setting_bool("downloader_series_images", True),
+        downloader_include_shorts=setting_bool("downloader_include_shorts", False),
+        downloader_include_livestreams=setting_bool("downloader_include_livestreams", True),
+        downloader_sponsorblock_behaviour=get_setting("downloader_sponsorblock_behaviour", "mark"),
+        downloader_sponsorblock_categories=get_setting("downloader_sponsorblock_categories", "sponsor,outro,preview,intro"),
 
         page_view=page_view,
         page_section_order=page_section_order,
@@ -18917,7 +19103,7 @@ def discover_videos():
                     "results": pinchflat_recent_downloaded_videos(
                         100
                     ),
-                    "source": "Pinchflat",
+                    "source": "Local downloader",
                     "search_remaining": stats["search_remaining"],
                 }
             )
