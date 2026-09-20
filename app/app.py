@@ -5435,6 +5435,10 @@ def enqueue_download(
             ).fetchone()
         if existing and existing["status"] in {"queued", "downloading", "processing"}:
             return existing["job_id"], False
+        if existing and existing["status"] == "retention_deleted" and not redownload:
+            # Retention deletions are intentional tombstones. Normal channel
+            # scans must not immediately download the same old item again.
+            return existing["job_id"], False
         if existing and existing["status"] == "completed" and not redownload:
             path = Path(str(existing["output_path"] or ""))
             if path.exists():
