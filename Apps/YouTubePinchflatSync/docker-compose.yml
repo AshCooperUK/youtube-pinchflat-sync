@@ -95,10 +95,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "3.0.0"
+  version: "3.0.1"
   update_at: "2026-09-20"
   release_notes:
-    en_US: v3.0 removes Pinchflat and introduces the native yt-dlp subscription downloader, persistent queue and in-app cookies.txt authentication.
+    en_US: v3.0.1 improves performance, favourites, download progress, existing-library import, cookie settings and YouTube channel artwork.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
