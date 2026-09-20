@@ -5753,6 +5753,39 @@ def _best_thumbnail_url(info):
     return ""
 
 
+def youtube_channel_artwork(channel_id):
+    """Return authoritative YouTube channel avatar/banner URLs when available."""
+    channel_id = str(channel_id or "").strip()
+    if not channel_id:
+        return {"thumbnail_url": "", "banner_url": ""}
+    try:
+        summary = youtube_channel_summary(
+            channel_id,
+            include_videos=False,
+            include_popular=False,
+            force=False,
+        )
+        return {
+            "thumbnail_url": str(summary.get("thumbnail_url") or "").strip(),
+            "banner_url": str(summary.get("banner_url") or "").strip(),
+        }
+    except Exception:
+        return {"thumbnail_url": "", "banner_url": ""}
+
+
+def _download_image(url):
+    url = str(url or "").strip()
+    if not url:
+        return None
+    response = requests.get(
+        url,
+        timeout=30,
+        headers={"User-Agent": f"youtube-subscription-downloader/{VERSION}"},
+    )
+    response.raise_for_status()
+    return Image.open(io.BytesIO(response.content)).convert("RGB")
+
+
 def _write_jpeg_variant(image, path, size):
     rendered = ImageOps.fit(
         image.convert("RGB"),
@@ -5818,21 +5851,53 @@ def write_direct_download_series_metadata(
     if not write_images:
         return
 
+    if channel_root and channel_id:
+        artwork = youtube_channel_artwork(channel_id)
+        avatar_url = artwork.get("thumbnail_url") or ""
+        banner_url = artwork.get("banner_url") or ""
+
+        # A channel's Emby artwork should represent the channel itself. Previous
+        # V3 builds incorrectly generated fanart/poster/banner from the current
+        # video's thumbnail.
+        avatar = banner = None
+        try:
+            avatar = _download_image(avatar_url)
+            banner = _download_image(banner_url)
+            if banner:
+                _write_jpeg_variant(banner, channel_dir / "fanart.jpg", (1920, 1080))
+                _write_jpeg_variant(banner, channel_dir / "banner.jpg", (1920, 480))
+            elif avatar:
+                _write_jpeg_variant(avatar, channel_dir / "fanart.jpg", (1920, 1080))
+                _write_jpeg_variant(avatar, channel_dir / "banner.jpg", (1920, 480))
+            if avatar:
+                _write_jpeg_variant(avatar, channel_dir / "poster.jpg", (1000, 1500))
+        finally:
+            try:
+                if avatar:
+                    avatar.close()
+            except Exception:
+                pass
+            try:
+                if banner:
+                    banner.close()
+            except Exception:
+                pass
+        return
+
+    # One-time / playlist downloads do not have a persistent subscription
+    # channel root, so retain the video-thumbnail artwork behaviour there.
     thumbnail_url = _best_thumbnail_url(info)
     if not thumbnail_url:
         return
-
-    response = requests.get(
-        thumbnail_url,
-        timeout=30,
-        headers={"User-Agent": f"youtube-subscription-downloader/{VERSION}"},
-    )
-    response.raise_for_status()
-
-    with Image.open(io.BytesIO(response.content)) as image:
+    image = _download_image(thumbnail_url)
+    if not image:
+        return
+    try:
         _write_jpeg_variant(image, channel_dir / "fanart.jpg", (1920, 1080))
         _write_jpeg_variant(image, channel_dir / "poster.jpg", (1000, 1500))
         _write_jpeg_variant(image, channel_dir / "banner.jpg", (1920, 480))
+    finally:
+        image.close()
 
 
 
@@ -15394,6 +15459,47 @@ def _v3_import_existing_library():
         log_activity("migration", "Existing library import failed", str(exc), "warning")
 
 
+def refresh_existing_channel_artwork():
+    """Refresh channel-level Emby artwork for existing subscription media."""
+    try:
+        with db() as conn:
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT channel_id, channel_title, output_path
+                    FROM downloads
+                    WHERE status='completed'
+                      AND source_type LIKE 'subscription%'
+                      AND COALESCE(channel_id,'')!=''
+                      AND COALESCE(output_path,'')!=''
+                    GROUP BY channel_id
+                    """
+                ).fetchall()
+            ]
+        for row in rows:
+            output_path = Path(str(row.get("output_path") or ""))
+            if not output_path.exists():
+                continue
+            fake_info = {
+                "channel_id": row.get("channel_id") or "",
+                "channel": row.get("channel_title") or "YouTube",
+                "uploader": row.get("channel_title") or "YouTube",
+            }
+            try:
+                write_direct_download_series_metadata(
+                    fake_info,
+                    str(output_path),
+                    write_nfo=True,
+                    write_images=True,
+                    channel_root=True,
+                )
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
 def library_import_status():
     with db() as conn:
         imported_total = int(conn.execute(
@@ -15417,6 +15523,11 @@ def library_import_status():
 def downloader_library_import():
     try:
         result = reconcile_existing_library(force=True)
+        threading.Thread(
+            target=refresh_existing_channel_artwork,
+            name="channel-artwork-refresh",
+            daemon=True,
+        ).start()
         flash(
             (
                 f"Library import complete: scanned {result['scanned']} media file(s), "
@@ -16076,7 +16187,6 @@ def index():
         (
             "google",
             "pinchflat",
-            "pinchflat_tasks",
             "latest_download",
             "subscriptions",
             "downloads",
@@ -16085,7 +16195,6 @@ def index():
         (
             "google",
             "pinchflat",
-            "pinchflat_tasks",
             "latest_download",
             "subscriptions",
             "downloads",
@@ -16155,7 +16264,8 @@ def index():
             SELECT
                 SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
                 SUM(CASE WHEN status IN ('downloading','processing') THEN 1 ELSE 0 END) AS running,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed
             FROM downloads
             """
         ).fetchone()
@@ -16202,6 +16312,7 @@ def index():
         "queued": int(download_counts_row["queued"] or 0),
         "running": int(download_counts_row["running"] or 0),
         "failed": int(download_counts_row["failed"] or 0),
+        "completed": int(download_counts_row["completed"] or 0),
     }
     youtube_account = (
         youtube_account_stats_cached()
@@ -16257,6 +16368,11 @@ def index():
         else {"active": [], "waiting": [], "summary": {}, "tasks": [], "last_downloaded": None}
     )
     current_library_import_status = library_import_status()
+    initial_latest_subscriptions = {
+        "results": list(LATEST_SUBSCRIPTIONS_CACHE.get("results") or []),
+        "shorts": list(LATEST_SUBSCRIPTIONS_CACHE.get("shorts") or []),
+        "retrieved_at": str(LATEST_SUBSCRIPTIONS_CACHE.get("retrieved_at") or ""),
+    }
 
     return render_template(
         "index.html",
@@ -16400,6 +16516,7 @@ def index():
         initial_download_overview=initial_download_overview,
         library_import_status=current_library_import_status,
         dashboard_preload_state=dict(dashboard_preload_state),
+        initial_latest_subscriptions=initial_latest_subscriptions,
 
         page_view=page_view,
         page_section_order=page_section_order,
@@ -17095,7 +17212,6 @@ def save_page_view_settings():
         in {
             "google",
             "pinchflat",
-            "pinchflat_tasks",
             "latest_download",
             "subscriptions",
             "downloads",
