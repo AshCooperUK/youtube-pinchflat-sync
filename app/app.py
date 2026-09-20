@@ -5620,12 +5620,20 @@ def _write_jpeg_variant(image, path, size):
     rendered.save(path, format="JPEG", quality=90, optimize=True)
 
 
-def write_direct_download_series_metadata(info, output_path, write_nfo=True):
-    """Write Emby-friendly artwork and optional NFO beside direct downloads."""
+def write_direct_download_series_metadata(
+    info,
+    output_path,
+    write_nfo=True,
+    write_images=True,
+    channel_root=False,
+):
+    """Write Emby-friendly artwork and optional NFO beside downloads."""
     if not output_path:
         return
 
     channel_dir = Path(output_path).parent
+    if channel_root and channel_dir.name.casefold().startswith("season "):
+        channel_dir = channel_dir.parent
     channel_dir.mkdir(parents=True, exist_ok=True)
 
     channel_title = (
@@ -5665,6 +5673,9 @@ def write_direct_download_series_metadata(info, output_path, write_nfo=True):
             xml_declaration=True,
         )
 
+    if not write_images:
+        return
+
     thumbnail_url = _best_thumbnail_url(info)
     if not thumbnail_url:
         return
@@ -5672,7 +5683,7 @@ def write_direct_download_series_metadata(info, output_path, write_nfo=True):
     response = requests.get(
         thumbnail_url,
         timeout=30,
-        headers={"User-Agent": f"youtube-pinchflat-sync/{VERSION}"},
+        headers={"User-Agent": f"youtube-subscription-downloader/{VERSION}"},
     )
     response.raise_for_status()
 
@@ -6136,6 +6147,11 @@ def run_download_job(job_id):
                             if subscription_job else True
                         )
                     ),
+                    write_images=(
+                        setting_bool("downloader_series_images", True)
+                        if subscription_job else True
+                    ),
+                    channel_root=subscription_job,
                 )
             except StopIteration:
                 pass
@@ -11057,7 +11073,7 @@ def pinchflat_session():
         session_obj.auth = (PINCHFLAT_USER, PINCHFLAT_PASS)
 
     session_obj.headers.update(
-        {"User-Agent": f"youtube-pinchflat-sync/{VERSION}"}
+        {"User-Agent": f"youtube-subscription-downloader/{VERSION}"}
     )
 
     return session_obj
