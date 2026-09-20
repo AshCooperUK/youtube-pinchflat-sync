@@ -54,6 +54,7 @@ jobs:
 
       - name: Validate compose files
         run: |
+          cp .env.example .env
           docker compose -f compose.yaml config >/dev/null
           docker compose -f docker-compose.dev.yml config >/dev/null
           docker compose -f Apps/YouTubePinchflatSync/docker-compose.yml config >/dev/null
