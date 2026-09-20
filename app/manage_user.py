@@ -41,7 +41,7 @@ def unlock(args):
         if not cur.rowcount: raise SystemExit("User not found.")
     print("Account unlocked.")
 
-parser=argparse.ArgumentParser(description="YouTube Pinchflat Sync account recovery utility")
+parser=argparse.ArgumentParser(description="YouTube Subscription Downloader account recovery utility")
 sub=parser.add_subparsers(dest="command", required=True)
 sub.add_parser("list").set_defaults(func=list_users)
 p=sub.add_parser("reset-password"); p.add_argument("username"); p.set_defaults(func=reset_password)

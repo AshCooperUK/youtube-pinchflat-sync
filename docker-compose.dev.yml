@@ -1,25 +1,11 @@
-name: youtube-pinchflat-sync-dev
+name: youtube-subscription-downloader-dev
 
 services:
-  pinchflat:
-    image: ghcr.io/kieraneglin/pinchflat:latest
-    container_name: pinchflat
-    restart: unless-stopped
-    environment:
-      TZ: Europe/London
-    ports:
-      - "8945:8945"
-    volumes:
-      - /media/NVME-Storage/AppData/pinchflat:/config
-      - /media/Storage/Media/YouTube:/downloads
-
-  youtube-sync:
+  youtube-subscription-downloader:
     build:
       context: ./app
-    container_name: youtube-pinchflat-sync
+    container_name: youtube-subscription-downloader-dev
     restart: unless-stopped
-    depends_on:
-      - pinchflat
     env_file:
       - .env
     environment:

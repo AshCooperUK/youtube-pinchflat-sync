@@ -1,47 +1,18 @@
-name: youtube-pinchflat-sync
+name: youtube-subscription-downloader
 
 services:
-  pinchflat:
-    image: ghcr.io/kieraneglin/pinchflat:latest
-    container_name: pinchflat
+  youtube-subscription-downloader:
+    image: ghcr.io/ashcooperuk/youtube-subscription-downloader:latest
+    container_name: youtube-subscription-downloader
     restart: unless-stopped
-    environment:
-      TZ: Europe/London
-      LOG_LEVEL: info
-      UMASK: "022"
-      YT_DLP_WORKER_CONCURRENCY: "2"
-    ports:
-      - target: 8945
-        published: "8945"
-        protocol: tcp
-    volumes:
-      - type: bind
-        source: /media/NVME-Storage/AppData/pinchflat
-        target: /config
-      - type: bind
-        source: /media/Storage/Media/YouTube
-        target: /downloads
-    labels:
-      icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
-    x-casaos:
-      ports:
-        - container: "8945"
-          description:
-            en_US: Pinchflat web interface
-      volumes:
-        - container: /config
-          description:
-            en_US: Pinchflat configuration and database
-        - container: /downloads
-          description:
-            en_US: YouTube download library
-
-  youtube-sync:
-    image: ghcr.io/ashcooperuk/youtube-pinchflat-sync:latest
-    container_name: youtube-pinchflat-sync
-    restart: unless-stopped
-    depends_on:
-      - pinchflat
+    deploy:
+      resources:
+        limits:
+          memory: 4GB
+          cpus: "4.00"
+        reservations:
+          memory: 256MB
+          cpus: "0.00"
     environment:
       TZ: Europe/London
       DATA_DIR: /data
@@ -52,14 +23,6 @@ services:
       GOOGLE_REDIRECT_URI: ""
       CANONICAL_REDIRECT: "true"
       YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube
-      PINCHFLAT_URL: http://butane.grovefarm:8945
-      PINCHFLAT_PUBLIC_URL: http://butane.grovefarm:8945
-      PINCHFLAT_DB_PATH: /pinchflat-config/db/pinchflat.db
-      PINCHFLAT_CONTAINER_NAME: pinchflat
-      DOCKER_SOCKET_PATH: /var/run/docker.sock
-      PINCHFLAT_MEDIA_PROFILE_ID: "1"
-      PINCHFLAT_BASIC_AUTH_USERNAME: ""
-      PINCHFLAT_BASIC_AUTH_PASSWORD: ""
       SYNC_INTERVAL_MINUTES: "60"
       INITIAL_IMPORT_CUTOFF: today
       INITIAL_IMPORT_YEARS: "1"
@@ -72,39 +35,28 @@ services:
         published: "8787"
         protocol: tcp
     volumes:
+      # Keep the existing V2 data directory so upgrades retain OAuth, users,
+      # favourites, settings and the local SQLite database.
       - type: bind
         source: /media/NVME-Storage/AppData/youtube-pinchflat-sync/data
         target: /data
       - type: bind
         source: /media/Storage/Media/YouTube
         target: /downloads
-      - type: bind
-        source: /media/NVME-Storage/AppData/pinchflat
-        target: /pinchflat-config
-        read_only: true
-      - type: bind
-        source: /var/run/docker.sock
-        target: /var/run/docker.sock
     labels:
       icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
     x-casaos:
       ports:
         - container: "8787"
           description:
-            en_US: Pinchflat Sync dashboard
+            en_US: YouTube Subscription Downloader web interface
       volumes:
         - container: /data
           description:
-            en_US: OAuth token, settings and subscription database
+            en_US: Application database, OAuth token, users, settings and optional YouTube cookies
         - container: /downloads
           description:
-            en_US: Shared YouTube media library used for storage statistics and direct downloads
-        - container: /pinchflat-config
-          description:
-            en_US: Read-only Pinchflat database used to reconcile removed sources
-        - container: /var/run/docker.sock
-          description:
-            en_US: Docker Engine control for Pinchflat start, stop and direct source cleanup
+            en_US: Shared YouTube media library
       envs:
         - container: APP_URL
           description:
@@ -115,52 +67,38 @@ services:
         - container: TZ
           description:
             en_US: Time zone
-        - container: PINCHFLAT_URL
-          description:
-            en_US: Internal Pinchflat URL
-        - container: PINCHFLAT_CONTAINER_NAME
-          description:
-            en_US: Docker container name controlled by the Pinchflat power switch
-        - container: DOCKER_SOCKET_PATH
-          description:
-            en_US: Docker Engine Unix socket path
-        - container: PINCHFLAT_PUBLIC_URL
-          description:
-            en_US: Browser URL used by the Open Pinchflat button
         - container: SYNC_INTERVAL_MINUTES
           description:
-            en_US: Initial default interval for the separate YouTube and Pinchflat automation schedules
-        - container: MAX_NEW_SOURCES_PER_RUN
-          description:
-            en_US: Maximum new Pinchflat sources per run. 0 means unlimited
+            en_US: Default YouTube subscription refresh and native downloader scan interval
         - container: DRY_RUN
           description:
-            en_US: Set true to preview without creating Pinchflat sources
+            en_US: Set true to preview subscription changes without applying downloads
 
 x-casaos:
+  # Keep the original ID/store ID for an in-place upgrade from V2.
   id: uk.ashjohn.youtube-pinchflat-sync
   store_app_id: youtube-pinchflat-sync
-  main: youtube-sync
+  main: youtube-subscription-downloader
   index: /
   port_map: "8787"
   scheme: http
   icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
   title:
-    en_US: Pinchflat Sync
+    en_US: YouTube Subscription Downloader
   tagline:
-    en_US: Sync your YouTube subscriptions into Pinchflat automatically.
+    en_US: Download your YouTube subscriptions directly with yt-dlp.
   description:
-    en_US: Reads your YouTube subscriptions with Google OAuth and lets each source have its own Pinchflat download cutoff.
+    en_US: Manages YouTube subscriptions, native yt-dlp downloads, authentication, Emby integration, favourites, Discover and retention without Pinchflat.
   author: AshCooperUK
   developer: AshCooperUK
   category: Media
   architectures:
     - amd64
     - arm64
-  version: "2.15.0.5"
-  update_at: "2026-09-19"
+  version: "3.0.0"
+  update_at: "2026-09-20"
   release_notes:
-    en_US: v2.15.0.5 fixes Single Download progress and adds persistent Pinchflat task cancellation.
+    en_US: v3.0 removes Pinchflat and introduces the native yt-dlp subscription downloader, persistent queue and in-app cookies.txt authentication.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
