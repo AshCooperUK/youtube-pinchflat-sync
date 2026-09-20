@@ -94,11 +94,13 @@ jobs:
         run: |
           mkdir -p /tmp/v13.0.1
           git archive HEAD | tar -x -C /tmp/v13.0.1
+          rm -rf /tmp/v13.0.1/app/__pycache__
 
       - name: Upload v13.0.1 source package
         uses: actions/upload-artifact@v4
         with:
           name: v13.0.1
           path: /tmp/v13.0.1
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
