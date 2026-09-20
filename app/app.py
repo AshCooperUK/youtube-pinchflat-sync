@@ -326,6 +326,9 @@ pinchflat_task_block_lock = threading.Lock()
 pinchflat_task_block_last = {"at": "", "cancelled": 0, "deleted": 0, "error": ""}
 storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
 storage_cache_lock = threading.Lock()
+settings_cache = {"updated_at": 0.0, "values": {}}
+settings_cache_lock = threading.Lock()
+SETTINGS_CACHE_SECONDS = 60
 dashboard_preload_lock = threading.Lock()
 dashboard_preload_state = {"running": False, "last_started": "", "last_finished": "", "last_error": ""}
 retention_cleanup_lock = threading.Lock()
@@ -473,8 +476,9 @@ def start_dashboard_preload(force_storage=False):
 
 
 def db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -491,6 +495,8 @@ def ensure_column(conn, table, column, definition):
 
 def init_db():
     with db() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS subscriptions (
@@ -1025,16 +1031,32 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def get_setting(key, default=""):
+def _settings_snapshot(force=False):
+    now = time.time()
+    with settings_cache_lock:
+        if (
+            not force
+            and settings_cache["values"]
+            and now - float(settings_cache["updated_at"] or 0) < SETTINGS_CACHE_SECONDS
+        ):
+            return dict(settings_cache["values"])
+
     with db() as conn:
-        row = conn.execute(
-            "SELECT value FROM settings WHERE key = ?",
-            (key,),
-        ).fetchone()
-    return row["value"] if row else default
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    values = {str(row["key"]): str(row["value"]) for row in rows}
+
+    with settings_cache_lock:
+        settings_cache["updated_at"] = now
+        settings_cache["values"] = dict(values)
+    return values
+
+
+def get_setting(key, default=""):
+    return _settings_snapshot().get(str(key), default)
 
 
 def set_setting(key, value):
+    value = str(value)
     with db() as conn:
         conn.execute(
             """
@@ -1042,8 +1064,11 @@ def set_setting(key, value):
             VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
             """,
-            (key, str(value)),
+            (key, value),
         )
+    with settings_cache_lock:
+        settings_cache["values"][str(key)] = value
+        settings_cache["updated_at"] = time.time()
 
 
 def emby_server_url():
