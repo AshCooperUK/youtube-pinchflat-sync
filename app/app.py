@@ -47,7 +47,7 @@ from downloader_auth import (
     test_cookie_authentication,
 )
 
-VERSION = "3.0.0"
+VERSION = "3.0.1"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -63,6 +63,7 @@ SECRET_PATH = DATA_DIR / "flask-secret.txt"
 AUTH_DIR = DATA_DIR / "auth"
 AUTH_DIR.mkdir(parents=True, exist_ok=True)
 YOUTUBE_COOKIE_PATH = AUTH_DIR / "youtube-cookies.txt"
+DASHBOARD_CACHE_PATH = DATA_DIR / "dashboard-cache.json"
 
 YOUTUBE_SCOPE = os.getenv(
     "YOUTUBE_SCOPE",
@@ -325,6 +326,8 @@ pinchflat_task_block_lock = threading.Lock()
 pinchflat_task_block_last = {"at": "", "cancelled": 0, "deleted": 0, "error": ""}
 storage_cache = {"updated_at": 0.0, "total": 0, "by_name": {}}
 storage_cache_lock = threading.Lock()
+dashboard_preload_lock = threading.Lock()
+dashboard_preload_state = {"running": False, "last_started": "", "last_finished": "", "last_error": ""}
 retention_cleanup_lock = threading.Lock()
 
 # Rolling file-size samples used to estimate live Pinchflat download speed when
@@ -333,6 +336,140 @@ retention_cleanup_lock = threading.Lock()
 # changing Pinchflat's own downloader arguments.
 pinchflat_speed_samples = {}
 pinchflat_speed_samples_lock = threading.Lock()
+
+
+def load_persistent_dashboard_cache():
+    """Restore the last server-side dashboard snapshot without touching media disks."""
+    try:
+        payload = json.loads(DASHBOARD_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    storage = payload.get("storage") or {}
+    if isinstance(storage, dict):
+        with storage_cache_lock:
+            storage_cache["updated_at"] = float(storage.get("updated_at") or 0)
+            storage_cache["total"] = int(storage.get("total") or 0)
+            storage_cache["by_name"] = dict(storage.get("by_name") or {})
+
+    account = payload.get("youtube_account")
+    if isinstance(account, dict):
+        with YOUTUBE_ACCOUNT_STATS_LOCK:
+            YOUTUBE_ACCOUNT_STATS_CACHE["data"] = dict(account)
+            YOUTUBE_ACCOUNT_STATS_CACHE["expires_at"] = time.time() + 60
+
+    latest = payload.get("latest_subscriptions")
+    if isinstance(latest, dict) and latest.get("results") is not None:
+        LATEST_SUBSCRIPTIONS_CACHE.update(
+            {
+                "expires_at": time.time() + 60,
+                "results": list(latest.get("results") or []),
+                "shorts": list(latest.get("shorts") or []),
+                "retrieved_at": str(latest.get("retrieved_at") or ""),
+            }
+        )
+    return True
+
+
+def persist_dashboard_cache():
+    """Persist lightweight server-side dashboard data for fast restarts/page loads."""
+    try:
+        with storage_cache_lock:
+            storage = {
+                "updated_at": float(storage_cache.get("updated_at") or 0),
+                "total": int(storage_cache.get("total") or 0),
+                "by_name": dict(storage_cache.get("by_name") or {}),
+            }
+        with YOUTUBE_ACCOUNT_STATS_LOCK:
+            account = dict(YOUTUBE_ACCOUNT_STATS_CACHE.get("data") or {})
+        latest = {
+            "results": list(LATEST_SUBSCRIPTIONS_CACHE.get("results") or []),
+            "shorts": list(LATEST_SUBSCRIPTIONS_CACHE.get("shorts") or []),
+            "retrieved_at": str(LATEST_SUBSCRIPTIONS_CACHE.get("retrieved_at") or ""),
+        }
+        payload = {
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "storage": storage,
+            "youtube_account": account,
+            "latest_subscriptions": latest,
+        }
+        temporary = DASHBOARD_CACHE_PATH.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        os.replace(temporary, DASHBOARD_CACHE_PATH)
+        return True
+    except Exception:
+        return False
+
+
+def storage_snapshot_cached():
+    """Return cached storage figures without scanning the media tree."""
+    with storage_cache_lock:
+        return {
+            "total": int(storage_cache.get("total") or 0),
+            "by_name": dict(storage_cache.get("by_name") or {}),
+            "updated_at": float(storage_cache.get("updated_at") or 0),
+        }
+
+
+def youtube_account_stats_cached():
+    with YOUTUBE_ACCOUNT_STATS_LOCK:
+        cached = YOUTUBE_ACCOUNT_STATS_CACHE.get("data")
+        if cached:
+            return dict(cached)
+
+    with db() as conn:
+        total = int(conn.execute(
+            "SELECT COUNT(*) AS c FROM subscriptions WHERE active=1"
+        ).fetchone()["c"] or 0)
+    return {
+        "available": True,
+        "error": "",
+        "subscription_count_text": f"{total:,}",
+        "liked_video_count_text": "…",
+        "playlist_count_text": "…",
+        "retrieved_at": "",
+    }
+
+
+def refresh_dashboard_preloads(force_storage=False):
+    """Refresh expensive dashboard data outside request/paint paths."""
+    if not dashboard_preload_lock.acquire(blocking=False):
+        return
+    dashboard_preload_state["running"] = True
+    dashboard_preload_state["last_started"] = datetime.now(timezone.utc).isoformat()
+    dashboard_preload_state["last_error"] = ""
+    try:
+        storage_snapshot(force=bool(force_storage))
+        if google_configured():
+            try:
+                creds = load_credentials()
+            except Exception:
+                creds = None
+            if creds and creds.valid:
+                try:
+                    youtube_account_stats(force=True)
+                except Exception:
+                    pass
+                try:
+                    youtube_latest_subscription_videos(limit=36, force=False)
+                except Exception:
+                    pass
+        persist_dashboard_cache()
+    except Exception as exc:
+        dashboard_preload_state["last_error"] = str(exc)[:1000]
+    finally:
+        dashboard_preload_state["running"] = False
+        dashboard_preload_state["last_finished"] = datetime.now(timezone.utc).isoformat()
+        dashboard_preload_lock.release()
+
+
+def start_dashboard_preload(force_storage=False):
+    threading.Thread(
+        target=refresh_dashboard_preloads,
+        kwargs={"force_storage": force_storage},
+        name="dashboard-preload",
+        daemon=True,
+    ).start()
 
 
 def db():
@@ -5252,6 +5389,7 @@ def storage_snapshot(force=False):
         storage_cache["total"] = total
         storage_cache["by_name"] = dict(by_name)
 
+    persist_dashboard_cache()
     return {"total": total, "by_name": by_name}
 
 
@@ -14919,21 +15057,40 @@ def pinchflat_download_overview(queue_limit=100):
         ).fetchone()["c"]
 
     def item(row):
+        video_id = str(row.get("video_id") or "")
+        channel_id = str(row.get("channel_id") or "")
+        output_path = Path(str(row.get("output_path") or "")) if row.get("output_path") else None
+        file_size = 0
+        if output_path and output_path.exists() and output_path.is_file():
+            try:
+                file_size = output_path.stat().st_size
+            except OSError:
+                file_size = 0
         return {
             "job_id": row.get("job_id"),
             "title": row.get("title") or row.get("youtube_url") or "YouTube video",
+            "channel": row.get("channel_title") or "",
             "channel_title": row.get("channel_title") or "",
+            "channel_id": channel_id,
+            "channel_url": f"https://www.youtube.com/channel/{channel_id}" if channel_id else "",
             "state": row.get("status") or "",
             "status": row.get("phase") or str(row.get("status") or "").title(),
             "started_at": row.get("started_at") or "",
+            "completed_at": row.get("finished_at") or "",
             "attempt": 1,
+            "max_attempts": 1,
             "speed": row.get("speed") or "",
-            "progress": float(row.get("progress") or 0),
-            "thumbnail_url": (
-                f"https://i.ytimg.com/vi/{row['video_id']}/hqdefault.jpg"
-                if row.get("video_id") else ""
-            ),
-            "video_id": row.get("video_id") or "",
+            "eta": row.get("eta") or "",
+            "progress": max(0.0, min(100.0, float(row.get("progress") or 0))),
+            "downloaded_bytes": int(row.get("downloaded_bytes") or 0),
+            "total_bytes": int(row.get("total_bytes") or 0),
+            "thumbnail_url": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else "",
+            "video_id": video_id,
+            "youtube_id": video_id,
+            "video_url": f"https://www.youtube.com/watch?v={video_id}" if video_id else str(row.get("youtube_url") or ""),
+            "output_path": str(row.get("output_path") or ""),
+            "file_size": file_size,
+            "file_size_text": format_bytes(file_size) if file_size else "",
         }
 
     tasks = [
@@ -14959,6 +15116,10 @@ def pinchflat_download_overview(queue_limit=100):
             "membership_errors": int(membership_errors or 0),
         },
         "tasks": tasks,
+        "task_block": {
+            "enabled": pinchflat_task_block_enabled(),
+            "last": dict(pinchflat_task_block_last),
+        },
         "last_downloaded": item(dict(last)) if last else None,
     }
 
@@ -14993,45 +15154,191 @@ def start_pinchflat_task_blocker():
     return None
 
 
-def _v3_import_existing_library():
-    if setting_bool("v3_library_import_complete", False):
-        return
-    imported = 0
-    shows_root = DOWNLOAD_ROOT / "shows"
-    if not shows_root.exists():
-        set_setting("v3_library_import_complete", "1")
-        return
+MEDIA_IMPORT_EXTENSIONS = {
+    ".mp4", ".mkv", ".webm", ".m4v", ".mov",
+    ".m4a", ".mp3", ".opus", ".flac", ".wav",
+}
+
+
+def _legacy_video_id_from_text(value):
+    text = str(value or "")
+    for pattern in (
+        r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([A-Za-z0-9_-]{11})",
+        r"\[([A-Za-z0-9_-]{11})\]",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _read_media_info_sidecar(media_path):
+    candidates = [
+        media_path.with_suffix(".info.json"),
+        Path(str(media_path.with_suffix("")) + ".info.json"),
+    ]
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    return {}
+
+
+def _legacy_media_nfo_video_id(media_path):
+    candidate = media_path.with_suffix(".nfo")
+    if not candidate.exists():
+        return ""
     try:
-        for info_path in shows_root.rglob("*.info.json"):
+        text = candidate.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+    match = re.search(
+        r"<uniqueid[^>]*type=[\"']youtube[\"'][^>]*>\s*([^<\s]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match and re.fullmatch(r"[A-Za-z0-9_-]{11}", match.group(1)):
+        return match.group(1)
+    return _legacy_video_id_from_text(text)
+
+
+def _library_channel_from_path(media_path):
+    try:
+        parts = media_path.relative_to(DOWNLOAD_ROOT).parts
+    except ValueError:
+        parts = ()
+    if len(parts) >= 2 and str(parts[0]).casefold() == "shows":
+        return str(parts[1])
+    return str(media_path.parent.name or "YouTube")
+
+
+def reconcile_existing_library(force=False):
+    """Import pre-V3 media into the native downloads database."""
+    if not force and setting_bool("v3_library_import_complete", False):
+        return {
+            "scanned": setting_int("v3_library_last_scanned", 0, 0, 100000000),
+            "imported": 0,
+            "known": setting_int("v3_library_last_known", 0, 0, 100000000),
+            "unmatched": setting_int("v3_library_last_unmatched", 0, 0, 100000000),
+        }
+
+    shows_root = DOWNLOAD_ROOT / "shows"
+    roots = [shows_root] if shows_root.exists() else [DOWNLOAD_ROOT]
+    scanned = imported = known = unmatched = 0
+
+    with db() as conn:
+        subscriptions = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT channel_id,title FROM subscriptions WHERE COALESCE(title,'')!=''"
+            ).fetchall()
+        ]
+    channel_by_title = {
+        normalise_storage_name(row["title"]): row["channel_id"]
+        for row in subscriptions
+        if row.get("title") and row.get("channel_id")
+    }
+
+    for root in roots:
+        try:
+            iterator = root.rglob("*")
+        except OSError:
+            continue
+
+        for media_path in iterator:
             try:
-                info = json.loads(info_path.read_text(encoding="utf-8"))
-                video_id = str(info.get("id") or "").strip()
-                if not video_id:
+                if not media_path.is_file() or media_path.suffix.casefold() not in MEDIA_IMPORT_EXTENSIONS:
                     continue
+            except OSError:
+                continue
+
+            scanned += 1
+            media_path_text = str(media_path)
+
+            with db() as conn:
+                existing = conn.execute(
+                    "SELECT id FROM downloads WHERE output_path=? AND status='completed' LIMIT 1",
+                    (media_path_text,),
+                ).fetchone()
+            if existing:
+                known += 1
+                continue
+
+            info = _read_media_info_sidecar(media_path)
+            video_id = str(info.get("id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+                video_id = ""
+            if not video_id:
+                for value in (
+                    info.get("webpage_url"),
+                    info.get("original_url"),
+                    info.get("url"),
+                    media_path.name,
+                ):
+                    video_id = _legacy_video_id_from_text(value)
+                    if video_id:
+                        break
+            if not video_id:
+                video_id = _legacy_media_nfo_video_id(media_path)
+
+            if video_id:
                 with db() as conn:
-                    exists = conn.execute(
-                        "SELECT 1 FROM downloads WHERE video_id=? AND source_type LIKE 'subscription%' LIMIT 1",
+                    duplicate = conn.execute(
+                        """
+                        SELECT id FROM downloads
+                        WHERE video_id=? AND status='completed'
+                          AND source_type LIKE 'subscription%'
+                        LIMIT 1
+                        """,
                         (video_id,),
                     ).fetchone()
-                if exists:
+                if duplicate:
+                    known += 1
                     continue
-                base = str(info_path)[:-10]  # strip .info.json
-                media_path = ""
-                for candidate in info_path.parent.glob(Path(base).name + ".*"):
-                    if candidate.suffix.lower() in {".mp4", ".mkv", ".webm", ".m4a", ".mp3", ".opus", ".flac"}:
-                        media_path = str(candidate)
-                        break
-                if not media_path:
-                    continue
-                upload_date = str(info.get("upload_date") or "")
-                published = (
-                    f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
-                    if re.fullmatch(r"\d{8}", upload_date) else ""
-                )
+            else:
+                unmatched += 1
+
+            channel_title = str(
+                info.get("channel")
+                or info.get("uploader")
+                or _library_channel_from_path(media_path)
+                or "YouTube"
+            ).strip()
+            channel_id = str(info.get("channel_id") or "").strip()
+            if not channel_id:
+                channel_id = str(channel_by_title.get(normalise_storage_name(channel_title)) or "")
+
+            title = str(info.get("title") or media_path.stem).strip()
+            if video_id:
+                title = re.sub(rf"\s*\[{re.escape(video_id)}\]\s*$", "", title).strip() or title
+
+            upload_date = str(info.get("upload_date") or "").strip()
+            published = (
+                f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+                if re.fullmatch(r"\d{8}", upload_date)
+                else ""
+            )
+            try:
+                file_time = datetime.fromtimestamp(media_path.stat().st_mtime, tz=timezone.utc).isoformat()
+            except OSError:
+                file_time = now_iso()
+
+            job_key = hashlib.sha1(media_path_text.encode("utf-8", errors="ignore")).hexdigest()[:24]
+            youtube_url = (
+                str(info.get("webpage_url") or info.get("original_url") or "").strip()
+                or (f"https://www.youtube.com/watch?v={video_id}" if video_id else "")
+            )
+
+            try:
                 with db() as conn:
                     conn.execute(
                         """
-                        INSERT INTO downloads (
+                        INSERT OR IGNORE INTO downloads (
                             job_id, source_type, youtube_url, video_id, title,
                             channel_title, status, phase, progress, output_path,
                             created_at, started_at, finished_at, channel_id,
@@ -15040,30 +15347,87 @@ def _v3_import_existing_library():
                                   'Imported existing library', 100, ?, ?, ?, ?, ?, ?, ?, 'import')
                         """,
                         (
-                            "import-" + secrets.token_hex(10),
-                            str(info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"),
-                            video_id,
-                            str(info.get("title") or "YouTube video"),
-                            str(info.get("channel") or info.get("uploader") or ""),
-                            media_path,
-                            now_iso(), now_iso(), now_iso(),
-                            str(info.get("channel_id") or ""),
+                            f"import-{job_key}",
+                            youtube_url,
+                            video_id or None,
+                            title,
+                            channel_title,
+                            media_path_text,
+                            file_time,
+                            file_time,
+                            file_time,
+                            channel_id,
                             published,
                             "1080p",
                         ),
                     )
-                imported += 1
+                    changed = conn.execute("SELECT changes() AS c").fetchone()["c"]
+                imported += int(changed or 0)
+                if not changed:
+                    known += 1
             except Exception:
-                continue
-        set_setting("v3_library_import_complete", "1")
+                unmatched += 1
+
+    set_setting("v3_library_import_complete", "1")
+    set_setting("v3_library_last_scanned", str(scanned))
+    set_setting("v3_library_last_known", str(known))
+    set_setting("v3_library_last_unmatched", str(unmatched))
+    set_setting("v3_library_last_imported", str(imported))
+    set_setting("v3_library_last_import_at", now_iso())
+    storage_snapshot(force=True)
+    return {"scanned": scanned, "imported": imported, "known": known, "unmatched": unmatched}
+
+
+def _v3_import_existing_library():
+    try:
+        result = reconcile_existing_library(force=False)
         log_activity(
             "migration",
-            "Existing YouTube library imported",
-            f"Imported {imported} existing media item(s) into the V3 downloader database.",
+            "Existing YouTube library checked",
+            (
+                f"Scanned {result['scanned']} media file(s); imported {result['imported']}; "
+                f"already known {result['known']}; without YouTube ID {result['unmatched']}."
+            ),
             "success",
         )
     except Exception as exc:
         log_activity("migration", "Existing library import failed", str(exc), "warning")
+
+
+def library_import_status():
+    with db() as conn:
+        imported_total = int(conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM downloads
+            WHERE status='completed' AND source_type LIKE 'subscription%'
+            """
+        ).fetchone()["c"] or 0)
+    return {
+        "completed": setting_bool("v3_library_import_complete", False),
+        "last_at": get_setting("v3_library_last_import_at", ""),
+        "last_scanned": setting_int("v3_library_last_scanned", 0, 0, 100000000),
+        "last_imported": setting_int("v3_library_last_imported", 0, 0, 100000000),
+        "last_known": setting_int("v3_library_last_known", 0, 0, 100000000),
+        "last_unmatched": setting_int("v3_library_last_unmatched", 0, 0, 100000000),
+        "database_total": imported_total,
+    }
+
+
+@app.post("/settings/downloader/library/import")
+def downloader_library_import():
+    try:
+        result = reconcile_existing_library(force=True)
+        flash(
+            (
+                f"Library import complete: scanned {result['scanned']} media file(s), "
+                f"imported {result['imported']}, already known {result['known']}, "
+                f"without a YouTube ID {result['unmatched']}."
+            ),
+            "success",
+        )
+    except Exception as exc:
+        flash(f"Library import failed: {exc}", "error")
+    return redirect(url_for("index") + "#pinchflat")
 
 
 @app.post("/settings/downloader/auth/upload")
@@ -15822,7 +16186,7 @@ def index():
     profile_settings = migrate_legacy_subscription_output_path(
         profile_settings
     )
-    storage = storage_snapshot()
+    storage = storage_snapshot_cached()
     storage_filesystem = download_filesystem_snapshot()
     storage_capacity = int(storage_filesystem.get("total") or 0)
     storage_content_percent = round(
@@ -15840,7 +16204,7 @@ def index():
         "failed": int(download_counts_row["failed"] or 0),
     }
     youtube_account = (
-        youtube_account_stats()
+        youtube_account_stats_cached()
         if google_connected
         else {
             "available": False,
@@ -15886,6 +16250,13 @@ def index():
                 next_emby_sync = value
         except Exception:
             pass
+
+    initial_download_overview = (
+        pinchflat_download_overview(25)
+        if page_view["load_pinchflat_downloads"] or page_view["load_summary"]
+        else {"active": [], "waiting": [], "summary": {}, "tasks": [], "last_downloaded": None}
+    )
+    current_library_import_status = library_import_status()
 
     return render_template(
         "index.html",
@@ -16026,6 +16397,9 @@ def index():
         downloader_include_livestreams=setting_bool("downloader_include_livestreams", True),
         downloader_sponsorblock_behaviour=get_setting("downloader_sponsorblock_behaviour", "mark"),
         downloader_sponsorblock_categories=get_setting("downloader_sponsorblock_categories", "sponsor,outro,preview,intro"),
+        initial_download_overview=initial_download_overview,
+        library_import_status=current_library_import_status,
+        dashboard_preload_state=dict(dashboard_preload_state),
 
         page_view=page_view,
         page_section_order=page_section_order,
@@ -18731,77 +19105,52 @@ def toggle_favourite_channel():
     channel_id = str(payload.get("channel_id") or "").strip()
 
     if not user_id or not channel_id:
-        return jsonify(
-            {
-                "ok": False,
-                "error": "Channel information is missing.",
-            }
-        ), 400
+        return jsonify({"ok": False, "error": "Channel information is missing."}), 400
 
     with db() as conn:
         existing = conn.execute(
-            "SELECT 1 FROM favourite_channels WHERE user_id = ? AND channel_id = ?",
+            "SELECT 1 FROM favourite_channels WHERE user_id=? AND channel_id=?",
             (user_id, channel_id),
         ).fetchone()
 
-    favourite = not bool(existing)
-
-    if favourite:
-        # Preserve richer metadata supplied by Discover for channels which are
-        # not yet present in the subscriptions table.
-        with db() as conn:
-            sub = conn.execute(
-                "SELECT title, channel_url, thumbnail_url FROM subscriptions WHERE channel_id = ?",
-                (channel_id,),
-            ).fetchone()
-
-            title = str(
-                payload.get("channel_title")
-                or (sub["title"] if sub else "YouTube channel")
-            ).strip()
-            url = str(
-                payload.get("channel_url")
-                or (
-                    sub["channel_url"]
-                    if sub
-                    else f"https://www.youtube.com/channel/{channel_id}"
-                )
-            ).strip()
-            thumb = str(
-                payload.get("thumbnail_url")
-                or (sub["thumbnail_url"] if sub else "")
-            ).strip()
+        if existing:
+            conn.execute(
+                "DELETE FROM favourite_channels WHERE user_id=? AND channel_id=?",
+                (user_id, channel_id),
+            )
+            favourite = False
+        else:
+            title = str(payload.get("channel_title") or "").strip()
+            url = str(payload.get("channel_url") or "").strip()
+            thumb = str(payload.get("thumbnail_url") or "").strip()
+            if not title or not url:
+                sub = conn.execute(
+                    "SELECT title,channel_url,thumbnail_url FROM subscriptions WHERE channel_id=?",
+                    (channel_id,),
+                ).fetchone()
+                if sub:
+                    title = title or str(sub["title"] or "").strip()
+                    url = url or str(sub["channel_url"] or "").strip()
+                    thumb = thumb or str(sub["thumbnail_url"] or "").strip()
 
             conn.execute(
                 """
-                INSERT OR REPLACE INTO favourite_channels (
-                    user_id, channel_id, channel_title, channel_url,
-                    thumbnail_url, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO favourite_channels (
+                    user_id,channel_id,channel_title,channel_url,thumbnail_url,created_at
+                ) VALUES (?,?,?,?,?,?)
                 """,
                 (
                     user_id,
                     channel_id,
-                    title[:300],
-                    url,
+                    (title or "YouTube channel")[:300],
+                    url or f"https://www.youtube.com/channel/{channel_id}",
                     thumb,
                     now_iso(),
                 ),
             )
-    else:
-        set_channel_favourite_state(
-            channel_id,
-            False,
-            user_id=user_id,
-        )
+            favourite = True
 
-    return jsonify(
-        {
-            "ok": True,
-            "favourite": favourite,
-            "channel_id": channel_id,
-        }
-    )
+    return jsonify({"ok": True, "favourite": favourite, "channel_id": channel_id})
 
 
 @app.post("/api/favourites/video/toggle")
@@ -19389,6 +19738,7 @@ def google_callback():
         authorization_response=request.url
     )
     save_credentials(flow.credentials)
+    start_dashboard_preload(force_storage=False)
     log_activity("google", "Google connected", "Google OAuth connection completed.", "success")
 
     playlist_note = ""
@@ -19486,9 +19836,11 @@ def health():
 
 init_db()
 init_v3_db()
+cache_restored = load_persistent_dashboard_cache()
 start_download_worker()
 start_scan_worker()
 threading.Thread(target=_v3_import_existing_library, name="v3-library-import", daemon=True).start()
+start_dashboard_preload(force_storage=not cache_restored)
 
 scheduler = BackgroundScheduler(
     timezone=os.getenv("TZ", "Europe/London")
@@ -19541,6 +19893,15 @@ scheduler.add_job(
     "interval",
     hours=1,
     id="video-retention-cleanup",
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    refresh_dashboard_preloads,
+    "interval",
+    minutes=15,
+    id="dashboard-preload-refresh",
+    kwargs={"force_storage": True},
     max_instances=1,
     coalesce=True,
 )
