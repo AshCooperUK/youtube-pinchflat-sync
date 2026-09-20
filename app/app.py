@@ -17259,13 +17259,13 @@ def save_pinchflat_advanced_settings():
     except Exception as exc:
         log_activity(
             "settings",
-            "Pinchflat concurrent downloads update failed",
+            "Downloader concurrency update failed",
             str(exc),
             "error",
         )
 
         flash(
-            "Pinchflat concurrent downloads could not be changed: "
+            "Downloader concurrency could not be changed: "
             f"{exc}",
             "error",
         )
@@ -17276,6 +17276,7 @@ def save_pinchflat_advanced_settings():
     )
 
 
+@app.post("/settings/downloader/scan-schedule")
 @app.post("/settings/pinchflat/force-index")
 def save_pinchflat_force_index_settings():
     def parse_interval(name, allowed):
@@ -17321,14 +17322,14 @@ def save_pinchflat_force_index_settings():
 
     log_activity(
         "settings",
-        "Scheduled Force Index updated",
+        "Scheduled channel scans updated",
         (
             f"Favourite channels: {interval_text(favourite_minutes)}. "
             f"Non-favourite channels: {interval_text(nonfavourite_minutes)}."
         ),
         "success",
     )
-    flash("Scheduled Pinchflat Force Index settings saved.", "success")
+    flash("Scheduled channel scan settings saved.", "success")
     return redirect(url_for("index") + "#pinchflat")
 
 
