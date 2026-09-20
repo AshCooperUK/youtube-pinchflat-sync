@@ -1,0 +1,62 @@
+name: Validate V3
+
+on:
+  pull_request:
+  push:
+    branches:
+      - v3-youtube-subscription-downloader
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install application dependencies
+        run: pip install -r app/requirements.txt
+
+      - name: Compile Python
+        run: python -m py_compile app/app.py app/downloader_auth.py app/manage_user.py
+
+      - name: Parse Jinja templates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment
+          env = Environment()
+          for path in Path("app/templates").glob("*.html"):
+              env.parse(path.read_text(encoding="utf-8"))
+              print("OK", path)
+          PY
+
+      - name: Check duplicate literal HTML IDs
+        run: |
+          python - <<'PY'
+          import re
+          from collections import Counter
+          from pathlib import Path
+          text = Path("app/templates/index.html").read_text(encoding="utf-8")
+          ids = re.findall(r'\bid=["\']([^"\'{%}]+)["\']', text)
+          duplicates = {key: value for key, value in Counter(ids).items() if value > 1}
+          if duplicates:
+              raise SystemExit(f"Duplicate literal IDs: {duplicates}")
+          print("No duplicate literal HTML IDs")
+          PY
+
+      - name: Validate compose files
+        run: |
+          docker compose -f compose.yaml config >/dev/null
+          docker compose -f docker-compose.dev.yml config >/dev/null
+          docker compose -f Apps/YouTubePinchflatSync/docker-compose.yml config >/dev/null
+
+      - name: Build application image
+        run: docker build -t youtube-subscription-downloader:v3-test ./app
