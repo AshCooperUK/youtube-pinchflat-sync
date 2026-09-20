@@ -3477,7 +3477,7 @@
     <div class="card" data-summary-tile="downloads">
       <div class="muted small">Downloads</div>
       <div class="metric ok" id="dashboard-downloads-completed">{{ download_counts.completed }}</div>
-      <div class="muted small" id="dashboard-downloads-status">{{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
+      <div class="muted small" id="dashboard-downloads-queue-status">{{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
       <div class="muted small">{{ counts.enabled }} channels enabled · {{ storage_total }} used</div>
     </div>
     {% endif %}
@@ -3504,7 +3504,7 @@
       <div>
         <h2>subscription downloads</h2>
         <div class="muted small" id="pinchflat-download-summary">
-          Loading current Downloader download activity…
+          Loading subscription download activity…
         </div>
       </div>
 
@@ -3558,7 +3558,7 @@
 
     <div class="pinchflat-download-body" id="pinchflat-download-body">
       <div id="pinchflat-active-downloads" class="pinchflat-active-list">
-        <div class="pinchflat-download-empty">Checking Downloader for active downloads…</div>
+        <div class="pinchflat-download-empty">Checking for active downloads…</div>
       </div>
 
       {% if not (page_view.load_summary and page_view.show_summary_latest_download) %}
@@ -5866,7 +5866,9 @@ let youtubeIframeApiPromise = null;
 
 let pinchflatDownloadTimer = null;
 let pinchflatQueueTimer = null;
-let pinchflatDownloadSnapshot = null;
+const serverInitialDownloadOverview = {{ initial_download_overview|tojson }};
+const serverInitialLatestSubscriptions = {{ initial_latest_subscriptions|tojson }};
+let pinchflatDownloadSnapshot = serverInitialDownloadOverview || null;
 
 function openDebugReference() {
   if (!debugReferenceDialog) return;
@@ -6228,7 +6230,7 @@ function renderDownloaderActiveDownloads(data) {
     const empty = document.createElement("div");
     empty.className = "pinchflat-download-empty";
     empty.textContent = waiting
-      ? `${waiting} download${waiting === 1 ? "" : "s"} waiting in Downloader.`
+      ? `${waiting} download${waiting === 1 ? "" : "s"} waiting.`
       : "No active subscription downloads.";
     target.appendChild(empty);
     return;
@@ -6307,6 +6309,39 @@ function renderDownloaderActiveDownloads(data) {
     );
 
     card.appendChild(mediaRow);
+
+    const progressWrap = document.createElement("div");
+    progressWrap.className = "subscription-progress-wrap";
+
+    const progressBar = document.createElement("div");
+    progressBar.className = "subscription-progress";
+
+    const progressFill = document.createElement("span");
+    progressBar.appendChild(progressFill);
+
+    const progressValue = Math.max(
+      0,
+      Math.min(100, Number(item.progress || 0))
+    );
+    const hasMeasuredProgress =
+      progressValue > 0
+      || Number(item.total_bytes || 0) > 0
+      || ["processing", "completed"].includes(String(item.state || ""));
+
+    if (hasMeasuredProgress) {
+      progressFill.style.width = String(progressValue) + "%";
+    } else {
+      progressBar.classList.add("is-indeterminate");
+    }
+
+    const progressLabel = document.createElement("span");
+    progressLabel.className = "subscription-progress-label";
+    progressLabel.textContent = hasMeasuredProgress
+      ? Math.round(progressValue) + "%"
+      : "…";
+
+    progressWrap.append(progressBar, progressLabel);
+    card.appendChild(progressWrap);
     target.appendChild(card);
   }
 }
@@ -6326,7 +6361,7 @@ function renderDownloaderTasks(data) {
   const waitingCount = Number(data.summary?.tasks_waiting || 0);
   const membershipErrors = Number(data.summary?.membership_errors || 0);
   const tasks = Array.isArray(data.tasks) ? data.tasks : [];
-  const running = tasks.filter(item => item.state === "executing");
+  const running = tasks.filter(item => ["executing", "running"].includes(item.state));
   const blockEnabled = !!data.task_block?.enabled;
 
   activeTarget.textContent = String(activeCount);
@@ -7691,9 +7726,19 @@ function toggleChannelFavouriteFromButton(button) {
 }
 
 async function toggleChannelFavourite(button, channelId, channelTitle, channelUrl, thumbnailUrl) {
-  const viewport = captureViewportState(
-    button?.closest(".source-row") || null
-  );
+  const viewport = captureViewportState(button?.closest(".source-row") || null);
+  const before = getChannelControlState(channelId, {
+    channel_title: channelTitle,
+    channel_url: channelUrl,
+    thumbnail_url: thumbnailUrl
+  });
+  const optimistic = !before.favourite;
+
+  const selector = `.heart-btn[data-channel-id="${CSS.escape(channelId)}"], .discover-channel-heart[data-channel-id="${CSS.escape(channelId)}"], [data-channel-favourite-control="1"][data-channel-id="${CSS.escape(channelId)}"]`;
+  document.querySelectorAll(selector).forEach(btn => setHeartButton(btn, optimistic, "channel"));
+  syncChannelAvatarControls(channelId, {favourite: optimistic});
+  const sourceRow = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
+  if (sourceRow) sourceRow.dataset.favourite = optimistic ? "1" : "0";
 
   try {
     const data = await apiPost("/api/favourites/channel/toggle", {
@@ -7703,19 +7748,9 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       thumbnail_url: thumbnailUrl
     });
 
-    document.querySelectorAll(
-      `.heart-btn[data-channel-id="${CSS.escape(channelId)}"], .discover-channel-heart[data-channel-id="${CSS.escape(channelId)}"], [data-channel-favourite-control="1"][data-channel-id="${CSS.escape(channelId)}"]`
-    ).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
-    syncChannelAvatarControls(channelId, {favourite:data.favourite});
-
-    document.querySelectorAll(`.source-row`).forEach(row => {
-      const heart = row.querySelector(
-        `.heart-btn[data-channel-id="${CSS.escape(channelId)}"]`
-      );
-      if (heart) {
-        row.dataset.favourite = data.favourite ? "1" : "0";
-      }
-    });
+    document.querySelectorAll(selector).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
+    syncChannelAvatarControls(channelId, {favourite: data.favourite});
+    if (sourceRow) sourceRow.dataset.favourite = data.favourite ? "1" : "0";
 
     [
       discoverResults.downloaded,
@@ -7725,15 +7760,12 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       discoverResults.shorts,
       discoverResults.top100
     ].forEach(items => items.forEach(item => {
-      if (item.channel_id === channelId) {
-        item.is_favourite_channel = data.favourite;
-      }
+      if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     }));
 
     latestSubscriptionVideos.forEach(item => {
       if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     });
-
     latestSubscriptionShorts.forEach(item => {
       if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     });
@@ -7748,28 +7780,26 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       if (currentSubscriptionChannelData.subscription) {
         currentSubscriptionChannelData.subscription.favourite = data.favourite;
       }
-      syncChannelAvatarControls(channelId, {favourite:data.favourite});
     }
 
     const favouritesSettingsOpen = !!document.querySelector('.tab-panel[data-panel="favourites"].active');
     if (favouritesDialog?.open || favouritesSettingsOpen) {
-      await loadFavourites();
-    } else {
-      renderSettingsFavouriteOverview();
+      loadFavourites();
     }
 
-    applyFilters({
-      preserveScroll: true,
-      anchorRow: viewport.anchorRow
-    });
-
-    restoreViewportState(viewport);
+    if (pinFavouritesToTop || statusFilter?.value === "favourites") {
+      const resort = () => applyFilters({preserveScroll:true, anchorRow:sourceRow});
+      if ("requestIdleCallback" in window) requestIdleCallback(resort, {timeout:500});
+      else setTimeout(resort, 0);
+    }
   } catch (err) {
+    document.querySelectorAll(selector).forEach(btn => setHeartButton(btn, before.favourite, "channel"));
+    syncChannelAvatarControls(channelId, {favourite: before.favourite});
+    if (sourceRow) sourceRow.dataset.favourite = before.favourite ? "1" : "0";
     restoreViewportState(viewport);
-    window.alert(err.message || String(err));
+    showAjaxToast(err.message || String(err), "error");
   }
 }
-
 
 async function toggleVideoFavourite(button, item) {
   try {
@@ -12896,27 +12926,32 @@ function startDeferredDashboardWork() {
   setDownloaderDownloadMinimised(
     {{ 'true' if page_view.min_pinchflat_downloads else 'false' }}
   );
-  // Start the summary/download request first. Fetch is asynchronous, so the
-  // already-rendered status tiles stay responsive while the request runs.
-  Promise.resolve(loadDownloaderDownloadOverview(true))
-    .finally(() => startDownloaderDownloadPolling());
-  {% elif page_view.load_summary and (page_view.show_summary_latest_download or page_view.show_summary_pinchflat_tasks) %}
-  Promise.resolve(loadDownloaderDownloadOverview(true));
-  setInterval(
-    () => loadDownloaderDownloadOverview(false),
-    {{ '4000' if page_view.show_summary_pinchflat_tasks else '15000' }}
-  );
+  if (serverInitialDownloadOverview) {
+    renderDownloaderActiveDownloads(serverInitialDownloadOverview);
+    renderDownloaderTasks(serverInitialDownloadOverview);
+    renderDownloaderLastDownload(serverInitialDownloadOverview);
+    renderLatestDownloadSummary(serverInitialDownloadOverview.last_downloaded || null);
+  }
+  startDownloaderDownloadPolling();
+  {% elif page_view.load_summary and (page_view.show_summary_latest_download or page_view.show_summary_pinchflat) %}
+  if (serverInitialDownloadOverview) {
+    renderDownloaderTasks(serverInitialDownloadOverview);
+    renderLatestDownloadSummary(serverInitialDownloadOverview.last_downloaded || null);
+  }
+  setInterval(() => loadDownloaderDownloadOverview(false), 5000);
   {% endif %}
 
   {% if google_connected and page_view.load_latest_videos %}
   setLatestSectionMinimised(
     {{ 'true' if page_view.min_latest_videos else 'false' }}
   );
-  // YouTube remains the last network-heavy dashboard request.
-  setTimeout(
-    () => loadLatestSubscriptionVideos(false),
-    900
-  );
+  const initialLatest = serverInitialLatestSubscriptions || {};
+  if ((initialLatest.results || []).length || (initialLatest.shorts || []).length) {
+    renderLatestSubscriptionVideos(initialLatest.results || [], initialLatest.shorts || []);
+    setTimeout(() => loadLatestSubscriptionVideos(false), 5000);
+  } else {
+    setTimeout(() => loadLatestSubscriptionVideos(false), 1200);
+  }
   {% endif %}
 
   {% if page_view.load_subscriptions %}
