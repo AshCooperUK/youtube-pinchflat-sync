@@ -27,6 +27,32 @@ jobs:
       - name: Compile Python
         run: python -m py_compile app/app.py app/downloader_auth.py app/manage_user.py
 
+      - name: Import application with temporary V3 storage
+        env:
+          DATA_DIR: /tmp/youtube-subscription-downloader-data
+          DOWNLOAD_ROOT: /tmp/youtube-subscription-downloader-media
+          APP_URL: http://localhost:8787
+          CANONICAL_REDIRECT: "false"
+        run: |
+          mkdir -p "$DATA_DIR" "$DOWNLOAD_ROOT"
+          PYTHONPATH=app python - <<'PY'
+          import app
+          assert app.VERSION == "3.0.0"
+          assert app.YOUTUBE_COOKIE_PATH.name == "youtube-cookies.txt"
+          print("Application import OK", app.VERSION)
+          PY
+
+      - name: Test cookie upload validator
+        run: |
+          PYTHONPATH=app python - <<'PY'
+          from downloader_auth import validate_netscape_cookie_text
+          text = "# Netscape HTTP Cookie File\n#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t2147483647\tSID\texample\n"
+          normalised, stats = validate_netscape_cookie_text(text)
+          assert stats["youtube_cookies"] == 1
+          assert "#HttpOnly_.youtube.com" in normalised
+          print("Cookie validator OK")
+          PY
+
       - name: Parse Jinja templates
         run: |
           python - <<'PY'
