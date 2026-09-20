@@ -3395,7 +3395,7 @@
     <div class="card" data-summary-tile="pinchflat_tasks" id="pinchflat-tasks-summary-card">
       <div class="muted small">Tasks</div>
       <div class="metric" id="pinchflat-tasks-active">0</div>
-      <div class="muted small" id="pinchflat-tasks-status">No active non-download tasks</div>
+      <div class="muted small" id="pinchflat-tasks-status">No active background tasks</div>
       <div class="warn small hidden" id="pinchflat-tasks-membership-errors"></div>
       <div class="muted small" id="pinchflat-tasks-current"></div>
       {% if is_admin %}
@@ -3403,7 +3403,7 @@
         <label class="source-toggle" title="When enabled, stop and delete all current native tasks and automatically cancel any new tasks until switched off.">
           <input id="pinchflat-task-block-toggle" type="checkbox" onchange="setDownloaderTaskBlock(this.checked)">
           <span class="toggle-track"></span>
-          <span class="source-toggle-text">Delete all tasks</span>
+          <span class="source-toggle-text">Suppress scan tasks</span>
         </label>
         <div id="pinchflat-task-block-status" class="pinchflat-task-block-status"></div>
       </div>
@@ -3933,7 +3933,7 @@
       <section class="debug-function-group">
         <h3>Dashboard &amp; account</h3>
         <div class="debug-function-list">
-          <div class="debug-function-row" data-debug-search="pinchflat sync youtube subscriptions sources"><div class="debug-function-name">YouTube Subscription Downloader</div><div class="debug-service-badge">YouTube + Downloader</div><div class="debug-function-description">Synchronises the app's subscription state with Downloader sources and applies the configured source rules.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat sync youtube subscriptions sources"><div class="debug-function-name">YouTube Subscription Downloader</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Synchronises the app's subscription state with download monitorings and applies the configured source rules.</div></div>
           <div class="debug-function-row" data-debug-search="refresh youtube subscriptions google data api"><div class="debug-function-name">Refresh YouTube</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Reloads the connected account's current YouTube subscriptions and updates local subscription records.</div></div>
           <div class="debug-function-row" data-debug-search="single download yt-dlp one-time"><div class="debug-function-name">Single Download</div><div class="debug-service-badge">yt-dlp / Local app</div><div class="debug-function-description">Downloads one supplied YouTube URL using the selected One-time Download options. The Emby / Smart TV profile prefers H.264 + AAC in MP4 and converts incompatible streams before the detected Emby One-time Download library is scanned.</div></div>
           <div class="debug-function-row" data-debug-search="google status oauth cloud console"><div class="debug-function-name">Google status tile</div><div class="debug-service-badge">Google OAuth</div><div class="debug-function-description">Shows whether Google is connected and whether the token has read/write access. The logo opens Google Cloud Console.</div></div>
@@ -3942,7 +3942,7 @@
           <div class="debug-function-row" data-debug-search="queue waiting downloads"><div class="debug-function-name">Download queue</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Opens the complete list of waiting Downloader jobs and refreshes the queue while the popup remains open.</div></div>
           <div class="debug-function-row" data-debug-search="refresh downloads activity"><div class="debug-function-name">Refresh download activity</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Immediately reloads current Downloader workers, waiting count and recent completed download data.</div></div>
           <div class="debug-function-row" data-debug-search="pinchflat tasks oban active jobs background membership members only join this channel"><div class="debug-function-name">Tasks tile</div><div class="debug-service-badge">Native queue</div><div class="debug-function-description">Shows active and waiting Downloader background work other than media downloads, such as source indexing or metadata jobs. It also counts non-completed download jobs whose stored yt-dlp error contains “Join this channel”, shown as membership errors. Download jobs remain in the dedicated Downloads section.</div></div>
-          <div class="debug-function-row" data-debug-search="delete all tasks block cancel stop persistent oban"><div class="debug-function-name">Delete all Tasks</div><div class="debug-service-badge">Native queue</div><div class="debug-function-description">Cancels running Downloader jobs, deletes queued non-completed jobs and pauses Downloader queues. While the toggle stays enabled the app removes any new tasks which are created. Switching it off resumes Downloader queues.</div></div>
+          <div class="debug-function-row" data-debug-search="delete all tasks block cancel stop persistent oban"><div class="debug-function-name">Delete all Tasks</div><div class="debug-service-badge">Native queue</div><div class="debug-function-description">Cancels queued channel-scan work and suppresses new background scan tasks while the toggle stays enabled. Active media downloads remain controlled separately.</div></div>
           <div class="debug-function-row" data-debug-search="download speed live transfer yt-dlp"><div class="debug-function-name">Downloader download speed</div><div class="debug-service-badge">Downloader / yt-dlp</div><div class="debug-function-description">Shows a best-effort live transfer rate for active subscription downloads. The app uses yt-dlp progress output when available and otherwise estimates speed from the growing download file.</div></div>
         </div>
       </section>
@@ -3950,23 +3950,23 @@
       <section class="debug-function-group">
         <h3>Subscriptions &amp; channel actions</h3>
         <div class="debug-function-list">
-          <div class="debug-function-row" data-debug-search="enable disable downloads source toggle"><div class="debug-function-name">Enable / Disable</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Immediately creates or removes the channel's Downloader source according to the Enabled switch.</div></div>
+          <div class="debug-function-row" data-debug-search="enable disable downloads source toggle"><div class="debug-function-name">Enable / Disable</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Immediately enables or disables native subscription monitoring for the channel.</div></div>
           <div class="debug-function-row" data-debug-search="save range profile history"><div class="debug-function-name">Save changes</div><div class="debug-service-badge">Local app + Downloader</div><div class="debug-function-description">Saves changed download range or media profile settings and applies them to the channel source.</div></div>
-          <div class="debug-function-row" data-debug-search="download pending action"><div class="debug-function-name">Download Pending</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Requests Downloader to process media which is pending for the selected source.</div></div>
-          <div class="debug-function-row" data-debug-search="re-download existing redownload"><div class="debug-function-name">Re-Download Existing</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Requests Downloader to download media again for items already known to that source.</div></div>
-          <div class="debug-function-row" data-debug-search="force scan source"><div class="debug-function-name">Force Scan</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Forces Downloader to check the channel now rather than waiting for its normal source schedule.</div></div>
-          <div class="debug-function-row" data-debug-search="refresh media metadata"><div class="debug-function-name">Refresh Media</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Refreshes Downloader's media information for the selected source.</div></div>
-          <div class="debug-function-row" data-debug-search="sync files disk"><div class="debug-function-name">Sync Files on Disk</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Asks Downloader to reconcile its media records with files currently present on disk.</div></div>
+          <div class="debug-function-row" data-debug-search="download pending action"><div class="debug-function-name">Download Pending</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Scans the selected channel and queues eligible videos which are not already downloaded.</div></div>
+          <div class="debug-function-row" data-debug-search="re-download existing redownload"><div class="debug-function-name">Re-Download Existing</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Runs a deep channel scan and explicitly allows matching media to be queued again.</div></div>
+          <div class="debug-function-row" data-debug-search="deep scan source"><div class="debug-function-name">Deep Scan</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Runs a queued deep scan of the selected channel now.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh media metadata"><div class="debug-function-name">Refresh Media</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Refreshes local media information and the matching Emby channel metadata.</div></div>
+          <div class="debug-function-row" data-debug-search="sync files disk"><div class="debug-function-name">Sync Files on Disk</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Refreshes the app's view of files currently present on disk.</div></div>
           <div class="debug-function-row" data-debug-search="refresh emby channel scan"><div class="debug-function-name">Refresh Emby</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Scans the matching channel folder in the auto-detected YouTube library, then runs a delayed Replace all metadata refresh. If the folder is not indexed yet, the same two-stage refresh runs against only the YouTube library.</div></div>
           <div class="debug-function-row" data-debug-search="unsubscribe youtube"><div class="debug-function-name">Unsubscribe</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Unsubscribes the connected Google account from the channel while retaining the local channel record.</div></div>
-          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove source"><div class="debug-function-name">Unsubscribe &amp; Delete Channel</div><div class="debug-service-badge">YouTube + Downloader</div><div class="debug-function-description">Unsubscribes, removes the Downloader source and removes the channel from the normal local subscription list while keeping downloaded media.</div></div>
-          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove media destructive"><div class="debug-function-name">Unsubscribe, Delete Channel &amp; Remove Media</div><div class="debug-service-badge">YouTube + Downloader + Storage</div><div class="debug-function-description">Performs the destructive channel removal and also deletes downloaded media belonging to the channel.</div></div>
+          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove source"><div class="debug-function-name">Unsubscribe &amp; Delete Channel</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Unsubscribes, removes the download monitoring and removes the channel from the normal local subscription list while keeping downloaded media.</div></div>
+          <div class="debug-function-row" data-debug-search="unsubscribe delete channel remove media destructive"><div class="debug-function-name">Unsubscribe, Delete Channel &amp; Remove Media</div><div class="debug-service-badge">YouTube + Local app + Storage</div><div class="debug-function-description">Performs the destructive channel removal and also deletes downloaded media belonging to the channel.</div></div>
           <div class="debug-function-row" data-debug-search="bulk actions selected channels"><div class="debug-function-name">Bulk actions</div><div class="debug-service-badge">Multiple services</div><div class="debug-function-description">Runs the chosen channel action across every selected subscription. Destructive actions ask for confirmation first.</div></div>
           <div class="debug-function-row" data-debug-search="channel name details popup stats"><div class="debug-function-name">Channel name</div><div class="debug-service-badge">YouTube + Local app</div><div class="debug-function-description">Opens the rich Channel popup with YouTube statistics, videos, featured channels, local source details and history.</div></div>
           <div class="debug-function-row" data-debug-search="heart favourite channel"><div class="debug-function-name">Heart icon</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Adds or removes the channel from Favourite Channels. The same state is reflected throughout the interface.</div></div>
           <div class="debug-function-row" data-debug-search="tick enabled downloads"><div class="debug-function-name">Download tick icon</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Enables or disables subscription downloads for the channel directly from channel artwork.</div></div>
-          <div class="debug-function-row" data-debug-search="refresh icon force scan artwork"><div class="debug-function-name">Channel refresh icon</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Runs Force Scan for the channel directly from the channel-image overlay.</div></div>
-          <div class="debug-function-row" data-debug-search="delete remove trash channel icon unsubscribe pinchflat sync everything"><div class="debug-function-name">Channel delete icon</div><div class="debug-service-badge">YouTube Subscription Downloader + Downloader + YouTube</div><div class="debug-function-description">Opens the channel removal menu. Choose whether to unsubscribe, remove only the YouTube Subscription Downloader record, remove the Downloader source too, or remove the channel and downloaded media.</div></div>
+          <div class="debug-function-row" data-debug-search="refresh icon deep scan artwork"><div class="debug-function-name">Channel refresh icon</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Runs Deep Scan for the channel directly from the channel-image overlay.</div></div>
+          <div class="debug-function-row" data-debug-search="delete remove trash channel icon unsubscribe pinchflat sync everything"><div class="debug-function-name">Channel delete icon</div><div class="debug-service-badge">YouTube Subscription Downloader + YouTube</div><div class="debug-function-description">Opens the channel removal menu. Choose whether to unsubscribe, remove only the YouTube Subscription Downloader record, remove the download monitoring too, or remove the channel and downloaded media.</div></div>
         </div>
       </section>
 
@@ -3974,7 +3974,7 @@
         <h3>Channel details &amp; media player</h3>
         <div class="debug-function-list">
           <div class="debug-function-row" data-debug-search="youtube logo channel"><div class="debug-function-name">YouTube logo</div><div class="debug-service-badge">YouTube</div><div class="debug-function-description">Opens the current channel directly on YouTube in a new browser tab.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat logo source"><div class="debug-function-name">Downloader logo</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Opens the associated Downloader source when a source exists.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat logo source"><div class="debug-function-name">Downloader logo</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Opens the associated download monitoring when a source exists.</div></div>
           <div class="debug-function-row" data-debug-search="popular latest channel videos"><div class="debug-function-name">Popular / Latest videos</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Switches the channel video strip between popular results and recent uploads.</div></div>
           <div class="debug-function-row" data-debug-search="featured channels"><div class="debug-function-name">Featured Channels</div><div class="debug-service-badge">YouTube</div><div class="debug-function-description">Shows channels featured by the current channel where YouTube exposes that public channel section.</div></div>
           <div class="debug-function-row" data-debug-search="growth history chart snapshots"><div class="debug-function-name">Growth history</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Charts public YouTube totals stored by the app as daily channel snapshots.</div></div>
@@ -4008,8 +4008,8 @@
           <div class="debug-function-row" data-debug-search="emby scan library files youtube single downloads playlist"><div class="debug-function-name">Emby targeted scans</div><div class="debug-service-badge">Emby</div><div class="debug-function-description">Detects the Emby library associated with subscription media, One-time Downloads or the Emby Download playlist, scans only that target, then runs the delayed Replace all metadata refresh.</div></div>
           <div class="debug-function-row" data-debug-search="auto refresh emby downloads"><div class="debug-function-name">Automatic Emby refresh</div><div class="debug-service-badge">Downloader + Emby</div><div class="debug-function-description">Detects a newly completed Downloader download, scans its channel in Emby and follows with a delayed metadata refresh automatically.</div></div>
           <div class="debug-function-row" data-debug-search="subscription sync schedule automation youtube"><div class="debug-function-name">YouTube subscription sync</div><div class="debug-service-badge">YouTube Data API</div><div class="debug-function-description">Controls the scheduled refresh of YouTube subscriptions.</div></div>
-          <div class="debug-function-row" data-debug-search="pinchflat sync schedule automation"><div class="debug-function-name">Downloader sync schedule</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Controls scheduled reconciliation between local subscription settings and Downloader sources.</div></div>
-          <div class="debug-function-row" data-debug-search="scheduled force index favourites non favourites source scan"><div class="debug-function-name">Scheduled Force Index</div><div class="debug-service-badge">Downloader + YouTube</div><div class="debug-function-description">Force Indexes enabled Downloader sources automatically. Favourite and non-favourite channels have separate intervals, and scans are staggered source by source across each interval to avoid one large request burst.</div></div>
+          <div class="debug-function-row" data-debug-search="pinchflat sync schedule automation"><div class="debug-function-name">Downloader sync schedule</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Controls scheduled reconciliation between local subscription settings and download monitorings.</div></div>
+          <div class="debug-function-row" data-debug-search="scheduled scheduled scan favourites non favourites source scan"><div class="debug-function-name">Scheduled Scheduled Scan</div><div class="debug-service-badge">Downloader + YouTube</div><div class="debug-function-description">Scheduled Scanes enabled download monitorings automatically. Favourite and non-favourite channels have separate intervals, and scans are staggered source by source across each interval to avoid one large request burst.</div></div>
           <div class="debug-function-row" data-debug-search="video retention cleanup delete old media age storage"><div class="debug-function-name">Video Retention</div><div class="debug-service-badge">Downloader + Local app</div><div class="debug-function-description">Removes old subscription media by YouTube upload age using favourite, non-favourite and per-channel policies. It keeps the configured newest videos and uses Downloader's own deletion logic to stop removed media being immediately downloaded again.</div></div>
           <div class="debug-function-row" data-debug-search="retention shield channel policy override"><div class="debug-function-name">Retention shield</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Opens Video Retention settings for the selected channel so its inherited policy can be viewed or overridden.</div></div>
           <div class="debug-function-row" data-debug-search="protect video retention shield keep permanently"><div class="debug-function-name">Protect video from retention</div><div class="debug-service-badge">Local app</div><div class="debug-function-description">Marks an individual YouTube video as protected so Video Retention will keep it regardless of the channel age policy.</div></div>
@@ -4018,7 +4018,7 @@
           <div class="debug-function-row" data-debug-search="concurrent downloads workers yt-dlp docker"><div class="debug-function-name">Concurrent downloads</div><div class="debug-service-badge">Downloader + Docker</div><div class="debug-function-description">Changes Downloader's yt-dlp worker concurrency and recreates the container while preserving its configuration.</div></div>
           <div class="debug-function-row" data-debug-search="media profiles pinchflat settings"><div class="debug-function-name">Media Profiles</div><div class="debug-service-badge">Downloader</div><div class="debug-function-description">Creates, edits and deletes subscription media profiles including path, quality, metadata, artwork and SponsorBlock options.</div></div>
           <div class="debug-function-row" data-debug-search="dashboard page view settings show hide load minimise"><div class="debug-function-name">Dashboard settings</div><div class="debug-service-badge">Local app / Browser</div><div class="debug-function-description">Controls dashboard order, section visibility, minimised state, status tiles, header buttons and the shared channel-image controls.</div></div>
-          <div class="debug-function-row" data-debug-search="channel image controls icons heart tick scan delete global"><div class="debug-function-name">Channel image controls</div><div class="debug-service-badge">Local app + YouTube + Downloader</div><div class="debug-function-description">Global Dashboard switches control whether Favourite, download enable, Force Scan, retention and remove icons appear around channel artwork throughout the web app.</div></div>
+          <div class="debug-function-row" data-debug-search="channel image controls icons heart tick scan delete global"><div class="debug-function-name">Channel image controls</div><div class="debug-service-badge">Local app + YouTube + Local app</div><div class="debug-function-description">Global Dashboard switches control whether Favourite, download enable, Deep Scan, retention and remove icons appear around channel artwork throughout the web app.</div></div>
           <div class="debug-function-row" data-debug-search="429 too many requests bot yt-dlp rate limit concurrency"><div class="debug-function-name">YouTube HTTP 429</div><div class="debug-service-badge">YouTube / yt-dlp / Downloader</div><div class="debug-function-description">YouTube is rate-limiting the downloader. Reduce Downloader concurrent downloads to 1 first. Cookies or a current yt-dlp PO Token provider may also be required when YouTube asks for bot confirmation.</div></div>
           <div class="debug-function-row" data-debug-search="diagnostics logs activity sync pinchflat direct downloads"><div class="debug-function-name">Diagnostics</div><div class="debug-service-badge">Local app + Downloader</div><div class="debug-function-description">Combines application health, activity, direct-download history, sync runs and Downloader logs in one troubleshooting view.</div></div>
         </div>
@@ -4104,10 +4104,10 @@
                 <option value="unfavourite">Remove favourite</option>
                 <option value="retry">Retry errors</option>
               </optgroup>
-              <optgroup label="Downloader source actions">
+              <optgroup label="download monitoring actions">
                 <option value="download_pending">Download Pending</option>
                 <option value="redownload_existing">Re-Download Existing</option>
-                <option value="force_scan">Force Scan</option>
+                <option value="force_scan">Deep Scan</option>
                 <option value="refresh_metadata">Refresh Media</option>
                 <option value="sync_files">Sync Files on Disk</option>
               </optgroup>
@@ -4117,7 +4117,6 @@
               <optgroup label="YouTube and channel removal">
                 <option value="unsubscribe">Unsubscribe</option>
                 <option value="delete_local">Delete Channel from YouTube Subscription Downloader</option>
-                <option value="delete_local_pinchflat">Delete Channel from YouTube Subscription Downloader &amp; Downloader</option>
                 <option value="delete_unsubscribe">Unsubscribe &amp; Delete Channel</option>
                 <option value="delete_unsubscribe_media">Unsubscribe, Delete Channel &amp; Remove Media</option>
               </optgroup>
@@ -4201,7 +4200,7 @@
             <a id="subscription-channel-youtube-link" class="channel-service-icon-link" href="https://www.youtube.com" target="_blank" rel="noopener" title="Open YouTube channel" aria-label="Open YouTube channel">
               <img src="https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png" alt="YouTube">
             </a>
-            <a id="subscription-channel-pinchflat-link" class="channel-service-icon-link hidden" href="#" target="_blank" rel="noopener" title="Open Downloader source" aria-label="Open Downloader source">
+            <a id="subscription-channel-pinchflat-link" class="channel-service-icon-link hidden" href="#" target="_blank" rel="noopener" title="Open download monitoring" aria-label="Open download monitoring">
               <img src="https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Downloader/icon.png" alt="Downloader">
             </a>
           </div>
@@ -4289,7 +4288,7 @@
             <div class="channel-detail-card"><span>Media Profile</span><strong id="subscription-channel-profile">—</strong></div>
             <div class="channel-detail-card"><span>Download range</span><strong id="subscription-channel-range">—</strong></div>
             <div class="channel-detail-card"><span>Disk usage</span><strong id="subscription-channel-storage">—</strong></div>
-            <div class="channel-detail-card"><span>Downloader source</span><strong id="subscription-channel-source">—</strong></div>
+            <div class="channel-detail-card"><span>download monitoring</span><strong id="subscription-channel-source">—</strong></div>
           </div>
         </div>
 
@@ -4349,7 +4348,7 @@
     <div class="subscription-actions-menu-label">Downloader</div>
     <button type="button" data-action-source-action="download_pending" onclick="runSubscriptionSourceActionFromMenu('download_pending')">Download Pending</button>
     <button type="button" data-action-source-action="redownload_existing" onclick="runSubscriptionSourceActionFromMenu('redownload_existing')">Re-Download Existing</button>
-    <button type="button" data-action-source-action="force_scan" onclick="runSubscriptionSourceActionFromMenu('force_scan')">Force Scan</button>
+    <button type="button" data-action-source-action="force_scan" onclick="runSubscriptionSourceActionFromMenu('force_scan')">Deep Scan</button>
     <button type="button" data-action-source-action="refresh_metadata" onclick="runSubscriptionSourceActionFromMenu('refresh_metadata')">Refresh Media</button>
     <button type="button" data-action-source-action="sync_files" onclick="runSubscriptionSourceActionFromMenu('sync_files')">Sync Files on Disk</button>
   </div>
@@ -4364,7 +4363,6 @@
   <div class="subscription-actions-menu-section">
     <div class="subscription-actions-menu-label">Remove channel</div>
     <button class="danger-item" type="button" onclick="confirmDeleteLocalCurrentChannel(false)">Delete Channel from YouTube Subscription Downloader</button>
-    <button class="danger-item" type="button" onclick="confirmDeleteLocalCurrentChannel(true)">Delete Channel from YouTube Subscription Downloader &amp; Downloader</button>
     <button class="danger-item" type="button" onclick="confirmRemoveCurrentChannel(false)">Unsubscribe &amp; Delete Channel</button>
     <button class="danger-item" type="button" onclick="confirmRemoveCurrentChannel(true)">Unsubscribe, Delete Channel &amp; Remove Media</button>
   </div>
@@ -4382,7 +4380,6 @@
   <div class="subscription-actions-menu-section">
     <div class="subscription-actions-menu-label">YouTube Subscription Downloader</div>
     <button id="channel-delete-local" class="danger-item" type="button" onclick="runChannelDeleteMenuAction('local')">Delete Channel from YouTube Subscription Downloader</button>
-    <button id="channel-delete-pinchflat" class="danger-item" type="button" onclick="runChannelDeleteMenuAction('local_pinchflat')">Delete Channel from YouTube Subscription Downloader &amp; Downloader</button>
   </div>
   <div class="subscription-actions-menu-section">
     <div class="subscription-actions-menu-label">Everything</div>
@@ -4876,10 +4873,10 @@
             <div class="settings-note">This only sets the starting state for newly discovered subscriptions. You can enable or disable any channel later from the dashboard.</div>
             <label>When you unsubscribe on YouTube
               <select name="unsubscribe_policy">
-                <option value="keep" {% if unsubscribe_policy == "keep" %}selected{% endif %}>Keep Downloader source</option>
+                <option value="keep" {% if unsubscribe_policy == "keep" %}selected{% endif %}>Keep download monitoring</option>
                 <option value="disable" {% if unsubscribe_policy == "disable" %}selected{% endif %}>Disable subscription downloads</option>
-                <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove Downloader source, keep media</option>
-                <option value="remove_delete" {% if unsubscribe_policy == "remove_delete" %}selected{% endif %}>Remove Downloader source and media</option>
+                <option value="remove" {% if unsubscribe_policy == "remove" %}selected{% endif %}>Remove downloader registration, keep media</option>
+                <option value="remove_delete" {% if unsubscribe_policy == "remove_delete" %}selected{% endif %}>Remove downloader registration and media</option>
               </select>
             </label>
             <label><input type="checkbox" name="show_removed" value="1" {% if show_removed %}checked{% endif %}> Show removed subscriptions in the main list by default</label>
@@ -4997,7 +4994,7 @@
             <label class="page-view-option"><input type="checkbox" name="page_channel_controls" value="1" {% if page_view.channel_controls %}checked{% endif %}><span><strong>Show controls</strong><span class="muted small">Master switch for the controls around channel images.</span></span></label>
             <label class="page-view-option"><input type="checkbox" name="page_channel_control_favourite" value="1" {% if page_view.channel_control_favourite %}checked{% endif %}><span><strong>Favourite heart</strong><span class="muted small">Favourite or unfavourite a channel.</span></span></label>
             <label class="page-view-option"><input type="checkbox" name="page_channel_control_downloads" value="1" {% if page_view.channel_control_downloads %}checked{% endif %}><span><strong>Downloads tick</strong><span class="muted small">Enable or disable subscription downloads.</span></span></label>
-            <label class="page-view-option"><input type="checkbox" name="page_channel_control_scan" value="1" {% if page_view.channel_control_scan %}checked{% endif %}><span><strong>Force Scan</strong><span class="muted small">Ask Downloader to scan the channel now.</span></span></label>
+            <label class="page-view-option"><input type="checkbox" name="page_channel_control_scan" value="1" {% if page_view.channel_control_scan %}checked{% endif %}><span><strong>Deep Scan</strong><span class="muted small">Ask Downloader to scan the channel now.</span></span></label>
             <label class="page-view-option"><input type="checkbox" name="page_channel_control_delete" value="1" {% if page_view.channel_control_delete %}checked{% endif %}><span><strong>Remove / Delete</strong><span class="muted small">Open channel removal options.</span></span></label>
             <label class="page-view-option"><input type="checkbox" name="page_channel_control_retention" value="1" {% if page_view.channel_control_retention %}checked{% endif %}><span><strong>Retention shield</strong><span class="muted small">Open the channel's Video Retention settings.</span></span></label>
           </div>
@@ -5385,7 +5382,7 @@
               <span class="muted small">{{ pinchflat_force_index_status.non_favourites.eligible }} enabled non-favourite channel(s).</span>
             </label>
           </div>
-          <div class="profile-control-help" style="margin-top:10px">Each due channel is placed into the native serial deep-scan queue. It no longer creates external Force Index or Oban jobs.</div>
+          <div class="profile-control-help" style="margin-top:10px">Each due channel is placed into the native serial deep-scan queue. It no longer creates external Scheduled Scan or Oban jobs.</div>
           <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Save Scan Schedule</button></div>
         </form>
       </div>
@@ -5622,7 +5619,7 @@
             </div>
           </div>
           <div class="profile-control-help" style="margin-top:12px">
-            Cleanup uses Downloader's own media deletion logic and marks removed items so a later Force Scan does not immediately download them again. Downloader's native Prevent Automatic Deletion flag is also respected.
+            Cleanup uses the app's own media deletion logic and marks removed items so a later Deep Scan does not immediately download them again. Retention-deleted videos are tombstoned so normal scans do not immediately download them again.
           </div>
           <div class="actions" style="margin-top:14px">
             <button class="btn" type="submit">Save Video Retention</button>
@@ -5722,7 +5719,7 @@
           </div>
 
           <div class="setting-box compact-setting">
-            <h3>Downloader source sync</h3>
+            <h3>download monitoring sync</h3>
             <label>Reconcile Downloader every
               <select name="pinchflat_sync_interval_minutes">
                 {% for value, label in schedule_options %}
@@ -5730,7 +5727,7 @@
                 {% endfor %}
               </select>
             </label>
-            <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Retry failed Downloader source updates</label>
+            <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Retry failed download monitoring updates</label>
             <p class="muted small">Adds authorised sources, removes disabled sources and repairs mismatches.</p>
             <p class="muted small">Next run: {{ next_pinchflat_sync or "not available" }}</p>
           </div>
@@ -6459,7 +6456,7 @@ function renderDownloaderTasks(data) {
   } else if (waitingCount > 0) {
     statusTarget.textContent = `Idle · ${waitingCount} waiting`;
   } else {
-    statusTarget.textContent = "No active non-download tasks";
+    statusTarget.textContent = "No active background tasks";
   }
 
   if (membershipTarget) {
@@ -11047,7 +11044,7 @@ function openSubscriptionChannelActions(button) {
 
   subscriptionActionsMenu.querySelectorAll("[data-action-source-action]").forEach(actionButton => {
     actionButton.disabled = !sourceId;
-    actionButton.title = sourceId ? "" : "This channel is not currently a Downloader source";
+    actionButton.title = sourceId ? "" : "This channel is not currently a download monitoring";
   });
 
   subscriptionActionsMenu.classList.remove("hidden");
@@ -11098,7 +11095,7 @@ function updateChannelDeleteMenuAvailability(state) {
     pinchflat.disabled = !state.inApp;
     pinchflat.title = !state.inApp
       ? "This channel is not stored in YouTube Subscription Downloader"
-      : (state.sourceId ? "Remove the channel from YouTube Subscription Downloader and remove its Downloader source" : "Remove the channel from YouTube Subscription Downloader. No Downloader source currently exists");
+      : (state.sourceId ? "Remove the channel from YouTube Subscription Downloader" : "Remove the channel from YouTube Subscription Downloader. No download monitoring currently exists");
   }
   if (everything) {
     everything.disabled = !state.inApp;
@@ -11110,7 +11107,7 @@ function updateChannelDeleteMenuAvailability(state) {
     const parts = [];
     parts.push(state.subscribed ? "Subscribed" : "Not subscribed");
     parts.push(state.inApp ? "In YouTube Subscription Downloader" : "Not in YouTube Subscription Downloader");
-    parts.push(state.sourceId ? "In Downloader" : "No Downloader source");
+    parts.push(state.sourceId ? "In Downloader" : "No download monitoring");
     subtitle.textContent = parts.join(" · ");
   }
 }
@@ -11236,8 +11233,8 @@ function confirmDeleteLocalCurrentChannel(removeDownloader) {
   closeSubscriptionChannelActions(false);
   closeChannelDeleteMenu(false);
   document.getElementById("subscription-confirm-message").textContent = removeDownloader
-    ? `Delete ${title} from YouTube Subscription Downloader and remove its Downloader source? Downloaded media and your YouTube subscription will be kept.`
-    : `Delete ${title} from YouTube Subscription Downloader only? Its Downloader source, downloaded media and YouTube subscription will be kept.`;
+    ? `Delete ${title} from YouTube Subscription Downloader? Downloaded media and your YouTube subscription will be kept.`
+    : `Delete ${title} from YouTube Subscription Downloader only? Its download monitoring, downloaded media and YouTube subscription will be kept.`;
   subscriptionConfirmAction = () => deleteCurrentChannelFromDownloaderSync(removeDownloader);
   if (!subscriptionConfirmDialog.open) subscriptionConfirmDialog.showModal();
 }
@@ -12546,7 +12543,7 @@ async function submitBulkActionAjax(event) {
     retry:"Retry errors",
     download_pending:"Download Pending",
     redownload_existing:"Re-Download Existing",
-    force_scan:"Force Scan",
+    force_scan:"Deep Scan",
     refresh_metadata:"Refresh Media",
     sync_files:"Sync Files on Disk",
     emby_refresh:"Refresh Emby",
