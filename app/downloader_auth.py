@@ -44,7 +44,14 @@ def validate_netscape_cookie_text(text):
     google_rows = 0
     for raw in lines:
         line = raw.strip("\n")
-        if not line or line.lstrip().startswith("#"):
+        if not line:
+            continue
+        # Netscape cookie exports encode HttpOnly cookies as
+        # "#HttpOnly_.example.com<TAB>...". They are cookie records, not
+        # comments, and YouTube account cookies commonly use this form.
+        if line.startswith("#HttpOnly_"):
+            line = line[len("#HttpOnly_"):]
+        elif line.lstrip().startswith("#"):
             continue
         fields = line.split("\t")
         if len(fields) < 7:
@@ -174,6 +181,9 @@ def authenticated_ydl_options(base_options, cookie_path=None, po_token="", custo
 
     token = str(po_token or "").strip()
     if token:
+        # Manual GVS tokens remain available as an expert fallback. Current
+        # yt-dlp guidance recommends a PO Token Provider plugin for reliable
+        # automatic token generation, so this field is deliberately optional.
         extractor_args = dict(options.get("extractor_args") or {})
         youtube_args = dict(extractor_args.get("youtube") or {})
         youtube_args["player_client"] = ["default", "mweb"]
