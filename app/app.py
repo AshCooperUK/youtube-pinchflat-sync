@@ -4607,7 +4607,7 @@ def process_deferred_unsubscribe_cleanups():
                             str(source_id),
                             time.time() + 300,
                             next_remaining,
-                            "Pinchflat source removal is still in progress.",
+                            "Downloader cleanup is still in progress.",
                             job["id"],
                         ),
                     )
@@ -4623,7 +4623,7 @@ def process_deferred_unsubscribe_cleanups():
                         """,
                         (
                             str(source_id),
-                            "Pinchflat source removal is still in progress.",
+                            "Downloader cleanup is still in progress.",
                             job["channel_id"],
                         ),
                     )
@@ -4798,7 +4798,7 @@ def reconcile_removed_pinchflat_sources():
                     """,
                     (
                         str(source_id),
-                        "Pinchflat source removal is in progress. Waiting for Pinchflat deletion worker.",
+                        "Downloader removal is in progress. Waiting for Pinchflat deletion worker.",
                         row["channel_id"],
                     ),
                 )
@@ -4952,7 +4952,7 @@ def remove_subscription_source_keep_files(row):
             """,
             (
                 str(source_id),
-                "Pinchflat source removal is in progress. Waiting for Pinchflat deletion worker.",
+                "Downloader removal is in progress. Waiting for Pinchflat deletion worker.",
                 row["channel_id"],
             ),
         )
@@ -8280,7 +8280,7 @@ def refresh_subscriptions():
                             """,
                             (
                                 str(source_id),
-                                "Pinchflat source removal is in progress. Waiting for Pinchflat deletion worker.",
+                                "Downloader removal is in progress. Waiting for Pinchflat deletion worker.",
                                 row["channel_id"],
                             ),
                         )
@@ -12031,7 +12031,7 @@ def pinchflat_profile_status(known_online=None):
     if not online:
         return {
             "ready": False,
-            "message": "Pinchflat is offline or unreachable.",
+            "message": "Downloader is unavailable.",
             "profile_ids": [],
         }
 
@@ -13711,10 +13711,12 @@ def sync_once():
         if pinchflat_health():
             authority = reconcile_active_source_authority()
             result = add_pending_sources()
+            scan = v3_scan_all_enabled()
             retry = retry_failed_source_updates()
         else:
             authority = {"checked": 0, "changed": 0, "errors": 0}
             result = {"added": 0, "skipped": 0, "errors": 0}
+            scan = {"checked": 0, "found": 0, "queued": 0, "errors": 0}
             retry = {"attempted": 0, "fixed": 0, "errors": 0}
 
         emby = sync_emby_download_playlist()
@@ -13723,6 +13725,7 @@ def sync_once():
             refresh["policy_errors"]
             + authority["errors"]
             + result["errors"]
+            + scan["errors"]
             + retry["errors"]
             + (1 if emby.get("error") else 0)
         )
@@ -13737,8 +13740,9 @@ def sync_once():
             f"Found {refresh['total']} subscriptions. "
             f"New {refresh['new']}. Re-subscribed {refresh.get('reactivated', 0)}. "
             f"Removed {refresh['removed']}. "
-            f"Authority changes {authority['changed']}. "
-            f"Added {result['added']} Pinchflat sources. "
+            f"Monitoring changes {authority['changed']}. "
+            f"Registered {result['added']} new channel(s). "
+            f"Scanned {scan['checked']} enabled channel(s); queued {scan['queued']} download(s). "
             f"Retry fixes {retry['fixed']}. "
             f"Emby Download queued {emby.get('queued', 0)}. "
             f"Errors {total_errors}."
@@ -16281,7 +16285,7 @@ def save_subscription_row(channel_id):
         ):
             message = (
                 f"{current['title']} saved. "
-                "Pinchflat source removal is in progress."
+                "Downloader removal is in progress."
             )
         elif enabled:
             message = (
@@ -16297,7 +16301,7 @@ def save_subscription_row(channel_id):
         ok = False
         status_code = 409
         message = (
-            "Your choices were saved locally, but Pinchflat could not "
+            "Your choices were saved locally, but the downloader could not "
             f"be reconciled: {exc}"
         )
 
@@ -16437,7 +16441,7 @@ def save_subscription_history(channel_id):
     elif row["pinchflat_added"]:
         flash(
             "Download range saved locally. This older source does not have a "
-            "stored Pinchflat source ID, so update its cutoff in Pinchflat.",
+            "stored downloader registration, so update its cutoff.",
             "success",
         )
     else:
@@ -16495,14 +16499,14 @@ def save_subscription_download(channel_id):
             )
         except Exception as exc:
             flash(
-                "The local setting was saved, but Pinchflat could not be updated: "
+                "The local setting was saved, but the downloader could not be updated: "
                 f"{exc}",
                 "error",
             )
     else:
         flash(
             f"{row['title']} will be "
-            f"{'enabled' if enabled else 'disabled'} when added to Pinchflat.",
+            f"{'enabled' if enabled else 'disabled'} when registered with the downloader.",
             "success",
         )
 
@@ -16574,7 +16578,7 @@ def bulk_subscription_download():
 
     flash(
         f"{'Enabled' if enabled else 'Disabled'} {updated} selected source(s). "
-        f"Pinchflat errors: {pinchflat_errors}.",
+        f"Downloader errors: {pinchflat_errors}.",
         "success" if pinchflat_errors == 0 else "error",
     )
     return redirect(url_for("index") + "#subscriptions")
@@ -17773,7 +17777,7 @@ def bulk_subscription_action():
             }:
                 source_id = resolve_pinchflat_source_id(row)
                 if not source_id:
-                    raise RuntimeError("Channel is not currently a Pinchflat source.")
+                    raise RuntimeError("Channel is not currently enabled for subscription downloads.")
                 with pinchflat_source_action_lock:
                     execute_pinchflat_source_action(source_id, action)
 
@@ -17998,7 +18002,7 @@ def subscription_source_action_api(channel_id):
         return jsonify(
             {
                 "ok": False,
-                "error": "This channel does not currently exist in Pinchflat.",
+                "error": "This channel is not currently enabled in the downloader.",
             }
         ), 409
 
@@ -18132,7 +18136,7 @@ def unsubscribe_subscription(channel_id):
                         last_error = ?
                     WHERE channel_id = ?
                     """,
-                    (str(source_id), "Pinchflat source removal is still in progress.", channel_id),
+                    (str(source_id), "Downloader cleanup is still in progress.", channel_id),
                 )
         schedule_unsubscribe_cleanup(
             channel_id,
@@ -18230,7 +18234,7 @@ def delete_and_unsubscribe_subscription(channel_id, delete_media=False):
             else " Downloaded media removal was requested. No remaining channel folder was found by the app."
         )
     source_message = (
-        " Pinchflat source removal is still being reconciled in the background."
+        " Downloader cleanup is still being reconciled in the background."
         if not source_gone and source_id else ""
     )
     message = (
@@ -18266,7 +18270,7 @@ def delete_subscription_from_pinchflat_sync(channel_id, remove_pinchflat=False):
         ).fetchone()
 
     if row is None:
-        raise RuntimeError("Channel is not currently stored in Pinchflat Sync.")
+        raise RuntimeError("Channel is not currently stored in YouTube Subscription Downloader.")
 
     item = dict(row)
     title = item.get("title") or channel_id
@@ -18323,18 +18327,18 @@ def delete_subscription_from_pinchflat_sync(channel_id, remove_pinchflat=False):
 
     if remove_pinchflat:
         source_text = (
-            " Pinchflat source removal is still being reconciled in the background."
+            " Downloader cleanup is still being reconciled in the background."
             if source_id and not source_gone
-            else " The Pinchflat source was removed." if source_id
-            else " No Pinchflat source existed."
+            else " Download monitoring was removed." if source_id
+            else " No active download monitoring existed."
         )
     else:
-        source_text = " The Pinchflat source and downloaded media were left unchanged."
+        source_text = " Downloaded media was left unchanged."
 
-    message = f"{title} was removed from Pinchflat Sync.{source_text}"
+    message = f"{title} was removed from YouTube Subscription Downloader.{source_text}"
     log_activity(
         "subscriptions",
-        "Channel removed from Pinchflat Sync",
+        "Channel removed from YouTube Subscription Downloader",
         message,
         "success",
         channel_id,
@@ -18548,7 +18552,7 @@ def pinchflat_task_block_api():
             result = pinchflat_delete_all_tasks()
             log_activity(
                 "pinchflat",
-                "Delete all Pinchflat tasks enabled",
+                "Task suppression enabled",
                 f"Persistent task blocking enabled. Cancelled {result.get('cancelled', 0)} and deleted {result.get('deleted', 0)} tasks immediately.",
                 "warning",
             )
@@ -18557,7 +18561,7 @@ def pinchflat_task_block_api():
                 "enabled": True,
                 "message": (
                     f"Task blocking enabled. Cancelled {result.get('cancelled', 0)} and "
-                    f"deleted {result.get('deleted', 0)} Pinchflat tasks. New tasks will be cancelled automatically."
+                    f"deleted {result.get('deleted', 0)} native scan tasks. New scan tasks will be suppressed automatically."
                 ),
                 "result": result,
             })
@@ -18566,14 +18570,14 @@ def pinchflat_task_block_api():
         resume = pinchflat_resume_all_tasks()
         log_activity(
             "pinchflat",
-            "Delete all Pinchflat tasks disabled",
-            "Persistent task blocking disabled and Pinchflat queues resumed.",
+            "Task suppression disabled",
+            "Persistent task suppression disabled. Native scan scheduling has resumed.",
             "success",
         )
         return jsonify({
             "ok": True,
             "enabled": False,
-            "message": "Task blocking disabled. Pinchflat queues have resumed.",
+            "message": "Task suppression disabled. Native scan scheduling has resumed.",
             "result": resume,
         })
     except Exception as exc:
@@ -19434,20 +19438,11 @@ def refresh_only():
 
 @app.post("/add-pending")
 def add_pending():
-    if not pinchflat_health():
-        flash(
-            "Pinchflat is offline or unreachable.",
-            "error",
-        )
-        return redirect(
-            url_for("index") + "#subscriptions"
-        )
-
     result = add_pending_sources()
 
     flash(
         (
-            f"Added {result['added']} pending source(s) to Pinchflat. "
+            f"Registered {result['added']} pending channel(s) with the native downloader. "
             f"Errors: {result['errors']}."
         ),
         "success" if result["errors"] == 0 else "error",
@@ -19503,7 +19498,7 @@ scheduler.add_job(
     pinchflat_sync_once,
     "interval",
     minutes=current_pinchflat_sync_interval(),
-    id="pinchflat-source-sync",
+    id="native-downloader-sync",
     max_instances=1,
 )
 scheduler.add_job(
@@ -19531,7 +19526,7 @@ scheduler.add_job(
     scheduled_pinchflat_force_index,
     "interval",
     minutes=1,
-    id="pinchflat-scheduled-force-index",
+    id="native-scheduled-channel-scan",
     max_instances=1,
     coalesce=True,
 )
