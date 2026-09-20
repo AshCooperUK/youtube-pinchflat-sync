@@ -2,7 +2,7 @@
 
 A self-hosted Docker web application for managing YouTube subscriptions and downloading them directly with yt-dlp.
 
-Version: **3.0.3**
+Version: **3.0.4**
 
 V3 removes Pinchflat completely. The application now owns channel scanning, the persistent download queue, yt-dlp workers, authentication, download history, Emby integration and retention itself.
 
@@ -132,4 +132,4 @@ Health endpoint:
 
 ## Release
 
-V3.0.3 fixes download completion and channel artwork, restores native Discover, and adds compact dashboard tiles, FFmpeg status, Current Downloads and media switches. See [release details](RELEASE-v3.0.3.md).
+V3.0.4 separates subtitle and video progress, continues video downloads when optional captions fail, prepares channel metadata before downloading, and repairs channel folder names for Windows shares. Download errors and optional metadata issues remain visible. See [release details](RELEASE-v3.0.4.md).

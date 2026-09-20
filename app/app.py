@@ -47,8 +47,12 @@ from downloader_auth import (
     should_retry_with_cookies,
     test_cookie_authentication,
 )
+from downloader_media import MediaYoutubeDL, SUBTITLE_EXTENSIONS, safe_media_component
 
-VERSION = "3.0.3"
+VERSION = "3.0.4"
+
+channel_files_lock = threading.RLock()
+channel_metadata_locks = {}
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -988,6 +992,8 @@ def init_v3_db():
         ensure_column(conn, "downloads", "profile_id", "TEXT")
         ensure_column(conn, "downloads", "failure_code", "TEXT")
         ensure_column(conn, "downloads", "auth_mode", "TEXT")
+        ensure_column(conn, "downloads", "warning", "TEXT")
+        ensure_column(conn, "subscriptions", "download_folder", "TEXT")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS subscription_scan_jobs (
@@ -4505,10 +4511,7 @@ def format_bytes(value):
 
 
 def normalise_storage_name(value):
-    value = (value or "").strip().casefold()
-    value = re.sub(r'[<>:"/\\\\|?*]', "", value)
-    value = re.sub(r"\\s+", " ", value)
-    return value.strip(" .")
+    return safe_media_component(value, 240, fallback="").casefold()
 
 
 def safe_relative_download_folder(value, default):
@@ -5429,9 +5432,13 @@ def storage_snapshot(force=False):
     return {"total": total, "by_name": by_name}
 
 
-def channel_disk_usage(title, snapshot=None):
+def channel_disk_usage(title, snapshot=None, folder=None):
     snapshot = snapshot or storage_snapshot()
-    return int(snapshot["by_name"].get(normalise_storage_name(title), 0))
+    if folder is None:
+        with db() as conn:
+            row = conn.execute("SELECT download_folder FROM subscriptions WHERE title=? LIMIT 1", (title,)).fetchone()
+        folder = row["download_folder"] if row and row["download_folder"] else safe_media_component(title, 80)
+    return int(snapshot["by_name"].get(normalise_storage_name(folder), 0))
 
 
 def download_filesystem_snapshot():
@@ -5677,7 +5684,7 @@ def update_download_job(job_id, **values):
         "video_id", "title", "channel_title", "status", "phase", "progress", "speed",
         "eta", "downloaded_bytes", "total_bytes", "output_path", "error",
         "started_at", "finished_at", "channel_id", "published_at", "profile_id",
-        "failure_code", "auth_mode",
+        "failure_code", "auth_mode", "warning",
     }
     values = {key: value for key, value in values.items() if key in allowed}
     if not values:
@@ -5717,6 +5724,13 @@ def _download_progress_hook(job_id, progress_ceiling=100.0):
     def hook(data):
         status = data.get("status")
         info = data.get("info_dict") or {}
+        filename = str(data.get("filename") or "")
+        extension = Path(filename.removesuffix(".part")).suffix.lstrip(".").lower()
+        if extension in SUBTITLE_EXTENSIONS or str(info.get("ext") or "").lower() in SUBTITLE_EXTENSIONS:
+            update_download_job(job_id, status="downloading",
+                                phase="Downloading subtitles" if status == "downloading" else "Preparing video download",
+                                progress=0, speed="", eta="")
+            return
         identity = {
             key: value for key, value in {
                 "video_id": info.get("id"), "title": info.get("title"),
@@ -5749,12 +5763,11 @@ def _download_progress_hook(job_id, progress_ceiling=100.0):
         elif status == "finished":
             update_download_job(
                 job_id,
-                status="processing",
-                phase="FFmpeg · merging and processing media",
+                status="downloading",
+                phase="Media stream received · preparing processing",
                 progress=ceiling,
                 speed="",
                 eta="",
-                output_path=data.get("filename") or "",
                 **identity,
             )
     return hook
@@ -5766,13 +5779,13 @@ def _download_postprocessor_hook(job_id, progress_ceiling=100.0):
     def hook(data):
         status = str(data.get("status") or "").lower()
         postprocessor = str(data.get("postprocessor") or "").strip()
-        if postprocessor in {"SponsorBlock", "SubtitlesConvertor", "ThumbnailsConvertor"}:
+        if postprocessor == "SponsorBlock":
             update_download_job(job_id, status="downloading", phase=f"Preparing · {postprocessor}")
             return
         if status in {"started", "processing"}:
             label = "Processing downloaded media"
             if postprocessor:
-                label = f"FFmpeg · {postprocessor}" if "ffmpeg" in postprocessor.lower() or postprocessor in {"Merger", "Metadata", "EmbedSubtitle", "EmbedThumbnail"} else f"Processing · {postprocessor}"
+                label = f"FFmpeg · {postprocessor}" if "ffmpeg" in postprocessor.lower() or postprocessor in {"Merger", "Metadata", "EmbedSubtitle", "EmbedThumbnail", "SubtitlesConvertor", "ThumbnailsConvertor", "ModifyChapters"} else f"Processing · {postprocessor}"
             update_download_job(
                 job_id,
                 status="processing",
@@ -5824,13 +5837,131 @@ def youtube_channel_artwork(channel_id):
     return artwork
 
 
+def subscription_output_directory(sub, create=True):
+    """Pin a channel to one safe directory, adopting existing files by identity."""
+    channel_id = str(sub.get("channel_id") or "").strip()
+    if not channel_id:
+        raise RuntimeError("A channel ID is required for subscription downloads.")
+    shows = DOWNLOAD_ROOT / "shows"
+    with channel_files_lock:
+        with db() as conn:
+            saved = conn.execute("SELECT title,download_folder FROM subscriptions WHERE channel_id=?", (channel_id,)).fetchone()
+            title = (saved["title"] if saved else None) or sub.get("title") or sub.get("channel_title") or channel_id
+            saved_name = str(saved["download_folder"] or "") if saved else ""
+            records = conn.execute("SELECT output_path FROM downloads WHERE channel_id=? AND source_type LIKE 'subscription%' AND COALESCE(output_path,'')!=''", (channel_id,)).fetchall()
+            other_channels = conn.execute("SELECT channel_id,title,download_folder FROM subscriptions WHERE channel_id!=?", (channel_id,)).fetchall()
+            other_paths = conn.execute("SELECT DISTINCT channel_id,output_path FROM downloads WHERE channel_id!=? AND source_type LIKE 'subscription%' AND COALESCE(output_path,'')!=''", (channel_id,)).fetchall()
+        name = safe_media_component(saved_name or title, 80)
+        candidates = set()
+        for row in records:
+            path = subscription_channel_directory(row["output_path"])
+            if path.parent == shows and path.is_dir():
+                candidates.add(path)
+        if saved_name and (shows / saved_name).is_dir():
+            candidates.add(shows / saved_name)
+        if shows.exists() and not candidates:
+            candidates = {path for path in shows.iterdir() if path.is_dir()
+                          and safe_media_component(path.name, 80).casefold() == name.casefold()}
+        owned_names = {str(row["download_folder"]).casefold(): row["channel_id"]
+                       for row in other_channels if row["download_folder"]}
+        for row in other_paths:
+            directory = subscription_channel_directory(row["output_path"])
+            if directory.parent == shows:
+                owned_names[directory.name.casefold()] = row["channel_id"]
+
+        def belongs_to_other(path):
+            if path.is_symlink():
+                return True
+            if path.name.casefold() in owned_names:
+                return True
+            try:
+                owner = ET.parse(path / "tvshow.nfo").findtext("uniqueid[@type='youtube']")
+                return bool(owner and owner != channel_id)
+            except (OSError, ET.ParseError):
+                return False
+
+        candidates = {path for path in candidates if not belongs_to_other(path)}
+        if len(candidates) > 1:
+            raise RuntimeError("More than one existing folder matches this channel. Review its folders before downloading.")
+        old = next(iter(candidates), None)
+        if old:
+            name = safe_media_component(title if re.fullmatch(r"[A-Z0-9]{1,6}~[A-Z0-9]{1,3}", old.name) else old.name, 80)
+        elif not create:
+            return None
+        # Channel names are not unique. Keep separate channel IDs separate even
+        # if punctuation removal or a case-insensitive share makes names equal.
+        clashes = any(safe_media_component(row["title"], 80).casefold() == name.casefold() for row in other_channels)
+        if not old and (name.casefold() in owned_names or clashes or belongs_to_other(shows / name)):
+            name = safe_media_component(title, 60) + " [" + hashlib.sha256(channel_id.encode()).hexdigest()[:10] + "]"
+        target = shows / name
+        root = DOWNLOAD_ROOT.resolve()
+        for path in (target, old):
+            if path is not None and (path.is_symlink() or root not in path.resolve().parents):
+                raise RuntimeError("Channel folder must stay inside the downloads directory.")
+        if old and old != target:
+            if target.exists():
+                raise RuntimeError("Channel folder repair found an existing destination. No folders were merged or overwritten.")
+            with db() as conn:
+                active = conn.execute("SELECT 1 FROM downloads WHERE channel_id=? AND status IN ('downloading','processing') LIMIT 1", (channel_id,)).fetchone()
+            if active:
+                raise RuntimeError("Wait for this channel's current download to finish, then rescan to repair its folder name.")
+            old.rename(target)
+            try:
+                with db() as conn:
+                    for row in conn.execute("SELECT id,output_path FROM downloads WHERE COALESCE(output_path,'')!=''").fetchall():
+                        try:
+                            relative = Path(row["output_path"]).relative_to(old)
+                        except ValueError:
+                            continue
+                        conn.execute("UPDATE downloads SET output_path=? WHERE id=?", (str(target / relative), row["id"]))
+                    conn.execute("UPDATE subscriptions SET download_folder=? WHERE channel_id=?", (name, channel_id))
+            except Exception:
+                target.rename(old)
+                raise
+            invalidate_video_inventory()
+            log_activity("download_metadata", "Channel folder name repaired", f"{old.name} → {target.name}", "success", channel_id)
+        elif create:
+            target.mkdir(parents=True, exist_ok=True)
+        with db() as conn:
+            conn.execute("UPDATE subscriptions SET download_folder=? WHERE channel_id=?", (name, channel_id))
+        return target
+
+
+def prepare_subscription_metadata(sub, channel_dir, force=False):
+    """Write missing channel assets once, before the media transfer starts."""
+    if channel_dir is None:
+        return
+    with db() as conn:
+        saved = conn.execute("SELECT title FROM subscriptions WHERE channel_id=?", (sub.get("channel_id"),)).fetchone()
+    title = (saved["title"] if saved else None) or sub.get("channel_title") or sub.get("title") or "YouTube"
+    with channel_files_lock:
+        metadata_lock = channel_metadata_locks.setdefault(str(channel_dir), threading.RLock())
+    with metadata_lock:
+        write_direct_download_series_metadata(
+            {"channel_id": sub.get("channel_id"), "channel": title},
+            str(channel_dir / "Season 0000" / "metadata.mp4"),
+            write_nfo=setting_bool("downloader_write_nfo", True),
+            write_images=setting_bool("downloader_series_images", True),
+            channel_root=True, force=force,
+        )
+
+
+def record_download_notice(job_id, message):
+    row = download_job_row(job_id) or {}
+    notices = [part for part in str(row.get("warning") or "").split("\n") if part]
+    if message not in notices:
+        notices.append(str(message)[:700])
+        update_download_job(job_id, warning="\n".join(notices)[-2000:])
+        log_activity("download_metadata", "Download details", message, "warning", row.get("channel_id"))
+
+
 def _download_image(url):
     url = str(url or "").strip()
     if not url:
         return None
     response = requests.get(
         url,
-        timeout=30,
+        timeout=(5, 15),
         headers={"User-Agent": f"youtube-subscription-downloader/{VERSION}"},
     )
     response.raise_for_status()
@@ -5843,7 +5974,10 @@ def _write_jpeg_variant(image, path, size):
         size,
         method=Image.Resampling.LANCZOS,
     )
-    rendered.save(path, format="JPEG", quality=90, optimize=True)
+    try:
+        rendered.save(path, format="JPEG", quality=90, optimize=True)
+    finally:
+        rendered.close()
 
 
 def subscription_channel_directory(output_path):
@@ -5864,6 +5998,7 @@ def write_direct_download_series_metadata(
     write_nfo=True,
     write_images=True,
     channel_root=False,
+    force=False,
 ):
     """Write Emby-friendly artwork and optional NFO beside downloads."""
     if not output_path:
@@ -5885,7 +6020,7 @@ def write_direct_download_series_metadata(
     if video_description:
         description = video_description[:2000]
 
-    if write_nfo:
+    if write_nfo and (force or not (channel_dir / "tvshow.nfo").is_file()):
         root = ET.Element("tvshow")
         ET.SubElement(root, "title").text = str(channel_title)
         ET.SubElement(root, "sorttitle").text = str(channel_title)
@@ -5911,7 +6046,26 @@ def write_direct_download_series_metadata(
             xml_declaration=True,
         )
 
-    if not write_images:
+    if write_nfo and channel_root and Path(output_path).is_file():
+        episode = ET.Element("episodedetails")
+        published = _v3_parse_entry_date(info)
+        for key, value in {
+            "title": info.get("title") or Path(output_path).stem,
+            "showtitle": channel_title,
+            "plot": video_description,
+            "season": str(published.year) if published else "",
+            "episode": published.strftime("%m%d") + "00" if published else "",
+            "aired": published.isoformat() if published else "",
+        }.items():
+            if value:
+                ET.SubElement(episode, key).text = str(value)
+        if info.get("id"):
+            ET.SubElement(episode, "uniqueid", {"type": "youtube", "default": "true"}).text = str(info["id"])
+        ET.indent(episode, space="  ")
+        ET.ElementTree(episode).write(Path(output_path).with_suffix(".nfo"), encoding="utf-8", xml_declaration=True)
+
+    if not write_images or (not force and all((channel_dir / name).is_file() and (channel_dir / name).stat().st_size
+                                             for name in ("fanart.jpg", "poster.jpg", "banner.jpg"))):
         return
 
     if channel_root:
@@ -6241,7 +6395,8 @@ def ensure_single_download_emby_compatibility(output_path, job_id=None):
 def _v3_download_with_auth_retry(job, ydl_opts):
     """Run yt-dlp anonymously first and retry with configured auth only when useful."""
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with MediaYoutubeDL(ydl_opts, output_root=DOWNLOAD_ROOT,
+                            sidecar_notice=lambda message: record_download_notice(job["job_id"], message)) as ydl:
             info = ydl.extract_info(job["youtube_url"], download=True)
             return info, ydl, "anonymous"
     except Exception as anonymous_error:
@@ -6260,7 +6415,8 @@ def _v3_download_with_auth_retry(job, ydl_opts):
             auth_mode="cookies",
         )
         authenticated = _v3_authenticated_options(ydl_opts)
-        with yt_dlp.YoutubeDL(authenticated) as ydl:
+        with MediaYoutubeDL(authenticated, output_root=DOWNLOAD_ROOT,
+                            sidecar_notice=lambda message: record_download_notice(job["job_id"], message)) as ydl:
             info = ydl.extract_info(job["youtube_url"], download=True)
             return info, ydl, "cookies"
 
@@ -6276,7 +6432,13 @@ def run_download_job(job_id):
 
     if subscription_job:
         output_dir = DOWNLOAD_ROOT / "shows"
-        output_template = _v3_subscription_template()
+        try:
+            channel_dir = subscription_output_directory(job)
+            output_template = _v3_subscription_template(channel_dir)
+        except Exception as exc:
+            update_download_job(job_id, status="failed", phase="Channel folder error", error=str(exc)[:1500], finished_at=now_iso())
+            log_activity("download", "Channel folder error", str(exc), "error", job.get("channel_id"))
+            return
     else:
         folder_setting = (
             get_setting("emby_download_folder", "Emby Download")
@@ -6303,6 +6465,7 @@ def run_download_job(job_id):
         phase="Preparing YouTube download",
         started_at=now_iso(),
         error=None,
+        warning=None,
         failure_code=None,
         progress=0,
         auth_mode="anonymous",
@@ -6336,6 +6499,7 @@ def run_download_job(job_id):
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 30,
+        "windowsfilenames": True,
     }
 
     if source_type == "single":
@@ -6355,6 +6519,13 @@ def run_download_job(job_id):
         ydl_opts.update(_v3_custom_yt_dlp_options())
 
     try:
+        if subscription_job:
+            update_download_job(job_id, phase="Preparing channel artwork and NFO")
+            try:
+                prepare_subscription_metadata(job, channel_dir)
+            except Exception as exc:
+                record_download_notice(job_id, f"Channel metadata: {exc}")
+            update_download_job(job_id, phase="Preparing YouTube download")
         info, ydl, auth_mode = _v3_download_with_auth_retry(job, ydl_opts)
 
         output_path = ""
@@ -6426,6 +6597,7 @@ def run_download_job(job_id):
                     or setting_bool("downloader_series_images", True)
                 ):
                     raise StopIteration
+                update_download_job(job_id, status="processing", phase="Writing artwork and NFO", progress=99, speed="", eta="")
                 write_direct_download_series_metadata(
                     {**info, "channel_id": resolved_channel_id,
                      "channel": info.get("channel") or info.get("uploader") or job.get("channel_title")},
@@ -6447,13 +6619,7 @@ def run_download_job(job_id):
             except StopIteration:
                 pass
             except Exception as exc:
-                log_activity(
-                    "download_metadata",
-                    "Download metadata warning",
-                    f"{info.get('title') or job['youtube_url']}: {exc}",
-                    "warning",
-                    resolved_channel_id or None,
-                )
+                record_download_notice(job_id, f"Metadata: {exc}")
 
         update_download_job(
             job_id,
@@ -6475,6 +6641,9 @@ def run_download_job(job_id):
             failure_code=None,
             auth_mode=auth_mode,
         )
+        if subscription_job:
+            with db() as conn:
+                conn.execute("UPDATE subscriptions SET last_error=NULL WHERE channel_id=? AND last_error LIKE 'Video download failed:%'", (resolved_channel_id,))
 
         if job.get("remove_playlist_item") and job.get("playlist_item_id"):
             try:
@@ -6552,6 +6721,10 @@ def run_download_job(job_id):
             error=str(exc)[:1500],
             finished_at=now_iso(),
         )
+        if subscription_job:
+            with db() as conn:
+                conn.execute("UPDATE subscriptions SET last_error=? WHERE channel_id=?",
+                             (f"Video download failed: {job.get('title') or job['youtube_url']}: {exc}"[:1000], job.get("channel_id")))
         log_activity(
             "download",
             "Download failed",
@@ -14419,11 +14592,11 @@ def _v3_profile_ydl_options(profile_id):
     options["match_filter"] = match_filter
     return options
 
-def _v3_subscription_template():
+def _v3_subscription_template(channel_dir=None):
+    prefix = (str(channel_dir).replace("%", "%%") if channel_dir is not None else
+              str(DOWNLOAD_ROOT).replace("%", "%%") + "/shows/%(uploader,channel|Unknown Channel).80B")
     return str(
-        DOWNLOAD_ROOT
-        / "shows"
-        / "%(uploader,channel|Unknown Channel).80B"
+        Path(prefix)
         / "Season %(upload_date>%Y)s"
         / "s%(upload_date>%Y)sE%(upload_date>%m%d)s00 - %(title).180B [%(id)s].%(ext)s"
     )
@@ -14536,6 +14709,11 @@ def v3_scan_subscription(channel_id, deep=False, redownload=False):
     sub = dict(row)
     if not subscription_download_enabled(sub):
         return {"found": 0, "queued": 0, "message": "Downloads are disabled for this channel."}
+
+    try:
+        prepare_subscription_metadata(sub, subscription_output_directory(sub))
+    except Exception as exc:
+        log_activity("download_metadata", "Channel metadata preparation failed", str(exc), "warning", channel_id)
 
     entries = []
     if not deep:
@@ -15044,10 +15222,13 @@ def pinchflat_download_overview(queue_limit=100):
             "SELECT COUNT(*) AS c FROM downloads WHERE failure_code='membership_required'"
         ).fetchone()["c"]
         waiting_total = conn.execute("SELECT COUNT(*) AS c FROM downloads WHERE status='queued'").fetchone()["c"]
+        failed = conn.execute("SELECT * FROM downloads WHERE status='failed' ORDER BY finished_at DESC,id DESC LIMIT 1").fetchone()
     inventory = completed_video_inventory()
     last = inventory["rows"][0] if inventory["rows"] else None
     processing = [row for row in active_rows if row.get("status") == "processing"]
     latest = processing[-1] if processing else last
+    if not processing and failed and (not last or str(failed["finished_at"] or "") > str(last.get("finished_at") or "")):
+        latest = dict(failed)
 
     def item(row):
         video_id = str(row.get("video_id") or "")
@@ -15068,6 +15249,8 @@ def pinchflat_download_overview(queue_limit=100):
             "channel_id": channel_id,
             "channel_url": f"https://www.youtube.com/channel/{channel_id}" if channel_id else "",
             "state": row.get("status") or "",
+            "error": row.get("error") or "",
+            "warning": row.get("warning") or "",
             "status": row.get("phase") or str(row.get("status") or "").title(),
             "started_at": row.get("started_at") or "",
             "completed_at": row.get("finished_at") or "",
@@ -15251,7 +15434,7 @@ def reconcile_existing_library(force=False):
 
         for media_path in iterator:
             try:
-                if not media_path.is_file() or media_path.suffix.casefold() not in MEDIA_IMPORT_EXTENSIONS:
+                if not is_finished_media_file(media_path) or media_path.suffix.casefold() not in MEDIA_IMPORT_EXTENSIONS:
                     continue
             except OSError:
                 continue
@@ -15395,48 +15578,37 @@ def _v3_import_existing_library():
 
 
 def refresh_existing_channel_artwork():
-    """Refresh channel-level Emby artwork for existing subscription media."""
+    """Repair known channel folders and metadata, including subtitle-only folders."""
     try:
         with db() as conn:
-            rows = [
-                dict(row)
-                for row in conn.execute(
-                    """
-                    SELECT channel_id, channel_title, output_path
-                    FROM downloads
-                    WHERE status='completed'
-                      AND source_type LIKE 'subscription%'
-                      AND COALESCE(channel_id,'')!=''
-                      AND COALESCE(output_path,'')!=''
-                    GROUP BY channel_id, output_path
-                    """
-                ).fetchall()
-            ]
-        seen = set()
-        for row in rows:
-            output_path = Path(str(row.get("output_path") or ""))
-            if not output_path.exists():
-                continue
-            channel_dir = subscription_channel_directory(output_path)
-            if channel_dir in seen:
-                continue
-            seen.add(channel_dir)
-            fake_info = {
-                "channel_id": row.get("channel_id") or "",
-                "channel": row.get("channel_title") or "YouTube",
-                "uploader": row.get("channel_title") or "YouTube",
-            }
+            channels = {row["channel_id"]: dict(row) for row in conn.execute("SELECT channel_id,title,download_folder FROM subscriptions").fetchall()}
+            for row in conn.execute("SELECT channel_id,channel_title FROM downloads WHERE source_type LIKE 'subscription%' AND COALESCE(channel_id,'')!='' GROUP BY channel_id").fetchall():
+                channels.setdefault(row["channel_id"], {"channel_id": row["channel_id"], "title": row["channel_title"]})
+        checked = failed = 0
+        for sub in channels.values():
             try:
-                write_direct_download_series_metadata(
-                    fake_info,
-                    str(output_path),
-                    write_nfo=setting_bool("downloader_write_nfo", True),
-                    write_images=setting_bool("downloader_series_images", True),
-                    channel_root=True,
-                )
+                channel_dir = subscription_output_directory(sub, create=False)
+                if channel_dir is None:
+                    continue
+                checked += 1
+                prepare_subscription_metadata(sub, channel_dir, force=True)
+                if setting_bool("downloader_write_nfo", True):
+                    with db() as conn:
+                        media_rows = conn.execute("SELECT * FROM downloads WHERE channel_id=? AND status='completed' AND source_type LIKE 'subscription%'", (sub["channel_id"],)).fetchall()
+                    for media in media_rows:
+                        path = Path(str(media["output_path"] or ""))
+                        if not is_finished_media_file(path):
+                            continue
+                        info = _read_media_info_sidecar(path)
+                        for key, value in {"id": media["video_id"], "title": media["title"], "channel_id": sub["channel_id"], "channel": sub["title"], "published_at": media["published_at"]}.items():
+                            if not info.get(key):
+                                info[key] = value
+                        write_direct_download_series_metadata(info, str(path), write_nfo=True, write_images=False, channel_root=True)
             except Exception as exc:
-                log_activity("download_metadata", "Channel artwork repair failed", str(exc), "warning", row.get("channel_id"))
-        log_activity("download_metadata", "Channel artwork repair finished", f"Checked {len(seen)} channel folders using saved media options.", "success")
+                failed += 1
+                log_activity("download_metadata", "Channel repair failed", str(exc), "warning", sub.get("channel_id"))
+        storage_snapshot(force=True)
+        log_activity("download_metadata", "Channel repair finished", f"Checked {checked} channel folders; {failed} need attention. Media options were respected.", "warning" if failed else "success")
     except Exception as exc:
         log_activity("download_metadata", "Channel artwork repair failed", str(exc), "warning")
 
@@ -16254,7 +16426,7 @@ def index():
     ) if storage_capacity else 0.0
     pinchflat_stats = pinchflat_stats_summary(profiles, storage)
     for sub in subs:
-        sub["disk_bytes"] = channel_disk_usage(sub.get("title"), storage)
+        sub["disk_bytes"] = channel_disk_usage(sub.get("title"), storage, sub.get("download_folder") or safe_media_component(sub.get("title"), 80))
         sub["disk_usage"] = format_bytes(sub["disk_bytes"])
 
     video_inventory = completed_video_inventory()

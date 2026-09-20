@@ -168,6 +168,8 @@ def parse_custom_yt_dlp_options(raw):
         "cookiefile",
         "cookiesfrombrowser",
         "paths",
+        "windowsfilenames",
+        "restrictfilenames",
     }
     return {key: val for key, val in value.items() if key not in blocked}
 

@@ -111,7 +111,8 @@ class DownloadTests(unittest.TestCase):
         row=app.download_job_row('single.mp4')
         self.assertEqual(row['title'], 'New title')
         self.assertEqual(row['video_id'], 'newvideo123')
-        self.assertEqual(row['status'], 'processing')
+        self.assertEqual(row['status'], 'downloading')
+        self.assertNotIn('FFmpeg', row['phase'])
 
     def test_exact_final_path_never_selects_other_video_or_sidecar(self):
         other=self.job('different [zzzzzzzzzzz].mp4')
@@ -154,7 +155,7 @@ class DownloadTests(unittest.TestCase):
         app.set_setting('downloader_compatibility_profile','automatic')
         info={'id':'abcdefghijk','title':'Example video','filepath':str(path),'upload_date':'20260101'}
         def metadata(info, output, **kwargs):
-            self.assertEqual(app.download_job_row(job_id)['status'],'processing')
+            self.assertIn(app.download_job_row(job_id)['status'], ('downloading','processing'))
             self.assertEqual(info['channel_id'],'UCsample')
             self.assertTrue(kwargs['channel_root'])
         with patch.object(app,'_v3_download_with_auth_retry',return_value=(info,Mock(),'anonymous')), patch.object(app,'write_direct_download_series_metadata',side_effect=metadata), patch.object(app,'storage_snapshot'), patch.object(app,'emby_configured',return_value=False):
@@ -192,7 +193,7 @@ class DownloadTests(unittest.TestCase):
         app.update_download_job('failed.mp4',status='failed',phase='Failed')
         data=app.pinchflat_download_overview()
         self.assertEqual(data['summary']['completed'],0)
-        self.assertIsNone(data['latest_download'])
+        self.assertEqual(data['latest_download']['state'], 'failed')
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
     def test_real_compatibility_conversion(self):
