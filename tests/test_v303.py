@@ -89,12 +89,12 @@ class DownloadTests(unittest.TestCase):
         app.invalidate_video_inventory()
         self.assertEqual(app.completed_video_inventory()['count'], 0)
 
-    def test_processing_stays_active_and_latest_until_completion(self):
+    def test_processing_stays_active_and_latest_stays_completed(self):
         self.job('previous.mp4')
         self.job('new.mp4', status='processing', source='single')
         data = app.pinchflat_download_overview()
-        self.assertEqual(data['latest_download']['job_id'], 'new.mp4')
-        self.assertIn('FFmpeg', data['latest_download']['status'])
+        self.assertEqual(data['latest_download']['job_id'], 'previous.mp4')
+        self.assertIn('FFmpeg', data['active'][0]['status'])
         self.assertEqual(data['active'][0]['source_type'], 'single')
         self.assertEqual(data['last_downloaded']['job_id'], 'previous.mp4')
         self.assertEqual(data['summary']['completed'], 1)
@@ -193,7 +193,7 @@ class DownloadTests(unittest.TestCase):
         app.update_download_job('failed.mp4',status='failed',phase='Failed')
         data=app.pinchflat_download_overview()
         self.assertEqual(data['summary']['completed'],0)
-        self.assertEqual(data['latest_download']['state'], 'failed')
+        self.assertIsNone(data['latest_download'])
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
     def test_real_compatibility_conversion(self):

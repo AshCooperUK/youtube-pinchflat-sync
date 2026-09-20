@@ -2168,6 +2168,17 @@
     .activity-item { border-bottom:1px solid var(--line); padding:11px 0; }
     .activity-item:last-child { border-bottom:0; }
     .activity-time { color:var(--muted); font-size:12px; }
+    .activity-video { display:flex; align-items:flex-start; gap:12px; }
+    .activity-video-link { flex:0 0 112px; }
+    .activity-video-thumb { display:block; width:112px; height:63px; object-fit:cover; border-radius:7px; background:var(--panel); }
+    .activity-copy { min-width:0; flex:1; overflow-wrap:anywhere; }
+    .activity-message { white-space:pre-wrap; }
+    .activity-video-title { color:var(--muted); margin-top:3px; font-size:13px; }
+    @media(max-width:600px) {
+      .activity-video { gap:9px; }
+      .activity-video-link { flex-basis:80px; }
+      .activity-video-thumb { width:80px; height:45px; }
+    }
 
     .log-tile-head {
       display:flex;
@@ -3365,9 +3376,6 @@
     #summary-tiles .latest-download-summary-button { grid-template-columns:84px minmax(0,1fr); gap:10px; margin-top:10px; }
     #summary-tiles .latest-download-summary-button img { width:84px; height:52px; object-fit:cover; }
     #summary-tiles .latest-download-summary-copy strong { font-size:13px; }
-    .latest-download-status { margin-top:9px; line-height:1.3; }
-    #latest-download-summary-detail { display:-webkit-box; -webkit-line-clamp:2; line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; margin-top:4px; }
-    .latest-download-progress { display:block; width:100%; height:5px; margin-top:7px; accent-color:var(--amber); }
     .source-toggle input:focus-visible + .toggle-track { outline:2px solid #9dc1ff; outline-offset:3px; }
     .media-toggle-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:24px; }
     #settings-dialog .media-option { display:flex; gap:10px; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); white-space:normal; margin:0; }
@@ -3517,9 +3525,6 @@
           <span id="latest-download-summary-channel">YouTube</span>
         </span>
       </button>
-      <div id="latest-download-summary-status" class="latest-download-status muted small" role="status"></div>
-      <div id="latest-download-summary-detail" class="small muted hidden"></div>
-      <progress id="latest-download-summary-progress" class="latest-download-progress hidden" max="100" aria-label="Media processing progress"></progress>
     </div>
     {% endif %}
 
@@ -5745,9 +5750,24 @@
       </div>
 
       <div class="setting-box" style="margin-top:14px">
-        <h3>Activity</h3>
-        <p class="muted small">Recent automation, source, download, retention and settings events.</p>
-        {% if activity_rows %}{% for item in activity_rows %}<div class="activity-item"><strong class="{% if item['severity'] == 'warning' %}warn{% elif item['severity'] == 'success' %}ok{% elif item['severity'] == 'error' %}bad{% endif %}">{{ item["title"] }}</strong><div>{{ item["message"] }}</div><div class="activity-time">{{ item["created_at"] }} · {{ item["event_type"] }}</div></div>{% endfor %}{% else %}<div class="empty">No activity has been recorded yet.</div>{% endif %}
+        <div class="log-tile-head">
+          <div><h3>Activity</h3><p class="muted small">Download progress, completions and failures, with video thumbnails. Refreshes while this tab is open.</p></div>
+          <button class="btn secondary smallbtn" type="button" id="activity-refresh" onclick="loadActivity(true)">Refresh activity</button>
+        </div>
+        <div id="activity-list" aria-label="Activity log">
+          {% for item in activity_rows %}
+          <div class="activity-item {% if item.video_id %}activity-video{% endif %}" data-activity-id="{{ item.id }}">
+            {% if item.video_id %}<a class="activity-video-link" href="{{ item.video_url }}" target="_blank" rel="noopener noreferrer" aria-label="View {{ item.video_title or 'video' }} on YouTube"><img class="activity-video-thumb" src="{{ item.thumbnail_url }}" alt="{{ item.video_title or 'Video thumbnail' }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}'"></a>{% endif %}
+            <div class="activity-copy">
+              <strong class="{% if item.severity == 'warning' %}warn{% elif item.severity == 'success' %}ok{% elif item.severity == 'error' %}bad{% endif %}">{{ item.title }}</strong>
+              {% if item.video_title %}<div class="activity-video-title">{{ item.video_title }}</div>{% endif %}
+              <div class="activity-message">{{ item.message }}</div>
+              <div class="activity-time">{{ item.created_at }} · {{ item.event_type }}</div>
+            </div>
+          </div>
+          {% else %}<div class="empty">No activity has been recorded yet.</div>{% endfor %}
+        </div>
+        <div id="activity-refresh-status" class="muted small" role="status"></div>
       </div>
 
       <div class="setting-box" style="margin-top:14px">
@@ -5762,7 +5782,7 @@
       <div class="setting-box" style="margin-top:14px">
         <h3>Recent direct downloads</h3>
         <p class="muted small">One-time Downloads and Emby Download playlist jobs. The effective One-time settings live in Downloads.</p>
-        {% if recent_downloads %}{% for item in recent_downloads %}<div class="activity-item"><strong class="{% if item['status'] == 'completed' %}ok{% elif item['status'] == 'failed' %}bad{% elif item['status'] in ['downloading','processing'] %}warn{% endif %}">{{ item["title"] or item["youtube_url"] }}</strong><div>{{ item["source_type"] }} · {{ item["status"] }} · {{ "%.0f"|format(item["progress"] or 0) }}%</div>{% if item["error"] %}<div class="bad small">{{ item["error"] }}</div>{% endif %}<div class="activity-time">{{ item["created_at"] }}</div></div>{% endfor %}{% else %}<div class="muted small">No direct downloads yet.</div>{% endif %}
+        {% if recent_downloads %}{% for item in recent_downloads %}<div class="activity-item {% if item['video_id'] %}activity-video{% endif %}">{% if item['video_id'] %}<a class="activity-video-link" href="https://www.youtube.com/watch?v={{ item['video_id']|urlencode }}" target="_blank" rel="noopener noreferrer"><img class="activity-video-thumb" src="https://i.ytimg.com/vi/{{ item['video_id']|urlencode }}/hqdefault.jpg" alt="{{ item['title'] or 'Video thumbnail' }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}'"></a>{% endif %}<div class="activity-copy"><strong class="{% if item['status'] == 'completed' %}ok{% elif item['status'] == 'failed' %}bad{% elif item['status'] in ['downloading','processing'] %}warn{% endif %}">{{ item["title"] or item["youtube_url"] }}</strong><div>{{ item["source_type"] }} · {{ item["status"] }} · {{ "%.0f"|format(item["progress"] or 0) }}%</div>{% if item["error"] %}<div class="bad small">{{ item["error"] }}</div>{% endif %}<div class="activity-time">{{ item["created_at"] }}</div></div></div>{% endfor %}{% else %}<div class="muted small">No direct downloads yet.</div>{% endif %}
       </div>
     </section>
     {% endif %}
@@ -6307,7 +6327,7 @@ function renderDownloaderActiveDownloads(data) {
     .map(group => [group.querySelector("summary")?.textContent, group.open]));
   target.innerHTML = "";
 
-  if (!active.length && !waiting && !(data.recent || []).length) {
+  if (!active.length && !waiting) {
     const empty = document.createElement("div");
     empty.className = "pinchflat-download-empty";
     empty.textContent = waiting
@@ -6440,7 +6460,6 @@ function renderDownloaderActiveDownloads(data) {
     more.textContent = "Open the queue button to see all waiting downloads.";
     target.appendChild(more);
   }
-  appendDownloadResults(target, "Recent results · last 24 hours", Array.isArray(data.recent) ? data.recent : [], expandedResults.get("Recent results · last 24 hours") ?? !active.length);
 }
 
 
@@ -6598,7 +6617,7 @@ function renderDownloaderLastDownload(data) {
   const target = document.getElementById("pinchflat-last-download");
   if (!target) return;
 
-  const item = data.latest_download || data.last_downloaded;
+  const item = data.last_downloaded?.state === "completed" ? data.last_downloaded : null;
 
   target.innerHTML = "";
 
@@ -6626,7 +6645,7 @@ function renderDownloaderLastDownload(data) {
 
   const label = document.createElement("div");
   label.className = "pinchflat-last-label";
-  label.textContent = item.state === "processing" ? (item.status || "Processing media") : "Last downloaded";
+  label.textContent = "Latest Downloaded";
 
   const title = pinchflatMediaTitleButton(
     item,
@@ -6638,21 +6657,7 @@ function renderDownloaderLastDownload(data) {
 
   const channel = pinchflatChannelElement(item);
 
-  const completed = document.createElement("span");
-  completed.textContent = item.completed_at
-    ? `Completed ${safeDateTime(item.completed_at)}`
-    : (item.state === "processing" ? "Processing media" : "Completed");
-
-  meta.append(
-    channel,
-    completed
-  );
-
-  if (item.file_size_text && item.file_size_text !== "0 B") {
-    const size = document.createElement("span");
-    size.textContent = item.file_size_text;
-    meta.appendChild(size);
-  }
+  meta.append(channel);
 
   body.append(
     label,
@@ -6665,35 +6670,19 @@ function renderDownloaderLastDownload(data) {
 
 
 function renderLatestDownloadSummary(item) {
+  // An unexpected in-flight result must never replace the successful video.
+  if (item && item.state !== "completed") return;
   latestDownloadSummaryItem = item || null;
-
   const button = document.getElementById("latest-download-summary-button");
   const thumb = document.getElementById("latest-download-summary-thumb");
   const title = document.getElementById("latest-download-summary-title");
   const channel = document.getElementById("latest-download-summary-channel");
-  const status = document.getElementById("latest-download-summary-status");
-  const progress = document.getElementById("latest-download-summary-progress");
   if (!button || !thumb || !title || !channel) return;
-  const processing = item?.state === "processing";
-  const failed = item?.state === "failed";
-  const detail = document.getElementById("latest-download-summary-detail");
-  if (detail) {
-    detail.textContent = item?.error || item?.warning || "";
-    detail.title = detail.textContent;
-    detail.classList.toggle("hidden", !detail.textContent);
-    detail.classList.toggle("bad", failed);
-  }
-  if (status) {
-    status.textContent = item ? (failed ? (item.status || "Failed") : processing ? (item.status || "Processing media") : "Completed") : "";
-    status.classList.toggle("warn", processing || !!item?.warning);
-    status.classList.toggle("bad", failed);
-    status.classList.toggle("ok", !!item && !processing && !failed && !item?.warning);
-  }
-  if (progress) {
-    progress.classList.toggle("hidden", !processing);
-    progress.value = Math.max(0, Math.min(100, Number(item?.progress || 0)));
-  }
-
+  channel.onclick = null;
+  channel.style.cursor = "default";
+  channel.title = "";
+  title.title = "";
+  thumb.onerror = () => { thumb.onerror = null; thumb.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
   if (!item) {
     button.disabled = true;
     button.onclick = null;
@@ -6702,11 +6691,9 @@ function renderLatestDownloadSummary(item) {
     channel.textContent = "Downloader";
     return;
   }
-
   thumb.src = item.thumbnail_url || "{{ url_for('static', filename='channel-placeholder.svg') }}";
-  thumb.onerror = () => { thumb.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
   title.textContent = item.title || "YouTube video";
-  title.title = item.title || "YouTube video";
+  title.title = title.textContent;
   channel.textContent = item.channel || item.channel_title || "Downloader";
   channel.title = item.channel_id ? `View ${channel.textContent} channel details` : channel.textContent;
   channel.style.cursor = item.channel_id ? "pointer" : "default";
@@ -6715,8 +6702,8 @@ function renderLatestDownloadSummary(item) {
     event.stopPropagation();
     openChannelDetails(item.channel_id);
   } : null;
-  button.disabled = processing || failed || !item.youtube_id;
-  button.onclick = !processing && !failed && item.youtube_id ? event => {
+  button.disabled = !item.youtube_id;
+  button.onclick = item.youtube_id ? event => {
     if (event?.target === channel) return;
     openDownloaderMedia(item);
   } : null;
@@ -6860,7 +6847,7 @@ async function loadDownloaderDownloadOverview(force=false) {
     renderDownloaderActiveDownloads(data);
     renderDownloaderTasks(data);
     renderDownloaderLastDownload(data);
-    renderLatestDownloadSummary(data.latest_download || data.last_downloaded || null);
+    renderLatestDownloadSummary(data.last_downloaded || null);
 
     const newLastDownloadedId =
       data?.last_downloaded?.youtube_id
@@ -10342,6 +10329,90 @@ function toggleShortsSound() {
 
 let pinchflatLogsLoaded = false;
 
+let activityLoading = false;
+let activitySnapshot = "";
+
+async function loadActivity(force=false) {
+  const target = document.getElementById("activity-list");
+  const button = document.getElementById("activity-refresh");
+  const status = document.getElementById("activity-refresh-status");
+  if (!target || activityLoading) return;
+  activityLoading = true;
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch("/api/activity", {headers:{"Accept":"application/json"}, cache:"no-store"});
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Activity could not be loaded.");
+    const rows = Array.isArray(data.activity) ? data.activity : [];
+    const snapshot = JSON.stringify(rows);
+    if (force || snapshot !== activitySnapshot) {
+      const fragment = document.createDocumentFragment();
+      for (const item of rows) {
+        const row = document.createElement("div");
+        const videoId = /^[A-Za-z0-9_-]{11}$/.test(item.video_id || "") ? item.video_id : "";
+        row.className = "activity-item" + (videoId ? " activity-video" : "");
+        row.dataset.activityId = String(item.id);
+        if (videoId) {
+          const link = document.createElement("a");
+          link.className = "activity-video-link";
+          link.href = `https://www.youtube.com/watch?v=${videoId}`;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.setAttribute("aria-label", `View ${item.video_title || "video"} on YouTube`);
+          const image = document.createElement("img");
+          image.className = "activity-video-thumb";
+          image.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+          image.alt = item.video_title || "Video thumbnail";
+          image.loading = "lazy";
+          image.onerror = () => { image.onerror = null; image.src = "{{ url_for('static', filename='channel-placeholder.svg') }}"; };
+          link.appendChild(image);
+          row.appendChild(link);
+        }
+        const body = document.createElement("div");
+        body.className = "activity-copy";
+        const title = document.createElement("strong");
+        title.className = ({warning:"warn",success:"ok",error:"bad"})[item.severity] || "";
+        title.textContent = item.title || "Activity";
+        body.appendChild(title);
+        if (item.video_title) {
+          const videoTitle = document.createElement("div");
+          videoTitle.className = "activity-video-title";
+          videoTitle.textContent = item.video_title;
+          body.appendChild(videoTitle);
+        }
+        const message = document.createElement("div");
+        message.className = "activity-message";
+        message.textContent = item.message || "";
+        const time = document.createElement("div");
+        time.className = "activity-time";
+        time.textContent = `${safeDateTime(item.created_at)} · ${item.event_type || ""}`;
+        body.append(message, time);
+        row.appendChild(body);
+        fragment.appendChild(row);
+      }
+      if (!rows.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No activity has been recorded yet.";
+        fragment.appendChild(empty);
+      }
+      target.replaceChildren(fragment);
+      activitySnapshot = snapshot;
+    }
+    if (status) status.textContent = "";
+  } catch (error) {
+    if (status) status.textContent = error.message || String(error);
+  } finally {
+    activityLoading = false;
+    if (button) button.disabled = false;
+  }
+}
+
+setInterval(() => {
+  if (!document.hidden && document.getElementById("settings-dialog")?.open
+      && document.querySelector('[data-panel="diagnostics"]')?.classList.contains("active")) loadActivity();
+}, 10000);
+
 async function loadDownloaderLogs(force=false) {
   const output = document.getElementById("pinchflat-log-output");
   const status = document.getElementById("pinchflat-log-status");
@@ -10925,7 +10996,10 @@ function showTab(name) {
     loadRetentionChannels(false);
     loadRetentionRunStatus();
   }
-  if (name === "diagnostics") loadDownloaderLogs();
+  if (name === "diagnostics") {
+    loadDownloaderLogs();
+    loadActivity();
+  }
 }
 
 bindSettingsDynamicListeners();
@@ -13155,13 +13229,13 @@ function startDeferredDashboardWork() {
     renderDownloaderActiveDownloads(serverInitialDownloadOverview);
     renderDownloaderTasks(serverInitialDownloadOverview);
     renderDownloaderLastDownload(serverInitialDownloadOverview);
-    renderLatestDownloadSummary(serverInitialDownloadOverview.latest_download || serverInitialDownloadOverview.last_downloaded || null);
+    renderLatestDownloadSummary(serverInitialDownloadOverview.last_downloaded || null);
   }
   startDownloaderDownloadPolling();
   {% elif page_view.load_summary and (page_view.show_summary_latest_download or page_view.show_summary_pinchflat) %}
   if (serverInitialDownloadOverview) {
     renderDownloaderTasks(serverInitialDownloadOverview);
-    renderLatestDownloadSummary(serverInitialDownloadOverview.latest_download || serverInitialDownloadOverview.last_downloaded || null);
+    renderLatestDownloadSummary(serverInitialDownloadOverview.last_downloaded || null);
   }
   setInterval(() => loadDownloaderDownloadOverview(false), 5000);
   {% endif %}

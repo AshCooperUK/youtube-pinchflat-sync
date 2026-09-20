@@ -37,7 +37,7 @@ class MediaTests(unittest.TestCase):
         hook({'status': 'finished', 'filename': 'Example.f137.mp4', 'info_dict': {'id': 'abcdefghijk'}})
         self.assertEqual(app.download_job_row('test.mp4')['status'], 'downloading')
         app._download_postprocessor_hook('test.mp4', 85)({'status': 'started', 'postprocessor': 'Merger'})
-        self.assertEqual(app.pinchflat_download_overview()['latest_download']['status'], 'FFmpeg · Merger')
+        self.assertEqual(app.pinchflat_download_overview()['active'][0]['status'], 'FFmpeg · Merger')
 
     def test_subtitle_failure_is_optional_and_does_not_hide_media_errors(self):
         notices = []
@@ -158,8 +158,8 @@ class MediaTests(unittest.TestCase):
         self.job('failed.mp4',status='failed',exists=False)
         app.update_download_job('failed.mp4',error='Video stream unavailable')
         data=app.pinchflat_download_overview()
-        self.assertEqual(data['latest_download']['state'],'failed')
-        self.assertEqual(data['latest_download']['error'],'Video stream unavailable')
+        self.assertEqual(data['latest_download']['state'],'completed')
+        self.assertEqual(data['recent'][0]['error'],'Video stream unavailable')
         self.assertEqual(data['summary']['completed'],1)
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')

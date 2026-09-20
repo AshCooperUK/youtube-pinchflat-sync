@@ -49,7 +49,7 @@ from downloader_auth import (
 )
 from downloader_media import MediaYoutubeDL, SUBTITLE_EXTENSIONS, safe_media_component
 
-VERSION = "3.0.5"
+VERSION = "3.0.6"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -814,6 +814,9 @@ def init_db():
             """
         )
 
+        ensure_column(conn, "activity", "video_id", "TEXT")
+        ensure_column(conn, "activity", "video_title", "TEXT")
+        ensure_column(conn, "activity", "job_id", "TEXT")
         ensure_column(conn, "cleanup_jobs", "source_id", "TEXT")
         ensure_column(
             conn,
@@ -2211,17 +2214,100 @@ def auth_context():
     }
 
 
-def log_activity(event_type, title, message, severity="info", channel_id=None):
+def activity_video_id(value):
+    value = str(value or "").strip()
+    return value if re.fullmatch(r"[A-Za-z0-9_-]{11}", value) else ""
+
+
+def activity_video_id_from_message(message):
+    """Recover video identity from older URLs, filenames and yt-dlp errors."""
+    text = str(message or "")
+    for url in re.findall(r"https?://[^\s<>\"']+", text):
+        video_id = activity_video_id(youtube_video_id_from_url(url))
+        if video_id:
+            return video_id
+    match = re.search(r"\[youtube\]\s+([A-Za-z0-9_-]{11})(?=[:\s]|$)", text)
+    if not match:
+        match = re.search(r"\[([A-Za-z0-9_-]{11})\]\.(?:mp4|mkv|webm|m4v|mov|m4a|mp3|opus)\b", text, re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def log_activity(event_type, title, message, severity="info", channel_id=None, *, video_id=None, video_title=None, job_id=None):
     with db() as conn:
+        if job_id:
+            job = conn.execute("SELECT * FROM downloads WHERE job_id=?", (job_id,)).fetchone()
+            if job:
+                video_id = video_id or job["video_id"] or youtube_video_id_from_url(job["youtube_url"])
+                video_title = video_title or job["title"]
+                channel_id = channel_id or dict(job).get("channel_id")
+        video_id = activity_video_id(video_id) or activity_video_id_from_message(message)
         conn.execute(
             """
             INSERT INTO activity (
-                created_at, event_type, title, message, severity, channel_id
+                created_at, event_type, title, message, severity, channel_id, video_id, video_title, job_id
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (now_iso(), event_type, title, message, severity, channel_id),
+            (now_iso(), event_type, title, message, severity, channel_id, video_id or None, video_title, job_id),
         )
+
+
+def activity_view_rows(rows):
+    """Add trusted thumbnail links, including identifiable pre-v3.0.6 events."""
+    items = [dict(row) for row in rows]
+    titles = set()
+    for item in items:
+        item["video_id"] = activity_video_id(item.get("video_id")) or activity_video_id_from_message(item.get("message"))
+        item["candidate_titles"] = []
+        if not item["video_id"] and item["event_type"] in {"download", "download_metadata", "emby_download", "emby"}:
+            message = str(item.get("message") or "")
+            # Older download messages start with the exact saved video title.
+            for boundary in re.finditer(r": | queued from | completed\.| downloaded and | converted to ", message):
+                candidate = message[:boundary.start()].strip()
+                item["candidate_titles"].append(candidate)
+                titles.add(candidate)
+    by_title = {}
+    jobs = {}
+    with db() as conn:
+        job_ids = list({item.get("job_id") for item in items if item.get("job_id")})
+        for offset in range(0, len(job_ids), 200):
+            batch = job_ids[offset:offset + 200]
+            for row in conn.execute(f"SELECT * FROM downloads WHERE job_id IN ({','.join('?' for _ in batch)})", batch):
+                jobs[row["job_id"]] = dict(row)
+        titles = sorted(titles)
+        for offset in range(0, len(titles), 200):
+            batch = titles[offset:offset + 200]
+            for row in conn.execute(f"SELECT DISTINCT video_id,title,channel_id FROM downloads WHERE title IN ({','.join('?' for _ in batch)})", batch):
+                by_title.setdefault(row["title"], []).append(dict(row))
+    for item in items:
+        job = jobs.get(item.get("job_id"), {})
+        item["video_id"] = item["video_id"] or activity_video_id(job.get("video_id")) or activity_video_id(youtube_video_id_from_url(job.get("youtube_url")))
+        item["video_title"] = item.get("video_title") or job.get("title") or ""
+        if not item["video_id"]:
+            for candidate in sorted(item["candidate_titles"], key=len, reverse=True):
+                matches = {activity_video_id(row["video_id"]) for row in by_title.get(candidate, [])
+                           if not item.get("channel_id") or row["channel_id"] == item["channel_id"]}
+                matches.discard("")
+                if len(matches) == 1:
+                    item["video_id"] = matches.pop()
+                    item["video_title"] = candidate
+                    break
+        item.pop("candidate_titles", None)
+        video_id = item["video_id"]
+        item["thumbnail_url"] = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""
+        item["video_url"] = f"https://www.youtube.com/watch?v={video_id}" if video_id else ""
+    return items
+
+
+def recent_activity(limit=60):
+    with db() as conn:
+        rows = conn.execute("SELECT * FROM activity ORDER BY id DESC LIMIT ?", (max(1, min(int(limit), 200)),)).fetchall()
+    return activity_view_rows(rows)
+
+
+@app.get("/api/activity")
+def activity_api():
+    return jsonify({"ok": True, "activity": recent_activity()})
 
 
 def record_api_usage(method, units, success=True):
@@ -5681,6 +5767,7 @@ def enqueue_download(
         f"{title or youtube_url} queued from {source_type}.",
         "info",
         channel_id,
+        job_id=job_id,
     )
     return job_id, True
 
@@ -5699,10 +5786,13 @@ def update_download_job(job_id, **values):
     assignments = ", ".join(f"{key} = ?" for key in values)
     params = list(values.values()) + [job_id]
     with db() as conn:
+        previous = conn.execute("SELECT status,phase FROM downloads WHERE job_id=?", (job_id,)).fetchone() if values.get("phase") else None
         conn.execute(
             f"UPDATE downloads SET {assignments} WHERE job_id = ?",
             params,
         )
+    if previous and values.get("status", previous["status"]) in {"downloading", "processing"} and values["phase"] != previous["phase"]:
+        log_activity("download_progress", "Download progress", values["phase"], job_id=job_id)
     if values.get("status") in {"completed", "failed", "retention_deleted"}:
         invalidate_video_inventory()
 
@@ -5959,7 +6049,7 @@ def record_download_notice(job_id, message):
     if message not in notices:
         notices.append(str(message)[:700])
         update_download_job(job_id, warning="\n".join(notices)[-2000:])
-        log_activity("download_metadata", "Download details", message, "warning", row.get("channel_id"))
+        log_activity("download_metadata", "Download details", message, "warning", row.get("channel_id"), job_id=job_id)
 
 
 def _download_image(url):
@@ -6446,7 +6536,7 @@ def run_download_job(job_id):
             output_template = _v3_subscription_template(channel_dir)
         except Exception as exc:
             update_download_job(job_id, status="failed", phase="Channel folder error", error=str(exc)[:1500], finished_at=now_iso())
-            log_activity("download", "Channel folder error", str(exc), "error", job.get("channel_id"))
+            log_activity("download", "Channel folder error", str(exc), "error", job.get("channel_id"), job_id=job_id)
             return
     else:
         folder_setting = (
@@ -6588,6 +6678,7 @@ def run_download_job(job_id):
                         f"{info.get('title') or job['youtube_url']} converted to H.264 + AAC in MP4.",
                         "success",
                         job.get("channel_id"),
+                        job_id=job_id,
                     )
                 output_path = compatible_path or output_path
             except Exception as exc:
@@ -6662,6 +6753,7 @@ def run_download_job(job_id):
                     "Emby Download item completed",
                     f"{info.get('title') or job['youtube_url']} downloaded and removed from the playlist.",
                     "success",
+                    job_id=job_id,
                 )
             except Exception as exc:
                 log_activity(
@@ -6669,6 +6761,7 @@ def run_download_job(job_id):
                     "Playlist cleanup failed",
                     f"Download completed, but the playlist item could not be removed: {exc}",
                     "warning",
+                    job_id=job_id,
                 )
         else:
             log_activity(
@@ -6677,6 +6770,7 @@ def run_download_job(job_id):
                 f"{info.get('title') or job['youtube_url']} completed.",
                 "success",
                 resolved_channel_id or None,
+                job_id=job_id,
             )
 
         storage_snapshot(force=True)
@@ -6703,6 +6797,7 @@ def run_download_job(job_id):
                     f"Queued the targeted Emby scan and metadata refresh after {info.get('title') or job['youtube_url']} completed.",
                     "success",
                     resolved_channel_id or None,
+                    job_id=job_id,
                 )
             except Exception as exc:
                 log_activity(
@@ -6711,13 +6806,14 @@ def run_download_job(job_id):
                     f"{info.get('title') or job['youtube_url']}: {exc}",
                     "warning",
                     resolved_channel_id or None,
+                    job_id=job_id,
                 )
 
     except SubscriptionMediaExcluded as exc:
         update_download_job(job_id, status="skipped", phase=str(exc), failure_code=exc.code,
                             error=None, progress=0, speed="", eta="", finished_at=now_iso())
         log_activity("download", "Download skipped", f"{job.get('title') or job['youtube_url']}: {exc}",
-                     "info", job.get("channel_id"))
+                     "info", job.get("channel_id"), job_id=job_id)
     except Exception as exc:
         failure_code = classify_yt_dlp_error(exc)
         update_download_job(
@@ -6745,6 +6841,7 @@ def run_download_job(job_id):
             f"{job.get('title') or job['youtube_url']}: {exc}",
             "error",
             job.get("channel_id"),
+            job_id=job_id,
         )
 
 def download_worker():
@@ -14260,6 +14357,7 @@ ADMIN_ONLY_GET_ENDPOINTS = {
     "google_login",
     "google_callback",
     "pinchflat_logs_api",
+    "activity_api",
 }
 
 
@@ -15277,7 +15375,6 @@ def pinchflat_download_overview(queue_limit=100):
             "SELECT COUNT(*) AS c FROM downloads WHERE failure_code='membership_required'"
         ).fetchone()["c"]
         waiting_total = conn.execute("SELECT COUNT(*) AS c FROM downloads WHERE status='queued'").fetchone()["c"]
-        failed = conn.execute("SELECT * FROM downloads WHERE status='failed' ORDER BY finished_at DESC,id DESC LIMIT 1").fetchone()
         recent_rows = [dict(row) for row in conn.execute(
             """SELECT * FROM downloads
                WHERE status IN ('completed','failed','skipped','cancelled')
@@ -15289,12 +15386,9 @@ def pinchflat_download_overview(queue_limit=100):
     inventory = completed_video_inventory()
     last = inventory["rows"][0] if inventory["rows"] else None
     processing = [row for row in active_rows if row.get("status") == "processing"]
-    latest = processing[-1] if processing else last
-    if not processing and failed and (not last or str(failed["finished_at"] or "") > str(last.get("finished_at") or "")):
-        latest = dict(failed)
 
     def item(row):
-        video_id = str(row.get("video_id") or "")
+        video_id = activity_video_id(row.get("video_id")) or activity_video_id(youtube_video_id_from_url(row.get("youtube_url")))
         channel_id = str(row.get("channel_id") or "")
         output_path = Path(str(row.get("output_path") or "")) if row.get("output_path") else None
         file_size = 0
@@ -15366,7 +15460,7 @@ def pinchflat_download_overview(queue_limit=100):
             "last": dict(pinchflat_task_block_last),
         },
         "last_downloaded": item(last) if last else None,
-        "latest_download": item(latest) if latest else None,
+        "latest_download": item(last) if last else None,
     }
 
 
@@ -16491,6 +16585,8 @@ def index():
             """
         ).fetchone()
 
+    activity_rows = activity_view_rows(activity_rows)
+    recent_downloads = [{**dict(row), "video_id": activity_video_id(row["video_id"]) or activity_video_id(youtube_video_id_from_url(row["youtube_url"]))} for row in recent_downloads]
     subs = [subscription_view(row) for row in rows]
     fav_channel_ids = favourite_channel_ids()
     for sub in subs:
@@ -19757,6 +19853,7 @@ def like_youtube_video():
             ),
             "success",
             item["channel_id"] or None,
+            video_id=video_id, video_title=item["title"],
         )
 
         return jsonify(
