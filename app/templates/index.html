@@ -2168,6 +2168,13 @@
     .activity-item { border-bottom:1px solid var(--line); padding:11px 0; }
     .activity-item:last-child { border-bottom:0; }
     .activity-time { color:var(--muted); font-size:12px; }
+    .subscription-sort-button { display:inline-flex; align-items:center; gap:7px; border:0; background:transparent; padding:6px 0; color:inherit; font:inherit; font-weight:700; cursor:pointer; text-align:left; white-space:nowrap; }
+    .sort-indicator { opacity:.45; font-size:13px; }
+    th[aria-sort="ascending"] .sort-indicator, th[aria-sort="descending"] .sort-indicator { opacity:1; color:var(--text); }
+    .subscription-sort-button:focus-visible, .activity-popup-link:focus-visible { outline:2px solid var(--blue); outline-offset:3px; border-radius:3px; }
+    .activity-popup-link { cursor:pointer; }
+    .activity-video-title a, .activity-channel-link { color:var(--muted); text-decoration:underline; text-underline-offset:3px; }
+    .activity-channel-link { display:inline-block; font-size:13px; margin:3px 0; }
     .activity-video { display:flex; align-items:flex-start; gap:12px; }
     .activity-video-link { flex:0 0 112px; }
     .activity-video-thumb { display:block; width:112px; height:63px; object-fit:cover; border-radius:7px; background:var(--panel); }
@@ -3762,14 +3769,14 @@
         <thead>
           <tr>
             <th></th>
-            <th>Channel</th>
-            <th>Enabled</th>
-            <th>Range</th>
-            <th>Media Profile</th>
-            <th>Cutoff</th>
-            <th>Disk usage</th>
-            <th>Error</th>
-            <th>Save / Actions</th>
+            <th scope="col" aria-sort="none" data-sort-column="title"><button type="button" class="subscription-sort-button" data-sort-field="title" title="Sort channel names" onclick="sortSubscriptionsBy(this.dataset.sortField)">Channel<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none" data-sort-column="enabled"><button type="button" class="subscription-sort-button" data-sort-field="enabled" title="Sort enabled or disabled channels" onclick="sortSubscriptionsBy(this.dataset.sortField)">Enabled<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none" data-sort-column="range"><button type="button" class="subscription-sort-button" data-sort-field="range" title="Sort by range: default, shortest to longest, then dated ranges" onclick="sortSubscriptionsBy(this.dataset.sortField)">Range<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none" data-sort-column="media_profile"><button type="button" class="subscription-sort-button" data-sort-field="media_profile" title="Sort by media profile resolution" onclick="sortSubscriptionsBy(this.dataset.sortField)">Media Profile<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none" data-sort-column="cutoff"><button type="button" class="subscription-sort-button" data-sort-field="cutoff" title="Sort by cut-off date" onclick="sortSubscriptionsBy(this.dataset.sortField)">Cut-off<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none" data-sort-column="storage"><button type="button" class="subscription-sort-button" data-sort-field="storage" title="Sort by video storage size" onclick="sortSubscriptionsBy(this.dataset.sortField)">Disk usage<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none" data-sort-column="error"><button type="button" class="subscription-sort-button" data-sort-field="error" title="Sort channels with errors first, then by error message" onclick="sortSubscriptionsBy(this.dataset.sortField)">Error<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+            <th scope="col" aria-sort="none" data-sort-column="actions"><button type="button" class="subscription-sort-button" data-sort-field="actions" title="Sort channels with unsaved changes first" onclick="sortSubscriptionsBy(this.dataset.sortField)">Save / Actions<span class="sort-indicator" aria-hidden="true">↕</span></button></th>
           </tr>
         </thead>
         <tbody id="subscription-body">
@@ -3782,6 +3789,7 @@
             data-active="{{ 1 if sub['active'] else 0 }}"
             data-error="{{ 1 if sub['last_error'] else 0 }}"
             data-download-enabled="{{ 1 if sub['download_enabled'] else 0 }}"
+            data-range-mode="{{ sub['history_mode'] or 'default' }}"
             data-first-seen="{{ sub['first_seen_at'] }}"
             data-storage="{{ sub['disk_bytes'] }}"
             data-favourite="{{ 1 if sub['is_favourite'] else 0 }}"
@@ -4179,11 +4187,26 @@
           <label class="subscription-tool-field">
             <span>Sort results by</span>
             <select id="sort-filter" onchange="applyFilters({preserveScroll:true})">
-              <option value="title">Channel name A → Z</option>
-              <option value="status">Status</option>
-              <option value="media_profile">Media Profile</option>
+              <option value="title">Channel A → Z</option>
+              <option value="title:desc">Channel Z → A</option>
+              <option value="enabled">Enabled first</option>
+              <option value="enabled:asc">Disabled first</option>
+              <option value="range">Range: preset order</option>
+              <option value="range:desc">Range: reverse preset order</option>
+              <option value="media_profile">Media Profile: lowest first</option>
+              <option value="media_profile:desc">Media Profile: highest first</option>
+              <option value="cutoff">Cut-off: oldest first</option>
+              <option value="cutoff:desc">Cut-off: newest first</option>
+              <option value="storage">Disk usage: largest first</option>
+              <option value="storage:asc">Disk usage: smallest first</option>
+              <option value="error">Errors first</option>
+              <option value="error:desc">No errors first</option>
+              <option value="actions">Unsaved changes first</option>
+              <option value="actions:asc">Saved channels first</option>
+              <option value="status">Status A → Z</option>
+              <option value="status:desc">Status Z → A</option>
               <option value="newest">Newest subscription first</option>
-              <option value="storage">Largest disk usage first</option>
+              <option value="newest:asc">Oldest subscription first</option>
             </select>
           </label>
         </div>
@@ -5765,11 +5788,12 @@
         </div>
         <div id="activity-list" aria-label="Activity log">
           {% for item in activity_rows %}
-          <div class="activity-item {% if item.video_id %}activity-video{% endif %}" data-activity-id="{{ item.id }}">
-            {% if item.video_id %}<a class="activity-video-link" href="{{ item.video_url }}" target="_blank" rel="noopener noreferrer" aria-label="View {{ item.video_title or 'video' }} on YouTube"><img class="activity-video-thumb" src="{{ item.thumbnail_url }}" alt="{{ item.video_title or 'Video thumbnail' }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}'"></a>{% endif %}
+          <div class="activity-item {% if item.video_id %}activity-video{% endif %}" data-activity-id="{{ item.id }}" data-video-id="{{ item.video_id }}" data-video-title="{{ item.video_title }}" data-channel-id="{{ item.channel_id or '' }}" data-channel-title="{{ item.channel_title }}">
+            {% if item.video_id %}<a class="activity-video-link" href="{{ item.video_url }}" data-activity-video="{{ item.video_id }}" aria-label="Play {{ item.video_title or 'video' }}"><img class="activity-video-thumb" src="{{ item.thumbnail_url }}" alt="{{ item.video_title or 'Video thumbnail' }}" loading="lazy" onerror="this.onerror=null;this.src='{{ url_for('static', filename='channel-placeholder.svg') }}'"></a>{% endif %}
             <div class="activity-copy">
               <strong class="{% if item.severity == 'warning' %}warn{% elif item.severity == 'success' %}ok{% elif item.severity == 'error' %}bad{% endif %}">{{ item.title }}</strong>
-              {% if item.video_title %}<div class="activity-video-title">{{ item.video_title }}</div>{% endif %}
+              {% if item.video_id %}<div class="activity-video-title"><a class="activity-popup-link" href="{{ item.video_url }}" data-activity-video="{{ item.video_id }}">{{ item.video_title or 'Play video' }}</a></div>{% elif item.video_title %}<div class="activity-video-title">{{ item.video_title }}</div>{% endif %}
+              {% if item.channel_id %}<a class="activity-channel-link activity-popup-link" href="{{ item.channel_url }}" data-activity-channel="{{ item.channel_id }}">{{ item.channel_title or 'View channel' }}</a>{% elif item.channel_title %}<div class="activity-video-title">{{ item.channel_title }}</div>{% endif %}
               <div class="activity-message">{{ item.message }}</div>
               <div class="activity-time">{{ item.created_at }} · {{ item.event_type }}</div>
             </div>
@@ -10342,6 +10366,20 @@ let pinchflatLogsLoaded = false;
 let activityLoading = false;
 let activitySnapshot = "";
 
+// Delegation handles both server-rendered logs and entries replaced by polling.
+document.getElementById('activity-list')?.addEventListener('click', event => {
+  const link = event.target.closest('[data-activity-video], [data-activity-channel]');
+  if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const row = link.closest('[data-activity-id]');
+  if (link.dataset.activityVideo) {
+    openLatestVideo({video_id:row.dataset.videoId, title:row.dataset.videoTitle || 'YouTube video',
+      channel_id:row.dataset.channelId, channel_title:row.dataset.channelTitle,
+      thumbnail_url:`https://i.ytimg.com/vi/${row.dataset.videoId}/hqdefault.jpg`,
+      video_url:`https://www.youtube.com/watch?v=${row.dataset.videoId}`});
+  } else openChannelDetails(link.dataset.activityChannel);
+});
+
 async function loadActivity(force=false) {
   const target = document.getElementById("activity-list");
   const button = document.getElementById("activity-refresh");
@@ -10362,13 +10400,16 @@ async function loadActivity(force=false) {
         const videoId = /^[A-Za-z0-9_-]{11}$/.test(item.video_id || "") ? item.video_id : "";
         row.className = "activity-item" + (videoId ? " activity-video" : "");
         row.dataset.activityId = String(item.id);
+        row.dataset.videoId = videoId;
+        row.dataset.videoTitle = item.video_title || '';
+        row.dataset.channelId = item.channel_id || '';
+        row.dataset.channelTitle = item.channel_title || '';
         if (videoId) {
           const link = document.createElement("a");
           link.className = "activity-video-link";
           link.href = `https://www.youtube.com/watch?v=${videoId}`;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          link.setAttribute("aria-label", `View ${item.video_title || "video"} on YouTube`);
+          link.dataset.activityVideo = videoId;
+          link.setAttribute("aria-label", `Play ${item.video_title || "video"}`);
           const image = document.createElement("img");
           image.className = "activity-video-thumb";
           image.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
@@ -10384,11 +10425,28 @@ async function loadActivity(force=false) {
         title.className = ({warning:"warn",success:"ok",error:"bad"})[item.severity] || "";
         title.textContent = item.title || "Activity";
         body.appendChild(title);
-        if (item.video_title) {
+        if (videoId || item.video_title) {
           const videoTitle = document.createElement("div");
           videoTitle.className = "activity-video-title";
-          videoTitle.textContent = item.video_title;
+          const label = document.createElement(videoId ? 'a' : 'span');
+          label.textContent = item.video_title || 'Play video';
+          if (videoId) {
+            label.className = 'activity-popup-link';
+            label.href = `https://www.youtube.com/watch?v=${videoId}`;
+            label.dataset.activityVideo = videoId;
+          }
+          videoTitle.appendChild(label);
           body.appendChild(videoTitle);
+        }
+        if (item.channel_id || item.channel_title) {
+          const channel = document.createElement(item.channel_id ? 'a' : 'div');
+          channel.className = 'activity-channel-link activity-popup-link';
+          channel.textContent = item.channel_title || 'View channel';
+          if (item.channel_id) {
+            channel.href = `https://www.youtube.com/channel/${encodeURIComponent(item.channel_id)}`;
+            channel.dataset.activityChannel = item.channel_id;
+          }
+          body.appendChild(channel);
         }
         const message = document.createElement("div");
         message.className = "activity-message";
@@ -10420,7 +10478,8 @@ async function loadActivity(force=false) {
 
 setInterval(() => {
   if (!document.hidden && document.getElementById("settings-dialog")?.open
-      && document.querySelector('[data-panel="diagnostics"]')?.classList.contains("active")) loadActivity();
+      && document.querySelector('[data-panel="diagnostics"]')?.classList.contains("active")
+      && !latestVideoDialog?.open && !subscriptionChannelDialog?.open) loadActivity();
 }, 10000);
 
 async function loadDownloaderLogs(force=false) {
@@ -12430,6 +12489,7 @@ function updateSubscriptionRowFromData(row, item) {
   row.dataset.active = item.active ? "1" : "0";
   row.dataset.error = item.last_error ? "1" : "0";
   row.dataset.downloadEnabled = item.download_enabled ? "1" : "0";
+  row.dataset.rangeMode = item.history_mode || "default";
   row.dataset.sourceId = item.pinchflat_source_id || "";
   if (typeof item.is_favourite !== "undefined") {
     row.dataset.favourite = item.is_favourite ? "1" : "0";
@@ -12883,6 +12943,7 @@ function markSourceRowDirty(control) {
     save.textContent = "Save changes";
   }
   updateBulkSaveOption();
+  applyFilters({preserveScroll:true, anchorRow:row});
 }
 
 async function sourceToggleChanged(input) {
@@ -13071,6 +13132,29 @@ function initialFilter() {
   search.value = localStorage.getItem("ytpf-search") || "";
   statusFilter.value = localStorage.getItem("ytpf-status") || "{{ 'all' if show_removed else 'active' }}";
   sortFilter.value = localStorage.getItem("ytpf-sort") || "title";
+  if (!sortFilter.value) sortFilter.value = "title";
+  updateSubscriptionSortHeadings();
+}
+
+function updateSubscriptionSortHeadings() {
+  const current = ytsdSortSpec(sortFilter?.value);
+  document.querySelectorAll('[data-sort-column]').forEach(cell => {
+    const field = cell.dataset.sortColumn;
+    const active = field === current.field;
+    cell.setAttribute('aria-sort', active ? (current.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+    cell.querySelector('.sort-indicator').textContent = active ? (current.direction === 'asc' ? '↑' : '↓') : '↕';
+    const button = cell.querySelector('button');
+    const next = active ? (current.direction === 'asc' ? 'descending' : 'ascending') : (ytsdSortSpec(field).direction === 'asc' ? 'ascending' : 'descending');
+    button.setAttribute('aria-label', `${button.childNodes[0].textContent.trim()}: sort ${next}`);
+  });
+}
+
+function sortSubscriptionsBy(field) {
+  if (!sortFilter) return;
+  const current = ytsdSortSpec(sortFilter.value);
+  const direction = current.field === field ? (current.direction === 'asc' ? 'desc' : 'asc') : ytsdSortSpec(field).direction;
+  sortFilter.value = direction === ytsdSortSpec(field).direction ? field : `${field}:${direction}`;
+  applyFilters({preserveScroll:true});
 }
 
 function scheduleSubscriptionFilter() {
@@ -13091,6 +13175,7 @@ function applyFilters(options={}) {
   localStorage.setItem("ytpf-search", search.value);
   localStorage.setItem("ytpf-status", statusFilter.value);
   localStorage.setItem("ytpf-sort", sortFilter.value);
+  updateSubscriptionSortHeadings();
 
   const terms = search.value.normalize("NFC").toLocaleLowerCase("en-GB").trim().split(/\s+/).filter(Boolean);
   const filter = statusFilter.value;
@@ -13130,7 +13215,12 @@ function applyFilters(options={}) {
     status:row.dataset.status, first_seen_at:row.dataset.firstSeen,
     storage_bytes:Number(row.dataset.storage || 0),
     profile_id:row.querySelector('.source-profile select')?.value || row.querySelector('.source-profile')?.dataset.profileId || '',
-    profile_name:rowValues.get(row).profile
+    profile_name:rowValues.get(row).profile,
+    download_enabled:row.querySelector('input[name="download_enabled"]')?.checked ?? row.dataset.downloadEnabled === '1',
+    range_mode:row.querySelector('.source-history-mode')?.value || row.dataset.rangeMode || 'default',
+    cutoff:row.querySelector('.cutoff-cell code')?.textContent?.trim() || '',
+    last_error:row.querySelector('.error-text')?.textContent?.trim() || '',
+    dirty:row.classList.contains('dirty')
   });
   const compareBySelectedSort = (a,b) => ytsdCompareChannels(comparable(a),comparable(b),sortFilter.value);
   document.dispatchEvent(new CustomEvent('ytsd:sort'));

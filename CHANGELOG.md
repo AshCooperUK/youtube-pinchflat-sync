@@ -1,170 +1,10 @@
-# YouTube Subscription Downloader
+# YTSD release history
 
-A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
+This history restores the release notes from the repository's older READMEs, deployment metadata and release commits, checked against the available development conversations. Personal deployment examples have been replaced with generic values. Historical entries describe behaviour at the time. V3 uses the native downloader and supersedes the older Pinchflat instructions.
 
-Version: **3.0.8** · [Latest changes](RELEASE-v3.0.8.md) · [Full changelog](CHANGELOG.md)
+The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
-## Install: set up your Cloudflare domain first
-
-**Complete the domain and tunnel configuration before launching the YTSD Docker app.** Use a domain you own. Every address below is an example. Replace `example.com`, the server address and storage paths with your own values.
-
-### 1. Add your domain to Cloudflare
-
-Add your domain in Cloudflare, select your plan and review the imported DNS records, especially records used by an existing website or email. At your registrar, use the two nameservers assigned by Cloudflare. Follow its DNSSEC migration instructions where applicable. Continue when the domain status becomes **Active**. See [Cloudflare's domain setup instructions](https://developers.cloudflare.com/dns/zone-setups/full-setup/setup/).
-
-Choose the public YTSD hostname now, for example `youtube.example.com`.
-
-The screenshots below show Cloudflare's public demonstration. Use your own domain and the YTSD values given here. Cloudflare's dashboard layout varies by account and update.
-
-### 2. Create the Cloudflare Tunnel route
-
-In Cloudflare, open **Networking → Tunnels**. Create a tunnel named `ytsd` and follow the connector installation command for your server. Wait for the connector to become healthy. In the tunnel's **Routes** tab, add a **Published application** route with subdomain `youtube`, your domain, a blank path and the YTSD HTTP service on port `8787`. Older dashboards call this a public hostname. See [Cloudflare's tunnel instructions](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/).
-
-![Cloudflare tutorial: create a tunnel](docs/screenshots/setup-create-tunnel.jpg)
-
-Choose the service address according to where the connector runs:
-
-| Connector location | Service URL example |
-| --- | --- |
-| Installed directly on the Docker host | `http://localhost:8787` |
-| Separate container or another machine | `http://192.0.2.10:8787`, replacing the documentation IP with your Docker host's reachable LAN address |
-| On the same Docker network as YTSD | `http://youtube-subscription-downloader:8787` |
-
-Inside a separate container, `localhost` refers to that container. The public URL remains HTTPS even when the connector reaches YTSD over HTTP.
-
-![Cloudflare tutorial: published application hostname form](docs/screenshots/setup-route.jpg)
-
-Screenshots from [Cloudflare's public tunnel tutorial](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/). Its demo hostname and service port differ from this app. For YTSD, use your chosen hostname, leave Path blank and point to HTTP port `8787`.
-
-Before first launch, restrict this hostname to your own account with a [Cloudflare Access application](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/). Complete the first YTSD administrator setup while this restriction is in place. Keep the Access session available through Google OAuth's return to the same hostname.
-
-A healthy tunnel verifies the connector. The YTSD page will only respond after the app starts in the next step. Until then, an origin-unavailable response is expected.
-
-### 3. Change the domain in YAML, then launch Docker
-
-Edit **`compose.yaml`** before deployment. For a CasaOS/ZimaOS import, edit **`Apps/YouTubePinchflatSync/docker-compose.yml`** or the YAML supplied to its installer.
-
-Set `APP_URL` to the exact public HTTPS URL from Cloudflare. Use no trailing path. Leave `GOOGLE_REDIRECT_URI` blank to derive the callback automatically, or set it to the matching `/oauth/google/callback` URL.
-
-Relevant settings:
-
-```yaml
-environment:
-  APP_URL: "https://youtube.example.com"
-  CANONICAL_REDIRECT: "true"
-  GOOGLE_REDIRECT_URI: ""
-ports:
-  - "8787:8787"
-volumes:
-  - /srv/ytsd/data:/data
-  - /srv/media/youtube:/downloads
-```
-
-These are example host paths. **On an upgrade, keep your current host paths for `/data` and `/downloads`.** Changing either path points the container at different data. For a fresh install, create the directories you chose and give the container write access.
-
-The [setup values reference](docs/setup-walkthrough.html) groups the example domain, route and YAML fields in one page. Download and open this HTML file to view it.
-
-Production YAML uses inline environment values, so changing `.env` alone does not replace its `APP_URL`. The development Compose file reads `.env`. If you change domains later, update Cloudflare, `APP_URL`, any explicit `GOOGLE_REDIRECT_URI`, and the authorised Google callback together, then recreate the container.
-
-Start the production container from the repository directory:
-
-```bash
-docker compose -f compose.yaml pull
-docker compose -f compose.yaml up -d
-docker compose -f compose.yaml logs --tail=100
-```
-
-Open your public HTTPS hostname and create the first administrator account. The image is `ghcr.io/ashcooperuk/youtube-subscription-downloader:latest`. A matching version tag is available after the GitHub publishing workflow completes.
-
-### 4. Connect Google and choose your channels
-
-In a Google Cloud project, enable **YouTube Data API v3**, configure the OAuth consent screen and create a **Web application** OAuth client. Register the exact authorised redirect URI:
-
-```text
-https://youtube.example.com/oauth/google/callback
-```
-
-If the OAuth app is in Testing, add your Google account as a test user. See [Google's YouTube web-server OAuth guide](https://developers.google.com/youtube/v3/guides/auth/server-side-web-apps).
-
-Enter the client ID and secret under **Settings → YouTube**, then connect Google. Use the YouTube icon in the Google tile to refresh subscriptions. Select each channel's Enabled state, download range and Media Profile. The YTSD icon in the Downloader tile runs Sync & Scan. The `youtube` scope supports subscription and playlist write operations.
-
-Store credentials in your running app or private deployment configuration. Keep credentials, cookies, the `/data` contents and configured environment files out of public source uploads.
-
-## What the app includes
-
-- Per-channel download controls, history ranges, media profiles and bulk actions.
-- Click-to-sort subscription headings and search across Channel, Range, Media Profile, Cut-off, Disk usage and Error.
-- Persistent scan/download queues, one-time downloads and live download/FFmpeg progress in Current Downloads.
-- A Latest Downloaded tile containing only the last successfully completed video, with no status messages.
-- Video-only download totals. Metadata, subtitles, artwork, audio-only jobs and unfinished media are excluded.
-- Discover downloaded/liked/disliked/random videos, Shorts and Latest Subscriptions.
-- Favourite channels, favourite videos, saved lists, a shared media player and channel details popups.
-- An Upload Guide with cached YouTube history, Day/Week/Month views, favourites first and existing video/channel popups. Guide history is independent of download cut-offs.
-- Emby artwork, channel and episode NFOs, subtitles, metadata and Direct Play H.264/AAC MP4 processing.
-- YouTube publication dates in video NFOs, plus a repair action for existing media.
-- Emby Download playlist automation and targeted Emby library/metadata refreshes.
-- Retention policies, per-channel overrides, previews and per-video protection.
-- User accounts, administrator/viewer roles, 2FA, recovery codes and session controls.
-- Activity logs with video thumbnails, clickable video titles and channel names.
-- Validated YouTube cookies upload, anonymous-first downloads and authenticated retry.
-
-## Downloads, retention and Emby
-
-Changing a channel's download range changes eligibility for scans. It does **not** delete existing files. Retention cleanup is a separate feature using its configured policies and YouTube publication dates.
-
-The shield on a channel opens its retention policy. The shield on an individual video protects that video from retention cleanup. One-time downloads are excluded from automatic retention cleanup. Explicit manual deletion is a separate action.
-
-**Settings → Downloader → Import / rescan existing media** imports recognised completed media and enables matching existing active subscription channels. It preserves their saved ranges and profiles. Folders containing only metadata do not enable a channel. Startup reconciliation preserves deliberate disabled states.
-
-**Settings → Downloader → Repair Emby release dates** writes known YouTube dates to video NFO release-date fields. Refresh those items' metadata in Emby afterwards. Release dates and Date Added are separate fields. This operation preserves Date Added and never substitutes the local import date for a missing YouTube date.
-
-YouTube Shorts are filtered using available Shorts metadata or URL evidence, without treating every short-duration video as a Short. Channel filenames use Windows-safe Unicode handling. Existing folders are adopted safely where recognised.
-
-## YouTube authentication and background work
-
-Upload a Mozilla/Netscape-format `cookies.txt` file under **Settings → Downloader → YouTube Authentication** when a download needs an account. The validated file is held privately at `/data/auth/youtube-cookies.txt`. Membership-restricted content still requires the account's membership.
-
-The native downloader defaults to one download worker, lightweight feed scans, four RSS scan workers and queued deeper scans. Duplicate checks use YouTube video IDs. Optional expert yt-dlp JSON settings cannot override application-managed safety and filtering options.
-
-The Upload Guide's background worker caches YouTube metadata and tracks quota, pagination and backoff. Opening the guide does not queue video downloads. Forecasts remain inactive pending the project permission required by the approved implementation handover.
-
-## V3 architecture and upgrades
-
-V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, retention and Emby refresh inside YTSD. There is no runtime dependency on a Pinchflat container, API, SQLite database or Docker socket.
-
-| Container path | Contents |
-| --- | --- |
-| `/data` | Application database, users, OAuth, settings, favourites and private cookies |
-| `/downloads` | Video library, artwork, subtitles and metadata |
-
-For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
-
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.8 ZIP targets v3.0.7. It contains the same updated files as the full-source ZIP.
-
-## Development
-
-Copy `.env.example` to a private `.env` and set your development URL and paths before running:
-
-```bash
-docker compose -f docker-compose.dev.yml up -d --build
-```
-
-The health endpoint is `/health`. Regression tests run with:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-FFmpeg/ffprobe exercise download regressions. Node verifies shared browser/guide sort ordering. GitHub Actions also validates Compose and builds the application image.
-
-## Release history since v1
-
-The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older entries describe their original releases, including retired Pinchflat features. The earliest available archive is v1.1.0. No separate v1.0.0 notes were available to restore.
-
-<details>
-<summary>V3: native downloader and current releases</summary>
-
-### v3.0.8
+## v3.0.8
 
 - Click any subscription column heading to sort in both directions: Channel, Enabled, Range, Media Profile, Cut-off, Disk usage, Error and Save / Actions.
 - Remember sorting across refreshes. Keep the sort dropdown and heading arrows in sync, with keyboard controls and accessible direction announcements.
@@ -174,8 +14,7 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 - Recover missing Activity context from exact video IDs, saved job records and local saved-video metadata. Persist channel names for future logs, including one-time downloads and failures.
 - Restore the documented v1/v2 release archive and add Cloudflare-first installation instructions with generic setup screenshots and YAML examples.
 
-
-### v3.0.7
+## v3.0.7
 
 Built on the completed v3.0.6 work. The public GitHub baseline checked for this package was v3.0.5, commit `d0c7fdaa3c2da0d8e43039ef9b9e48fdbd49a662`. Both ZIPs include the v3.0.6 fixes, so upgrading from either version retains completed-only Latest Downloaded, Current Downloads progress and illustrated Activity logs.
 
@@ -234,8 +73,7 @@ Validation uses deterministic local API/media fixtures plus real FFmpeg. Live Go
 
 [Release details](RELEASE-v3.0.7.md).
 
-
-### v3.0.6
+## v3.0.6
 
 Based on GitHub v3.0.5 at `d0c7fdaa3c2da0d8e43039ef9b9e48fdbd49a662`. Includes all previous fixes.
 
@@ -281,8 +119,7 @@ Validation used local download fixtures and real FFmpeg. Live YouTube, NAS and E
 
 [Release details](RELEASE-v3.0.6.md).
 
-
-### v3.0.5
+## v3.0.5
 
 Includes the v3.0.4 fixes. The full package and cumulative changed-files package both upgrade GitHub v3.0.3 at `2938997827cdf38a1f1ffb8820888366912587f5`, or the previously supplied v3.0.4 package.
 
@@ -331,8 +168,7 @@ Live YouTube downloads, the NAS share and Emby were not available locally. Docke
 
 [Release details](RELEASE-v3.0.5.md).
 
-
-### v3.0.4
+## v3.0.4
 
 Based on GitHub `main` at `2938997827cdf38a1f1ffb8820888366912587f5` (v3.0.3).
 
@@ -378,8 +214,7 @@ Run the regression suite with `python -m unittest discover -s tests -v` after in
 
 [Release details](RELEASE-v3.0.4.md).
 
-
-### v3.0.3
+## v3.0.3
 
 Based on GitHub `main` at `2f391048b935a2170933486bb28f853bac4d506e` (v3.0.2).
 
@@ -426,8 +261,7 @@ python -m unittest discover -s tests -v
 
 [Release details](RELEASE-v3.0.3.md).
 
-
-### v3.0.2
+## v3.0.2
 
 - Rescan the entire existing media library using info JSON, NFO and YouTube IDs in filenames to import earlier downloads into native history.
 - Keep completed media totals and recent-download data available to the dashboard.
@@ -435,8 +269,7 @@ python -m unittest discover -s tests -v
 
 [Release source](https://github.com/AshCooperUK/youtube-pinchflat-sync/commit/2f391048b935a2170933486bb28f853bac4d506e).
 
-
-### v3.0.1
+## v3.0.1
 
 - Cache settings and use SQLite WAL to reduce dashboard delays and database contention.
 - Preload dashboard data, combine summary requests and keep download counts and latest completed media current.
@@ -446,8 +279,7 @@ python -m unittest discover -s tests -v
 
 [Release merge](https://github.com/AshCooperUK/youtube-pinchflat-sync/commit/efedc70).
 
-
-### v3.0.0
+## v3.0.0
 
 - Replace Pinchflat with native yt-dlp subscription scanning, a persistent SQLite download queue and controlled background workers.
 - Remove the Pinchflat container, API, database and Docker socket requirements while retaining the existing application data for upgrades.
@@ -459,13 +291,7 @@ python -m unittest discover -s tests -v
 
 [Release merge](https://github.com/AshCooperUK/youtube-pinchflat-sync/commit/7f877ba).
 
-
-</details>
-
-<details>
-<summary>V2: playback, discovery, channel insights and retention</summary>
-
-### v2.15.0.6
+## v2.15.0.6
 
 - Fixes the One-time Download popup appearing stuck at 0% while yt-dlp is still preparing the YouTube request.
 - Adds explicit Queued, Preparing, Downloading, Processing and Converting for Emby stages.
@@ -475,8 +301,7 @@ python -m unittest discover -s tests -v
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/183214b9109ebeca095227d750ecba2cb1b07da3/README.md).
 
-
-### v2.15.0.5
+## v2.15.0.5
 
 - Fixes One-time Download status so the popup shows clear preparation, YouTube download, post-processing and H.264/AAC compatibility-conversion phases instead of appearing stuck at 0%.
 - Keeps live byte, speed and ETA updates from yt-dlp and adds conversion progress while ffmpeg prepares the Emby / Smart TV file.
@@ -485,8 +310,7 @@ python -m unittest discover -s tests -v
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/5cf4471b5046a94333e8bdae98de43768a1f0e25/README.md).
 
-
-### v2.15.0.4
+## v2.15.0.4
 
 - Added an Emby / Smart TV compatibility profile to Settings > Downloads > One-time Download.
 - One-time video downloads now prefer H.264/AVC video and AAC audio in MP4 for better Direct Play compatibility on Emby clients such as LG Smart TVs.
@@ -494,8 +318,7 @@ python -m unittest discover -s tests -v
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/cb98a106c3fd285cb78a405a2d1367de77dcbf0d/README.md).
 
-
-### v2.15.0.3
+## v2.15.0.3
 
 - Adds a membership-error counter to the Pinchflat tasks tile.
 - Counts non-completed Pinchflat media-download jobs whose stored yt-dlp error contains “Join this channel”, identifying members-only YouTube failures.
@@ -503,8 +326,7 @@ python -m unittest discover -s tests -v
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/cb98a106c3fd285cb78a405a2d1367de77dcbf0d/README.md).
 
-
-### v2.15.0.2
+## v2.15.0.2
 
 - Fixed the Settings sidebar being clipped when the modal is shorter than the full navigation.
 - The left Settings navigation and right settings panel now scroll independently.
@@ -517,8 +339,7 @@ python -m unittest discover -s tests -v
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/55e6f7989f8cb5854666c37f7214b4556cf253ba/README.md).
 
-
-### v2.15.0.0
+## v2.15.0.0
 
 - Adds Settings → Video Retention with a master switch and separate policies for favourite and non-favourite channels.
 - Retention age is based on the original YouTube upload date rather than the local file creation date.
@@ -545,8 +366,7 @@ python -m unittest discover -s tests -v
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/6b7aacd3b66fe38e1ed8425751af5d4eb0e472a4/README.md).
 
-
-### v2.14.0.12
+## v2.14.0.12
 
 - Redesigns Discover → Random Shorts to use the same visual language as the main media player.
 - Replaces the old large Shorts text buttons with the shared icon action dock for favourite, subscribe, like, one-time download and YouTube.
@@ -557,8 +377,7 @@ python -m unittest discover -s tests -v
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/04c2472a02f298fe7c25852e85273d6409596027/README.md).
 
-
-### v2.14.0.11
+## v2.14.0.11
 
 - One-time Download controls now detect completed direct downloads which still exist on disk.
 - Download icons are disabled and greyed out for videos already present from One-time Download.
@@ -575,8 +394,7 @@ Settings notification correction.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/19005251159b05785a6188e6a41480f0b7944906/README.md).
 
-
-### v2.14.0.10
+## v2.14.0.10
 
 Settings notification correction.
 
@@ -586,8 +404,7 @@ Settings notification correction.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/04c2472a02f298fe7c25852e85273d6409596027/README.md).
 
-
-### v2.14.0.9
+## v2.14.0.9
 
 Scheduled Pinchflat indexing update.
 
@@ -601,8 +418,7 @@ Scheduled Pinchflat indexing update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/19005251159b05785a6188e6a41480f0b7944906/README.md).
 
-
-### v2.14.0.8
+## v2.14.0.8
 
 - Makes web addresses and email addresses in media-player video descriptions clickable and opens web links in a new tab.
 - Applies the same link handling to the channel description shown inside the media player.
@@ -614,8 +430,7 @@ Channel video icon consistency update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/19005251159b05785a6188e6a41480f0b7944906/README.md).
 
-
-### v2.14.0.7
+## v2.14.0.7
 
 Channel video icon consistency update.
 
@@ -624,8 +439,7 @@ Channel video icon consistency update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/955e643c28e96cb8c0ae81f0cecfcc82bdfbb6ab/README.md).
 
-
-### v2.14.0.6
+## v2.14.0.6
 
 Settings and dashboard layout usability update.
 
@@ -637,8 +451,7 @@ Settings and dashboard layout usability update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/04ff9c0caa38cdd0348ef476b88a600382426063/README.md).
 
-
-### v2.14.0.5
+## v2.14.0.5
 
 Channel navigation and control consistency update.
 
@@ -650,8 +463,7 @@ Channel navigation and control consistency update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/0b93457bebc3bdbf17e152c114b7b0c95c547070/README.md).
 
-
-### v2.14.0.4
+## v2.14.0.4
 
 Media player visual redesign.
 
@@ -665,8 +477,7 @@ Media player visual redesign.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/91c06f3228c6b31fb69ad9dc782d2f6a2296aeba/README.md).
 
-
-### v2.14.0.3
+## v2.14.0.3
 
 Emby scan and metadata sequencing update.
 
@@ -677,8 +488,7 @@ Emby scan and metadata sequencing update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/02ab6e4f03acf4be5ecd08d56c1fc9d47fcf5549/README.md).
 
-
-### v2.14.0.2
+## v2.14.0.2
 
 - Adds a consistent channel removal icon to channel artwork, with choices matching the Actions menu for YouTube, Pinchflat Sync, Pinchflat and media cleanup.
 - Redesigns the Favourites popup around compact channel/video tiles and the same channel-image controls used elsewhere in the app.
@@ -712,8 +522,7 @@ Dashboard layout and built-in function reference update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/6b7aacd3b66fe38e1ed8425751af5d4eb0e472a4/README.md).
 
-
-### v2.14.0.1
+## v2.14.0.1
 
 Dashboard layout and built-in function reference update.
 
@@ -743,8 +552,7 @@ Dashboard layout and built-in function reference update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/7314dedfa7fc6adc4e58a62eced639acab895473/README.md).
 
-
-### v2.14.0.0
+## v2.14.0.0
 
 Emby library targeting and Discover interaction update.
 
@@ -768,8 +576,7 @@ Emby library targeting and Discover interaction update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/779ce5569d8e2d83b8e0301a315e2a5589bd5b5c/README.md).
 
-
-### v2.13.0c
+## v2.13.0c
 
 - Speeds dashboard startup and applies the subscription Enabled toggle immediately.
 - Retains the compact Actions menu, Emby refresh integration, featured channels and channel insights from v2.13.0b.
@@ -778,8 +585,7 @@ These changes are recorded in the following v2.14.0.0 release notes. The v2.13.0
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/1d659f3474af5b71d2377e19551f98c618137f26/README.md).
 
-
-### v2.13.0b
+## v2.13.0b
 
 Channel-actions correction, Emby integration and Channel UI refinement.
 
@@ -801,8 +607,7 @@ Channel-actions correction, Emby integration and Channel UI refinement.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/1d659f3474af5b71d2377e19551f98c618137f26/README.md).
 
-
-### v2.13.0
+## v2.13.0
 
 Channel insights, richer media details and bulk Pinchflat management.
 
@@ -817,8 +622,7 @@ Channel insights, richer media details and bulk Pinchflat management.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/ebc7aff4ab1c4d7dbef2e6cc04c962ccf08bc8bb/README.md).
 
-
-### v2.12.4
+## v2.12.4
 
 Dashboard usability and persistent-login update.
 
@@ -832,8 +636,7 @@ Dashboard usability and persistent-login update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/6505f66a1f642b26b480df47b4337dec8304bb0b/README.md).
 
-
-### v2.12.3
+## v2.12.3
 
 Pinchflat source-action reliability update.
 
@@ -854,8 +657,7 @@ Pinchflat source-action reliability update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/e86207304de18033971ec70d26d2c77f102d0f38/README.md).
 
-
-### v2.12.2
+## v2.12.2
 
 Subscription search placement update.
 
@@ -868,8 +670,7 @@ Subscription search placement update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/3ce200908a173af1e4e6a691b3185a5516a786d5/README.md).
 
-
-### v2.12.1
+## v2.12.1
 
 Destructive channel removal fix.
 
@@ -888,8 +689,7 @@ Destructive channel removal fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/369732e6c7bb32beda7804fdab8bb866725a1f20/README.md).
 
-
-### v2.12.0
+## v2.12.0
 
 Subscription workflow and source-management update.
 
@@ -911,8 +711,7 @@ Subscription workflow and source-management update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/24c51e76f822b34d016cfce178191fb4205d010d/README.md).
 
-
-### v2.11.0
+## v2.11.0
 
 Pinchflat concurrent download control.
 
@@ -929,8 +728,7 @@ Pinchflat concurrent download control.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/0ee02f439b7594b9051a1054876c559970866259/README.md).
 
-
-### v2.10.1
+## v2.10.1
 
 Dismissible page messages.
 
@@ -941,8 +739,7 @@ Dismissible page messages.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/1dce17ecaec2ebc57a16f8bdacc79265f6a6bfe6/README.md).
 
-
-### v2.10.0
+## v2.10.0
 
 YouTube Liked Videos in Discover.
 
@@ -964,8 +761,7 @@ YouTube Liked Videos in Discover.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/1dce17ecaec2ebc57a16f8bdacc79265f6a6bfe6/README.md).
 
-
-### v2.9.1
+## v2.9.1
 
 Discover Downloaded live-refresh fix.
 
@@ -981,8 +777,7 @@ Discover Downloaded live-refresh fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/5dcdf13fb31d57c5cfb6291e17a875b89a0b53bc/README.md).
 
-
-### v2.9.0
+## v2.9.0
 
 Page View customisation and Pinchflat queue refresh fix.
 
@@ -1007,8 +802,7 @@ Page View customisation and Pinchflat queue refresh fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/5dcdf13fb31d57c5cfb6291e17a875b89a0b53bc/README.md).
 
-
-### v2.8.0
+## v2.8.0
 
 Dashboard loading, Discover history, queue and subscription AJAX update.
 
@@ -1034,8 +828,7 @@ Dashboard loading, Discover history, queue and subscription AJAX update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/4bd27f3eda0f3ec52019b9bcd9356173573eb548/README.md).
 
-
-### v2.7.4
+## v2.7.4
 
 Pinchflat download spacing and queue-navigation fix.
 
@@ -1050,8 +843,7 @@ Pinchflat download spacing and queue-navigation fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/9ca1817b11124a48d7626bbf364346bf8dbdab5e/README.md).
 
-
-### v2.7.3
+## v2.7.3
 
 Pinchflat download dashboard media links and queue cleanup.
 
@@ -1070,8 +862,7 @@ Pinchflat download dashboard media links and queue cleanup.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/90970008be63fafdf44dc9798d339cc2093f96bd/README.md).
 
-
-### v2.7.2
+## v2.7.2
 
 Pinchflat queue schema compatibility fix.
 
@@ -1086,8 +877,7 @@ Pinchflat queue schema compatibility fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/67ca9cd6eebdaa3d7c8291a3190da399e56b7047/README.md).
 
-
-### v2.7.1
+## v2.7.1
 
 Pinchflat database path compatibility fix.
 
@@ -1101,8 +891,7 @@ Pinchflat database path compatibility fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/39e618128153d567f15a4b79b01f9364839cd218/README.md).
 
-
-### v2.7.0
+## v2.7.0
 
 Live Pinchflat download dashboard and waiting queue.
 
@@ -1124,8 +913,7 @@ Live Pinchflat download dashboard and waiting queue.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/c678b4cb6b0957ab764139ac25088e2cc8c61a17/README.md).
 
-
-### v2.6.5
+## v2.6.5
 
 Pinchflat log viewer fix.
 
@@ -1136,8 +924,7 @@ Pinchflat log viewer fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/3e657076b9bab953097d652fb48873182db989b5/README.md).
 
-
-### v2.6.4
+## v2.6.4
 
 Settings form consistency and Pinchflat container logs.
 
@@ -1157,8 +944,7 @@ Settings form consistency and Pinchflat container logs.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/23de543aea643f350a6fecec01c5e150de305f22/README.md).
 
-
-### v2.6.3
+## v2.6.3
 
 YouTube statistics cleanup.
 
@@ -1174,8 +960,7 @@ YouTube statistics cleanup.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/36e82bd6a7ff47cbf1b822be540331586fe20a63/README.md).
 
-
-### v2.6.2
+## v2.6.2
 
 UI consistency, favourites refresh and YouTube statistics.
 
@@ -1195,8 +980,7 @@ UI consistency, favourites refresh and YouTube statistics.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/36e82bd6a7ff47cbf1b822be540331586fe20a63/README.md).
 
-
-### v2.6.1
+## v2.6.1
 
 Media Profile manager and one-time-download UI refresh.
 
@@ -1218,8 +1002,7 @@ Media Profile manager and one-time-download UI refresh.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/d59fa775441979f9f8e5109d011f90746e71c3b0/README.md).
 
-
-### v2.6.0
+## v2.6.0
 
 Interface, source-control and settings refresh.
 
@@ -1244,8 +1027,7 @@ Interface, source-control and settings refresh.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/c4b21eed3ec871987fd56ed5fff2646ffd641b49/README.md).
 
-
-### v2.5.1
+## v2.5.1
 
 Random Videos / Shorts separation and Shorts layout fix.
 
@@ -1263,8 +1045,7 @@ Random Videos / Shorts separation and Shorts layout fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/e6f97abdabb45f2b9070eaaeac6977d4641d5612/README.md).
 
-
-### v2.5.0
+## v2.5.0
 
 Random Videos / For You redesign.
 
@@ -1286,8 +1067,7 @@ Random Videos / For You redesign.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/901378d09c2b1563274e0404fbcd8be8c131a3af/README.md).
 
-
-### v2.4.0
+## v2.4.0
 
 Home-page Shorts shelf.
 
@@ -1306,8 +1086,7 @@ Home-page Shorts shelf.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/6e5bdc6fa9710bc13242b870ea20ed128a0e14f5/README.md).
 
-
-### v2.3.4
+## v2.3.4
 
 Random Shorts empty-player regression fix.
 
@@ -1322,8 +1101,7 @@ Random Shorts empty-player regression fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/6eb0f7825ee873d84673f9eea4ff0124898cc37f/README.md).
 
-
-### v2.3.3
+## v2.3.3
 
 YouTube Like CSRF fix.
 
@@ -1336,8 +1114,7 @@ YouTube Like CSRF fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/647a237c47e52246b6b14be0bff3eec6527826ab/README.md).
 
-
-### v2.3.2
+## v2.3.2
 
 Latest-video popup interface refresh.
 
@@ -1353,8 +1130,7 @@ Latest-video popup interface refresh.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/58aa6ba120be6c6200f1b9f0820acc19cd05c6d2/README.md).
 
-
-### v2.3.1
+## v2.3.1
 
 YouTube embedded-player identity fix.
 
@@ -1369,8 +1145,7 @@ YouTube embedded-player identity fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/bff338f4358f79ab7a4ac6748fd9468680e45614/README.md).
 
-
-### v2.3.0
+## v2.3.0
 
 Expanded latest-subscriptions player.
 
@@ -1387,8 +1162,7 @@ Expanded latest-subscriptions player.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/b0d97c511c7c277a3a4dd7fd78fa1b3e59161296/README.md).
 
-
-### v2.2.2
+## v2.2.2
 
 Personalised Discover and YouTube Like controls.
 
@@ -1408,8 +1182,7 @@ Personalised Discover and YouTube Like controls.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/913eb10056c9afb033dee3a3b14f68563875ced2/README.md).
 
-
-### v2.2.1
+## v2.2.1
 
 Latest subscriptions feed fix.
 
@@ -1426,8 +1199,7 @@ Latest subscriptions feed fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/7729d45d0e62b06a1b541baf80ae679f9a88e3fa/README.md).
 
-
-### v2.2.0
+## v2.2.0
 
 Latest subscription videos dashboard.
 
@@ -1446,8 +1218,7 @@ Latest subscription videos dashboard.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/a6f0faadf16db00a57efbf24514a7a5fc44c878b/README.md).
 
-
-### v2.1.1
+## v2.1.1
 
 Random Shorts description display.
 
@@ -1459,8 +1230,7 @@ Random Shorts description display.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/2154ab6efe7c43b8d58485d04f880ed5713c6828/README.md).
 
-
-### v2.1.0
+## v2.1.0
 
 Favourites and custom video lists.
 
@@ -1480,8 +1250,7 @@ Favourites and custom video lists.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/12d528e8612170c85769cb15368325f409bf3023/README.md).
 
-
-### v2.0.2
+## v2.0.2
 
 English-first Discover and Top 100 channel images.
 
@@ -1497,8 +1266,7 @@ English-first Discover and Top 100 channel images.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/12d528e8612170c85769cb15368325f409bf3023/README.md).
 
-
-### v2.0.1
+## v2.0.1
 
 Discover and unsubscribe fixes.
 
@@ -1515,8 +1283,7 @@ Discover and unsubscribe fixes.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/13378edd9c30c0faf5c688e04b35692a956ade34/README.md).
 
-
-### v2.0.0
+## v2.0.0
 
 Major discovery, automation and media-management release.
 
@@ -1538,13 +1305,7 @@ Major discovery, automation and media-management release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/302572c8a6898f6b702334d288284751f569418d/README.md).
 
-
-</details>
-
-<details>
-<summary>V1: subscriptions, deployment, automation and security</summary>
-
-### v1.9.4
+## v1.9.4
 
 Verification marker parsing fix.
 
@@ -1558,8 +1319,7 @@ Verification marker parsing fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/5b597203df27b4569c78e483fe0fb4227944963a/README.md).
 
-
-### v1.9.3
+## v1.9.3
 
 Running-Pinchflat RPC deletion fix.
 
@@ -1575,8 +1335,7 @@ Running-Pinchflat RPC deletion fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/357124585f47483947962b881d06f3b93a4d1a0a/README.md).
 
-
-### v1.9.2
+## v1.9.2
 
 Verified direct source deletion release.
 
@@ -1593,8 +1352,7 @@ Verified direct source deletion release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/4f3a10f8bcd67c3672ff7174ec185ba591b34728/README.md).
 
-
-### v1.9.1
+## v1.9.1
 
 Safe source-authorisation and first-import release.
 
@@ -1611,8 +1369,7 @@ Safe source-authorisation and first-import release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/e3c49b4a85ea2a8f951134e6281af195266d0628/README.md).
 
-
-### v1.9.0
+## v1.9.0
 
 Direct Pinchflat control release.
 
@@ -1633,8 +1390,7 @@ This release needs the ZimaOS application to be recreated or updated from the ne
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/b593d0075c5958ce6a1a4444368c99e1b35fa05e/README.md).
 
-
-### v1.8.8
+## v1.8.8
 
 Pinchflat source deletion transport fix.
 
@@ -1647,8 +1403,7 @@ Pinchflat source deletion transport fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/b593d0075c5958ce6a1a4444368c99e1b35fa05e/README.md).
 
-
-### v1.8.7
+## v1.8.7
 
 Authoritative Enabled toggle release.
 
@@ -1668,8 +1423,7 @@ Authoritative Enabled toggle release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/81ad54ca9246fe3f0403d1662523e17adce458a2/README.md).
 
-
-### v1.8.6
+## v1.8.6
 
 Authoritative Pinchflat source removal release.
 
@@ -1685,8 +1439,7 @@ Authoritative Pinchflat source removal release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/4352bf432860242f5e3f510be0deeaf95a913c75/README.md).
 
-
-### v1.8.5
+## v1.8.5
 
 Canonical URL and fresh-install Google OAuth fix.
 
@@ -1703,8 +1456,7 @@ For another server, edit `APP_URL` in the YAML before deployment.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/8cf47405dfcbeda7002a0ef7dff23e698292aa9a/README.md).
 
-
-### v1.8.4
+## v1.8.4
 
 YouTube subscription refresh accuracy fix.
 
@@ -1716,8 +1468,7 @@ YouTube subscription refresh accuracy fix.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/8cf47405dfcbeda7002a0ef7dff23e698292aa9a/README.md).
 
-
-### v1.8.3
+## v1.8.3
 
 Subscription row editor usability release.
 
@@ -1735,8 +1486,7 @@ Subscription row editor usability release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/8cf47405dfcbeda7002a0ef7dff23e698292aa9a/README.md).
 
-
-### v1.8.2
+## v1.8.2
 
 Re-subscribe recovery release.
 
@@ -1751,8 +1501,7 @@ Re-subscribe recovery release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/c2e912e71ce5fc177dd11218e53b2adac9d99052/README.md).
 
-
-### v1.8.1
+## v1.8.1
 
 Unsubscribe cleanup and media-path maintenance release.
 
@@ -1768,8 +1517,7 @@ Unsubscribe cleanup and media-path maintenance release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/eb27f46868260c58a0f0788da337f2adc779e738/README.md).
 
-
-### v1.8.0
+## v1.8.0
 
 Workflow and settings usability update.
 
@@ -1787,8 +1535,7 @@ Workflow and settings usability update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/75ac4cf5106d8f6e1f7d9b2a525c8902431d5ac4/README.md).
 
-
-### v1.7.1
+## v1.7.1
 
 Pinchflat settings display and UI maintenance release.
 
@@ -1804,8 +1551,7 @@ Pinchflat settings display and UI maintenance release.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/61139ef1fd35795f487bf8c8dbbeedbfd22dedf6/README.md).
 
-
-### v1.7.0
+## v1.7.0
 
 Pinchflat profile management and user administration update.
 
@@ -1823,8 +1569,7 @@ Pinchflat profile management and user administration update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/885bd8d33e0442b8630cc27d7e7dec9633608f3e/README.md).
 
-
-### v1.6.0
+## v1.6.0
 
 Native authentication and security release.
 
@@ -1865,8 +1610,7 @@ docker exec -it youtube-pinchflat-sync python /app/manage_user.py disable-2fa US
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/82b6a2d462396a096ba12725311acf7a2daddffe/README.md).
 
-
-### v1.5.2
+## v1.5.2
 
 Channel artwork update.
 
@@ -1880,8 +1624,7 @@ Channel artwork update.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/e8caf95ab840d9b2633e6c3a4422f063182c2f75/README.md).
 
-
-### v1.5.1
+## v1.5.1
 
 Maintenance release fixing the v1.5.0 startup failure.
 
@@ -1893,8 +1636,7 @@ Maintenance release fixing the v1.5.0 startup failure.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/ad8c79a7e2bcf14f291a0d2f4428f0548aefa517/README.md).
 
-
-### v1.5.0
+## v1.5.0
 
 Version 1.5.0 adds:
 
@@ -1919,8 +1661,7 @@ Version 1.5.0 adds:
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/4adf3a992c42849d54b2abe23912b8f793063d36/README.md).
 
-
-### v1.4.0
+## v1.4.0
 
 Version 1.4.0 is the UI and automation release.
 
@@ -2067,8 +1808,7 @@ When the app creates a Pinchflat source, it completes Pinchflat onboarding autom
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/d9fcc37b041c4db0e87415e7c536eb440dbc0851/README.md).
 
-
-### v1.3.1
+## v1.3.1
 
 This maintenance release fixes editing existing Pinchflat sources:
 
@@ -2080,8 +1820,7 @@ This maintenance release fixes editing existing Pinchflat sources:
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/3254bd2ddaea701893c6cef6ce55fac7b3c01db4/README.md).
 
-
-### v1.3.0
+## v1.3.0
 
 This version adds:
 
@@ -2098,8 +1837,7 @@ This version adds:
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/63361da542f8edbf817145589dabeae60cdc870f/README.md).
 
-
-### v1.2.1
+## v1.2.1
 
 - Each YouTube subscription has its own download-range dropdown.
 - Choices include Default, Today, This week, This month, Last 6 months, Last year, 2 to 10 years, original subscription date and a custom date.
@@ -2118,8 +1856,7 @@ This version adds:
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/63361da542f8edbf817145589dabeae60cdc870f/README.md).
 
-
-### v1.2.0
+## v1.2.0
 
 - Each YouTube subscription has its own download-range dropdown.
 - Choices include Default, Today, This week, This month, Last 6 months, Last year, 2 to 10 years, original subscription date and a custom date.
@@ -2133,8 +1870,7 @@ This version adds:
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/502a624c26e95c9fe7f046189a85cd0340e0f67f/README.md).
 
-
-### v1.1.0
+## v1.1.0
 
 This version adds:
 
@@ -2146,6 +1882,3 @@ This version adds:
 - Persistent settings in SQLite.
 
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/63fabba3842f1202dbc905faa3f9f2177140719b/README.md).
-
-</details>
-

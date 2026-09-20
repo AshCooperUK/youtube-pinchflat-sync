@@ -52,7 +52,7 @@ from downloader_media import MediaYoutubeDL, SUBTITLE_EXTENSIONS, safe_media_com
 from publication_metadata import publication_value, write_video_nfo
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.7"
+VERSION = "3.0.8"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -820,6 +820,7 @@ def init_db():
         ensure_column(conn, "activity", "video_id", "TEXT")
         ensure_column(conn, "activity", "video_title", "TEXT")
         ensure_column(conn, "activity", "job_id", "TEXT")
+        ensure_column(conn, "activity", "channel_title", "TEXT")
         ensure_column(conn, "cleanup_jobs", "source_id", "TEXT")
         ensure_column(
             conn,
@@ -2236,7 +2237,7 @@ def activity_video_id_from_message(message):
     return match.group(1) if match else ""
 
 
-def log_activity(event_type, title, message, severity="info", channel_id=None, *, video_id=None, video_title=None, job_id=None):
+def log_activity(event_type, title, message, severity="info", channel_id=None, *, video_id=None, video_title=None, job_id=None, channel_title=None):
     with db() as conn:
         if job_id:
             job = conn.execute("SELECT * FROM downloads WHERE job_id=?", (job_id,)).fetchone()
@@ -2244,20 +2245,24 @@ def log_activity(event_type, title, message, severity="info", channel_id=None, *
                 video_id = video_id or job["video_id"] or youtube_video_id_from_url(job["youtube_url"])
                 video_title = video_title or job["title"]
                 channel_id = channel_id or dict(job).get("channel_id")
+                channel_title = channel_title or job["channel_title"]
+        if channel_id and not channel_title:
+            channel = conn.execute("SELECT title FROM subscriptions WHERE channel_id=?", (channel_id,)).fetchone()
+            channel_title = channel["title"] if channel else None
         video_id = activity_video_id(video_id) or activity_video_id_from_message(message)
         conn.execute(
             """
             INSERT INTO activity (
-                created_at, event_type, title, message, severity, channel_id, video_id, video_title, job_id
+                created_at, event_type, title, message, severity, channel_id, video_id, video_title, job_id, channel_title
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (now_iso(), event_type, title, message, severity, channel_id, video_id or None, video_title, job_id),
+            (now_iso(), event_type, title, message, severity, channel_id, video_id or None, video_title, job_id, channel_title),
         )
 
 
 def activity_view_rows(rows):
-    """Add trusted thumbnail links, including identifiable pre-v3.0.6 events."""
+    """Resolve popup identities from local records, without network calls or title guesses."""
     items = [dict(row) for row in rows]
     titles = set()
     for item in items:
@@ -2287,6 +2292,8 @@ def activity_view_rows(rows):
         job = jobs.get(item.get("job_id"), {})
         item["video_id"] = item["video_id"] or activity_video_id(job.get("video_id")) or activity_video_id(youtube_video_id_from_url(job.get("youtube_url")))
         item["video_title"] = item.get("video_title") or job.get("title") or ""
+        item["channel_id"] = item.get("channel_id") or job.get("channel_id") or ""
+        item["channel_title"] = item.get("channel_title") or job.get("channel_title") or ""
         if not item["video_id"]:
             for candidate in sorted(item["candidate_titles"], key=len, reverse=True):
                 matches = {activity_video_id(row["video_id"]) for row in by_title.get(candidate, [])
@@ -2300,6 +2307,40 @@ def activity_view_rows(rows):
         video_id = item["video_id"]
         item["thumbnail_url"] = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""
         item["video_url"] = f"https://www.youtube.com/watch?v={video_id}" if video_id else ""
+    # Events predating job_id, and remote-only videos, still have useful local metadata.
+    videos = {}
+    channel_names = {}
+    with db() as conn:
+        video_ids = sorted({item["video_id"] for item in items if item["video_id"]})
+        for offset in range(0, len(video_ids), 200):
+            batch = video_ids[offset:offset + 200]
+            marks = ','.join('?' for _ in batch)
+            for table in ("downloads", "saved_videos", "discovery_likes"):
+                for row in conn.execute(f"SELECT video_id,title,channel_id,channel_title FROM {table} WHERE video_id IN ({marks})", batch):
+                    videos.setdefault(row["video_id"], []).append(dict(row))
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='guide_videos'").fetchone():
+                for row in conn.execute(f"""SELECT v.video_id,v.title,v.channel_id,c.title AS channel_title
+                    FROM guide_videos v LEFT JOIN guide_channels c ON c.channel_id=v.channel_id
+                    WHERE v.video_id IN ({marks}) AND v.metadata_checked_at>?""", [*batch, (datetime.now(timezone.utc)-timedelta(days=30)).isoformat()]):
+                    videos.setdefault(row["video_id"], []).append(dict(row))
+        for item in items:
+            matches = videos.get(item["video_id"], [])
+            channel_ids = {row["channel_id"] for row in matches if row["channel_id"]}
+            if not item["channel_id"] and len(channel_ids) == 1:
+                item["channel_id"] = channel_ids.pop()
+            for row in matches:
+                if item["channel_id"] and row["channel_id"] != item["channel_id"]:
+                    continue
+                item["video_title"] = item["video_title"] or row["title"] or ""
+                item["channel_title"] = item["channel_title"] or row["channel_title"] or ""
+        ids = sorted({item["channel_id"] for item in items if item["channel_id"]})
+        for offset in range(0, len(ids), 200):
+            batch = ids[offset:offset+200]
+            for row in conn.execute(f"SELECT channel_id,title FROM subscriptions WHERE channel_id IN ({','.join('?' for _ in batch)})", batch):
+                channel_names[row["channel_id"]] = row["title"]
+    for item in items:
+        item["channel_title"] = channel_names.get(item["channel_id"]) or item["channel_title"]
+        item["channel_url"] = "https://www.youtube.com/channel/" + quote(item["channel_id"], safe="") if item["channel_id"] else ""
     return items
 
 

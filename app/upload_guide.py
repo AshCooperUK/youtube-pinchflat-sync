@@ -37,19 +37,41 @@ def sort_text(value):
 
 
 def channel_sort_key(channel, mode='title'):
+    """Match subscription-sort.js, including direction and stable name/ID ties."""
+    field, _, direction = str(mode or 'title').partition(':')
+    defaults = {'title':'asc', 'enabled':'desc', 'range':'asc', 'media_profile':'asc',
+                'cutoff':'asc', 'storage':'desc', 'error':'asc', 'actions':'desc', 'status':'asc', 'newest':'desc'}
+    if field not in defaults:
+        field = 'title'
+    if direction not in ('asc', 'desc'):
+        direction = defaults[field]
     title = sort_text(channel.get('title'))
-    key = ()
-    if mode == 'media_profile':
+    key = (title,)
+    if field == 'media_profile':
         profile = channel.get('profile_id') or ''
         key = (int(profile[:-1]) if re.fullmatch(r'\d+p', profile) else 9007199254740991,
                sort_text(channel.get('profile_name')))
-    elif mode == 'status':
+    elif field == 'enabled':
+        key = (int(bool(channel.get('download_enabled'))),)
+    elif field == 'range':
+        ranges = {'default':0,'today':1,'this_week':2,'this_month':3,'six_months':4,'last_year':5,'subscription_date':15,'custom_date':16}
+        value = channel.get('range_mode') or 'default'
+        key = (ranges.get(value, 4+int(value[6:]) if re.fullmatch(r'years_\d+', value) else 17),)
+    elif field == 'cutoff':
+        key = (channel.get('cutoff') or '',)
+    elif field == 'error':
+        key = (not bool(channel.get('last_error')), sort_text(channel.get('last_error')))
+    elif field == 'actions':
+        key = (int(bool(channel.get('dirty'))),)
+    elif field == 'status':
         key = (channel.get('status') or '',)
-    elif mode == 'newest':
-        # ISO UTC timestamps compare lexically. Negative codepoints reverse them.
-        key = (tuple(-ord(c) for c in channel.get('first_seen_at', '')),)
-    elif mode == 'storage':
-        key = (-int(channel.get('storage_bytes') or 0),)
+    elif field == 'newest':
+        key = (channel.get('first_seen_at') or '',)
+    elif field == 'storage':
+        key = (int(channel.get('storage_bytes') or 0),)
+    if direction == 'desc':
+        # The terminator also reverses strings where one is a prefix of another.
+        key = tuple(tuple(-ord(c) for c in v)+(1,) if isinstance(v, str) else -v for v in key)
     return (not channel.get('favourite'), *key, title, channel['channel_id'])
 
 
@@ -438,6 +460,8 @@ class UploadGuide:
                 'thumbnail_url': (row['guide_thumbnail'] if fresh else '') or row['thumbnail_url'] or '',
                 'favourite': row['channel_id'] in favourite_ids, 'profile_id': self.app.subscription_media_profile_id(dict(row)),
                 'status': sub.get('ui_status') or 'enabled', 'first_seen_at': row['first_seen_at'] or '',
+                'download_enabled': bool(sub['download_enabled']), 'range_mode': row['history_mode'] or 'default',
+                'cutoff': sub['cutoff'], 'last_error': row['last_error'] or '', 'dirty': False,
                 'storage_bytes': self.app.channel_disk_usage(row['title'], storage, row['download_folder'] or self.app.safe_media_component(row['title'], 80)),
                 'coverage': {'initialised': bool(row['initialised']), 'complete': bool(row['history_complete']),
                   'oldest_at': row['oldest_covered_at'], 'last_success_at': row['last_success_at'],

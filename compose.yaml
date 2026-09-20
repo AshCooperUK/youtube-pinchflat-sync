@@ -95,10 +95,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "3.0.7"
+  version: "3.0.8"
   update_at: "2026-09-20"
   release_notes:
-    en_US: v3.0.7 adds the Upload Guide with cached YouTube history and existing player popups, plus YouTube release dates in Emby video metadata. Includes all earlier fixes.
+    en_US: v3.0.8 adds sortable subscription headings, Activity video and channel popup links, restored release history and Cloudflare-first setup instructions.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
