@@ -5913,18 +5913,75 @@ def ensure_single_download_emby_compatibility(output_path, job_id=None):
             temp_path.unlink(missing_ok=True)
 
 
+def _v3_subscription_info_date(info, fallback=""):
+    upload_date = str((info or {}).get("upload_date") or "").strip()
+    if re.fullmatch(r"\d{8}", upload_date):
+        return f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+    timestamp = (info or {}).get("timestamp") or (info or {}).get("release_timestamp")
+    if timestamp:
+        try:
+            return datetime.fromtimestamp(float(timestamp), tz=timezone.utc).date().isoformat()
+        except (TypeError, ValueError, OSError):
+            pass
+    return str(fallback or "")
+
+
+def _v3_download_with_auth_retry(job, ydl_opts):
+    """Run yt-dlp anonymously first and retry with configured auth only when useful."""
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(job["youtube_url"], download=True)
+            return info, ydl, "anonymous"
+    except Exception as anonymous_error:
+        if not setting_bool("downloader_auth_retry", True):
+            raise
+        if not should_retry_with_cookies(anonymous_error):
+            raise
+
+        status = _v3_cookie_status()
+        if not status.get("valid"):
+            raise
+
+        update_download_job(
+            job["job_id"],
+            phase="Retrying with YouTube authentication",
+            auth_mode="cookies",
+        )
+        authenticated = _v3_authenticated_options(ydl_opts)
+        with yt_dlp.YoutubeDL(authenticated) as ydl:
+            info = ydl.extract_info(job["youtube_url"], download=True)
+            return info, ydl, "cookies"
+
+
 def run_download_job(job_id):
     job = download_job_row(job_id)
     if not job:
         return
 
-    folder_setting = (
-        get_setting("emby_download_folder", "Emby Download")
-        if job["source_type"] == "emby_download"
-        else get_setting("single_download_folder", "Single Downloads")
-    )
-    folder_setting = folder_setting.strip().strip("/\\\\") or "Single Downloads"
-    output_dir = DOWNLOAD_ROOT / folder_setting
+    source_type = str(job.get("source_type") or "")
+    subscription_job = source_type.startswith("subscription")
+
+    if subscription_job:
+        output_dir = DOWNLOAD_ROOT / "shows"
+        output_template = _v3_subscription_template()
+    else:
+        folder_setting = (
+            get_setting("emby_download_folder", "Emby Download")
+            if source_type == "emby_download"
+            else get_setting("single_download_folder", "Single Downloads")
+        )
+        folder_setting = folder_setting.strip().strip("/\\") or "Single Downloads"
+        output_dir = DOWNLOAD_ROOT / folder_setting
+        relative_template = (
+            get_setting(
+                "single_download_output_template",
+                "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
+            )
+            if source_type == "single"
+            else "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s"
+        )
+        output_template = str(output_dir / relative_template)
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     update_download_job(
@@ -5933,21 +5990,13 @@ def run_download_job(job_id):
         phase="Preparing YouTube download",
         started_at=now_iso(),
         error=None,
+        failure_code=None,
         progress=0,
+        auth_mode="anonymous",
     )
-
-    relative_template = (
-        get_setting(
-            "single_download_output_template",
-            "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
-        )
-        if job["source_type"] == "single"
-        else "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s"
-    )
-    output_template = str(output_dir / relative_template)
 
     compatibility_video = (
-        job.get("source_type") == "single"
+        source_type == "single"
         and get_setting("single_download_format", "best") != "audio"
         and single_download_compatibility_profile() == "emby_tv"
     )
@@ -5966,18 +6015,34 @@ def run_download_job(job_id):
         "postprocessor_hooks": [_download_postprocessor_hook(job_id, download_progress_ceiling)],
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 30,
     }
-    if job["source_type"] == "single":
+
+    if source_type == "single":
         ydl_opts.update(single_download_ydl_settings())
+    elif subscription_job:
+        ydl_opts.update(_v3_profile_ydl_options(job.get("profile_id")))
+        # Subscription files are the long-term Emby library. Keep the sidecars
+        # required for migration/reconciliation even if metadata embedding fails.
+        ydl_opts.update({
+            "writeinfojson": True,
+            "writethumbnail": True,
+            "embedmetadata": True,
+        })
     else:
         ydl_opts.update({
             "format": "bestvideo*+bestaudio/best",
             "merge_output_format": "mp4",
         })
 
+    # Expert custom options apply to native subscription downloads as well as
+    # authenticated retries, but managed path/progress/cookie settings cannot
+    # be overridden by the JSON editor.
+    if subscription_job:
+        ydl_opts.update(_v3_custom_yt_dlp_options())
+
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(job["youtube_url"], download=True)
+        info, ydl, auth_mode = _v3_download_with_auth_retry(job, ydl_opts)
 
         output_path = ""
         requested = info.get("requested_downloads") or []
@@ -5991,7 +6056,7 @@ def run_download_job(job_id):
 
         output_path = resolve_direct_download_output_path(info, ydl, output_dir, output_path)
 
-        if job.get("source_type") == "single" and get_setting("single_download_format", "best") != "audio":
+        if source_type == "single" and get_setting("single_download_format", "best") != "audio":
             try:
                 update_download_job(
                     job_id,
@@ -6013,6 +6078,12 @@ def run_download_job(job_id):
             except Exception as exc:
                 raise RuntimeError(f"Emby compatibility conversion failed: {exc}") from exc
 
+        resolved_channel_id = (
+            str(info.get("channel_id") or "").strip()
+            or str(job.get("channel_id") or "").strip()
+        )
+        published_at = _v3_subscription_info_date(info, job.get("published_at"))
+
         update_download_job(
             job_id,
             video_id=info.get("id") or job.get("video_id"),
@@ -6022,31 +6093,36 @@ def run_download_job(job_id):
                 or info.get("channel")
                 or job.get("channel_title")
             ),
+            channel_id=resolved_channel_id or None,
+            published_at=published_at or None,
             status="completed",
             phase="Completed",
             progress=100.0,
             output_path=output_path,
             finished_at=now_iso(),
             error=None,
+            failure_code=None,
+            auth_mode=auth_mode,
         )
 
-        if job.get("source_type") in {"single", "emby_download"}:
+        if source_type in {"single", "emby_download"} or subscription_job:
             try:
                 write_direct_download_series_metadata(
                     info,
                     output_path,
                     write_nfo=(
                         setting_bool("single_download_write_nfo", True)
-                        if job.get("source_type") == "single"
+                        if source_type == "single"
                         else True
                     ),
                 )
             except Exception as exc:
                 log_activity(
                     "download_metadata",
-                    "Direct download metadata warning",
+                    "Download metadata warning",
                     f"{info.get('title') or job['youtube_url']}: {exc}",
                     "warning",
+                    resolved_channel_id or None,
                 )
 
         if job.get("remove_playlist_item") and job.get("playlist_item_id"):
@@ -6071,41 +6147,57 @@ def run_download_job(job_id):
                 "Download completed",
                 f"{info.get('title') or job['youtube_url']} completed.",
                 "success",
+                resolved_channel_id or None,
             )
 
         storage_snapshot(force=True)
 
-        # Direct downloads may live in their own Emby library below the shared
-        # /downloads bind.  Refresh the most specific matching library/folder
-        # instead of always refreshing the main Pinchflat YouTube library.
-        if job.get("source_type") in {"single", "emby_download"} and emby_configured():
+        if emby_configured():
             try:
-                if job.get("source_type") == "single":
+                if source_type == "single":
                     direct_folder = get_setting("single_download_folder", "Single Downloads")
                     direct_label = "One-time Download"
-                else:
+                    emby_refresh_download_library(direct_folder, direct_label)
+                elif source_type == "emby_download":
                     direct_folder = get_setting("emby_download_folder", "Emby Download")
                     direct_label = "Emby Download"
-                emby_refresh_download_library(direct_folder, direct_label)
+                    emby_refresh_download_library(direct_folder, direct_label)
+                elif subscription_job:
+                    direct_label = "Subscription Download"
+                    emby_refresh_library(
+                        channel_id=resolved_channel_id,
+                        channel_title=info.get("uploader") or info.get("channel") or job.get("channel_title") or "",
+                    )
                 log_activity(
                     "emby",
                     f"{direct_label} refresh queued",
                     f"Queued the targeted Emby scan and metadata refresh after {info.get('title') or job['youtube_url']} completed.",
                     "success",
+                    resolved_channel_id or None,
                 )
             except Exception as exc:
                 log_activity(
                     "emby",
-                    f"{direct_label} Emby refresh failed",
+                    "Emby refresh failed",
                     f"{info.get('title') or job['youtube_url']}: {exc}",
                     "warning",
+                    resolved_channel_id or None,
                 )
 
     except Exception as exc:
+        failure_code = classify_yt_dlp_error(exc)
         update_download_job(
             job_id,
             status="failed",
-            phase="Failed",
+            phase={
+                "membership_required": "Membership required",
+                "age_restricted": "Age restricted",
+                "authentication_required": "Authentication required",
+                "rate_limited": "YouTube rate limited",
+                "private": "Private video",
+                "unavailable": "Unavailable",
+            }.get(failure_code, "Failed"),
+            failure_code=failure_code,
             error=str(exc)[:1500],
             finished_at=now_iso(),
         )
@@ -6114,8 +6206,8 @@ def run_download_job(job_id):
             "Download failed",
             f"{job.get('title') or job['youtube_url']}: {exc}",
             "error",
+            job.get("channel_id"),
         )
-
 
 def download_worker():
     while True:
@@ -6127,33 +6219,37 @@ def download_worker():
 
 
 def start_download_worker():
-    global download_worker_started
-    if download_worker_started:
-        return
-    download_worker_started = True
+    global download_worker_started, download_worker_count
 
-    with db() as conn:
-        conn.execute(
-            """
-            UPDATE downloads
-            SET status = 'queued', phase = 'Queued', started_at = NULL
-            WHERE status IN ('downloading', 'processing')
-            """
+    desired = setting_int("downloader_worker_concurrency", 1, 1, 8)
+
+    if not download_worker_started:
+        download_worker_started = True
+        with db() as conn:
+            conn.execute(
+                """
+                UPDATE downloads
+                SET status = 'queued', phase = 'Queued', started_at = NULL
+                WHERE status IN ('downloading', 'processing')
+                """
+            )
+            queued = conn.execute(
+                "SELECT job_id FROM downloads WHERE status = 'queued' ORDER BY id ASC"
+            ).fetchall()
+        for row in queued:
+            download_queue.put(row["job_id"])
+
+    # Existing worker threads are intentionally not killed when concurrency is
+    # lowered. They drain naturally; a container restart applies a lower limit
+    # immediately. Increasing concurrency takes effect without a restart.
+    while download_worker_count < desired:
+        download_worker_count += 1
+        thread = threading.Thread(
+            target=download_worker,
+            name=f"youtube-download-worker-{download_worker_count}",
+            daemon=True,
         )
-        queued = conn.execute(
-            "SELECT job_id FROM downloads WHERE status = 'queued' ORDER BY id ASC"
-        ).fetchall()
-
-    thread = threading.Thread(
-        target=download_worker,
-        name="youtube-download-worker",
-        daemon=True,
-    )
-    thread.start()
-
-    for row in queued:
-        download_queue.put(row["job_id"])
-
+        thread.start()
 
 def youtube_playlists(creds):
     items = []
