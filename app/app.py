@@ -37,7 +37,17 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-VERSION = "2.15.0.5"
+from downloader_auth import (
+    authenticated_ydl_options,
+    classify_yt_dlp_error,
+    cookie_file_status,
+    parse_custom_yt_dlp_options,
+    save_cookie_upload,
+    should_retry_with_cookies,
+    test_cookie_authentication,
+)
+
+VERSION = "3.0.0"
 
 ENV_APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 CANONICAL_REDIRECT = os.getenv(
@@ -50,6 +60,9 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "sync.db"
 TOKEN_PATH = DATA_DIR / "google-token.json"
 SECRET_PATH = DATA_DIR / "flask-secret.txt"
+AUTH_DIR = DATA_DIR / "auth"
+AUTH_DIR.mkdir(parents=True, exist_ok=True)
+YOUTUBE_COOKIE_PATH = AUTH_DIR / "youtube-cookies.txt"
 
 YOUTUBE_SCOPE = os.getenv(
     "YOUTUBE_SCOPE",
@@ -269,7 +282,7 @@ YOUTUBE_VIDEO_CATEGORIES = {
 
 YOUTUBE_CHANNEL_FEED_WORKERS = 24
 
-TOTP_ISSUER = "YouTube Pinchflat Sync"
+TOTP_ISSUER = "YouTube Subscription Downloader"
 
 
 
@@ -304,6 +317,9 @@ sync_lock = threading.Lock()
 pinchflat_source_action_lock = threading.Lock()
 download_queue = queue.Queue()
 download_worker_started = False
+download_worker_count = 0
+scan_queue = queue.Queue()
+scan_worker_started = False
 pinchflat_task_blocker_started = False
 pinchflat_task_block_lock = threading.Lock()
 pinchflat_task_block_last = {"at": "", "cancelled": 0, "deleted": 0, "error": ""}
@@ -689,6 +705,13 @@ def init_db():
             "pinchflat_force_index_favourite_minutes": "0",
             "pinchflat_force_index_nonfavourite_minutes": "0",
             "pinchflat_task_block_enabled": "0",
+            "downloader_default_profile": "1080p",
+            "downloader_worker_concurrency": "1",
+            "downloader_scan_workers": "4",
+            "downloader_deep_scan_limit": "500",
+            "downloader_po_token": "",
+            "downloader_custom_yt_dlp_options": "{}",
+            "downloader_auth_retry": "1",
             "retention_enabled": "0",
             "retention_favourite_days": "365",
             "retention_favourite_min_videos": "20",
@@ -796,6 +819,56 @@ def init_db():
                 """,
                 ("1" if existing_count else "0",),
             )
+
+
+def init_v3_db():
+    """Upgrade the existing V2 database in place for the native V3 downloader."""
+    with db() as conn:
+        ensure_column(conn, "downloads", "channel_id", "TEXT")
+        ensure_column(conn, "downloads", "published_at", "TEXT")
+        ensure_column(conn, "downloads", "profile_id", "TEXT")
+        ensure_column(conn, "downloads", "failure_code", "TEXT")
+        ensure_column(conn, "downloads", "auth_mode", "TEXT")
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS subscription_scan_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id TEXT NOT NULL,
+                deep INTEGER NOT NULL DEFAULT 0,
+                redownload INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'queued',
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                found INTEGER NOT NULL DEFAULT 0,
+                queued INTEGER NOT NULL DEFAULT 0,
+                error TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_subscription_scan_jobs_status
+            ON subscription_scan_jobs(status, id);
+            """
+        )
+
+        # V3 keeps the old Pinchflat-named columns only as schema-compatibility
+        # fields. They now mean "registered with the native downloader" and no
+        # external Pinchflat database/container is required.
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET pinchflat_added = CASE
+                    WHEN active = 1 AND COALESCE(download_enabled, 0) = 1 THEN 1
+                    ELSE 0
+                END,
+                pinchflat_source_id = CASE
+                    WHEN active = 1 AND COALESCE(download_enabled, 0) = 1 THEN channel_id
+                    ELSE NULL
+                END,
+                source_authorised = CASE
+                    WHEN active = 1 AND COALESCE(download_enabled, 0) = 1 THEN 1
+                    ELSE 0
+                END
+            """
+        )
 
 
 def now_iso():
@@ -5320,9 +5393,39 @@ def enqueue_download(
     channel_title=None,
     playlist_item_id=None,
     remove_playlist_item=False,
+    channel_id=None,
+    published_at=None,
+    profile_id=None,
+    redownload=False,
 ):
     if not valid_youtube_url(youtube_url):
         raise RuntimeError("Enter a valid YouTube video URL.")
+
+    # Never create duplicate active jobs for the same video/source. Completed
+    # subscription downloads are also skipped unless an explicit redownload
+    # was requested.
+    if video_id:
+        with db() as conn:
+            existing = conn.execute(
+                """
+                SELECT job_id, status, output_path
+                FROM downloads
+                WHERE video_id = ?
+                  AND (
+                    source_type = ?
+                    OR (? LIKE 'subscription%' AND source_type LIKE 'subscription%')
+                  )
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (video_id, source_type, source_type),
+            ).fetchone()
+        if existing and existing["status"] in {"queued", "downloading", "processing"}:
+            return existing["job_id"], False
+        if existing and existing["status"] == "completed" and not redownload:
+            path = Path(str(existing["output_path"] or ""))
+            if path.exists():
+                return existing["job_id"], False
 
     if playlist_item_id:
         with db() as conn:
@@ -5336,7 +5439,7 @@ def enqueue_download(
                 """,
                 (playlist_item_id,),
             ).fetchone()
-        if existing and existing["status"] in {"queued", "downloading", "completed"}:
+        if existing and existing["status"] in {"queued", "downloading", "processing", "completed"}:
             return existing["job_id"], False
 
     job_id = secrets.token_hex(12)
@@ -5345,9 +5448,10 @@ def enqueue_download(
             """
             INSERT INTO downloads (
                 job_id, source_type, youtube_url, video_id, title, channel_title,
-                playlist_item_id, status, progress, remove_playlist_item, created_at
+                playlist_item_id, status, progress, remove_playlist_item, created_at,
+                channel_id, published_at, profile_id, failure_code, auth_mode
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?, NULL, 'anonymous')
             """,
             (
                 job_id,
@@ -5359,6 +5463,9 @@ def enqueue_download(
                 playlist_item_id,
                 1 if remove_playlist_item else 0,
                 now_iso(),
+                channel_id,
+                published_at,
+                profile_id,
             ),
         )
 
@@ -5368,9 +5475,9 @@ def enqueue_download(
         "Download queued",
         f"{title or youtube_url} queued from {source_type}.",
         "info",
+        channel_id,
     )
     return job_id, True
-
 
 def update_download_job(job_id, **values):
     if not values:
@@ -5378,7 +5485,8 @@ def update_download_job(job_id, **values):
     allowed = {
         "video_id", "title", "channel_title", "status", "phase", "progress", "speed",
         "eta", "downloaded_bytes", "total_bytes", "output_path", "error",
-        "started_at", "finished_at",
+        "started_at", "finished_at", "channel_id", "published_at", "profile_id",
+        "failure_code", "auth_mode",
     }
     values = {key: value for key, value in values.items() if key in allowed}
     if not values:
@@ -13736,6 +13844,939 @@ def require_authentication():
     return None
 
 
+
+# ---------------------------------------------------------------------------
+# V3 native YouTube Subscription Downloader
+# ---------------------------------------------------------------------------
+
+V3_MEDIA_PROFILES = [
+    {"id": "2160p", "name": "YouTube 4K", "resolution": "2160p"},
+    {"id": "1080p", "name": "YouTube 1080p", "resolution": "1080p"},
+    {"id": "720p", "name": "YouTube 720p", "resolution": "720p"},
+    {"id": "audio", "name": "YouTube Audio Only", "resolution": "audio"},
+]
+V3_MEDIA_PROFILE_MAP = {item["id"]: item for item in V3_MEDIA_PROFILES}
+
+
+def v3_profile_id(value=None):
+    value = str(value or "").strip()
+    if value in V3_MEDIA_PROFILE_MAP:
+        return value
+    default = get_setting("downloader_default_profile", "1080p").strip()
+    return default if default in V3_MEDIA_PROFILE_MAP else "1080p"
+
+
+def pinchflat_profiles(known_online=None):
+    """Compatibility name retained for V2 database/template upgrades."""
+    return [dict(item) for item in V3_MEDIA_PROFILES]
+
+
+def effective_media_profile_id():
+    return v3_profile_id(get_setting("downloader_default_profile", "1080p"))
+
+
+def subscription_media_profile_id(sub):
+    return v3_profile_id(row_value(sub, "media_profile_id", ""))
+
+
+def media_profile_settings(profile_id=None):
+    profile = V3_MEDIA_PROFILE_MAP[v3_profile_id(profile_id)]
+    resolution = profile["resolution"]
+    return {
+        "id": profile["id"],
+        "name": profile["name"],
+        "preferred_resolution": resolution,
+        "output_path_template": (
+            "/shows/{{ source_custom_name }}/"
+            "{{ season_by_year__episode_by_date_and_index }} - {{ title }}.{{ ext }}"
+        ),
+        "download_subtitles": True,
+        "embed_subtitles": True,
+        "download_thumbnail": True,
+        "embed_thumbnail": True,
+        "download_metadata": True,
+        "embed_metadata": True,
+        "download_nfo": True,
+        "download_source_images": True,
+        "shorts_behaviour": "exclude",
+        "livestream_behaviour": "include",
+        "sponsorblock_behaviour": "mark",
+        "sponsorblock_categories": ["sponsor", "outro", "preview"],
+        "redownload_delay_days": 0,
+        "extra_fields": [],
+    }
+
+
+def pinchflat_profile_status(known_online=None):
+    return {
+        "ready": True,
+        "message": "Native yt-dlp profiles are managed by YouTube Subscription Downloader.",
+    }
+
+
+def pinchflat_health():
+    return True
+
+
+def pinchflat_container_status():
+    concurrency = setting_int("downloader_worker_concurrency", 1, 1, 8)
+    return {
+        "exists": True,
+        "running": True,
+        "status": "running",
+        "control_available": True,
+        "worker_concurrency": concurrency,
+        "name": "youtube-subscription-downloader",
+    }
+
+
+def pinchflat_recreate_with_worker_concurrency(concurrency):
+    concurrency = max(1, min(8, int(concurrency)))
+    old = setting_int("downloader_worker_concurrency", 1, 1, 8)
+    set_setting("downloader_worker_concurrency", str(concurrency))
+    start_download_worker()
+    return {"changed": old != concurrency, "old": old, "new": concurrency}
+
+
+def pinchflat_stats_summary(profiles=None, storage=None):
+    storage = storage if storage is not None else storage_snapshot()
+    with db() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                SUM(CASE WHEN active = 1 AND download_enabled = 1 THEN 1 ELSE 0 END) AS enabled,
+                SUM(CASE WHEN active = 1 AND download_enabled = 0 THEN 1 ELSE 0 END) AS disabled,
+                SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS linked
+            FROM subscriptions
+            """
+        ).fetchone()
+        pending = conn.execute(
+            "SELECT COUNT(*) AS c FROM subscription_scan_jobs WHERE status IN ('queued','running')"
+        ).fetchone()["c"]
+    return {
+        "profiles": len(V3_MEDIA_PROFILES),
+        "linked": int(row["linked"] or 0),
+        "enabled": int(row["enabled"] or 0),
+        "disabled": int(row["disabled"] or 0),
+        "pending": int(pending or 0),
+        "storage": format_bytes(storage["total"]),
+    }
+
+
+def _v3_cookie_status():
+    return cookie_file_status(YOUTUBE_COOKIE_PATH)
+
+
+def _v3_custom_yt_dlp_options():
+    return parse_custom_yt_dlp_options(
+        get_setting("downloader_custom_yt_dlp_options", "{}")
+    )
+
+
+def _v3_authenticated_options(base):
+    status = _v3_cookie_status()
+    cookie = YOUTUBE_COOKIE_PATH if status.get("valid") else None
+    return authenticated_ydl_options(
+        base,
+        cookie_path=cookie,
+        po_token=get_setting("downloader_po_token", ""),
+        custom_options=_v3_custom_yt_dlp_options(),
+    )
+
+
+def _v3_profile_ydl_options(profile_id):
+    profile_id = v3_profile_id(profile_id)
+    if profile_id == "audio":
+        return {
+            "format": "bestaudio/best",
+            "postprocessors": [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "0"}
+            ],
+        }
+    height = int(profile_id[:-1]) if profile_id.endswith("p") else 1080
+    return {
+        "format": f"bestvideo*[height<={height}]+bestaudio/best[height<={height}]/best",
+        "merge_output_format": "mp4",
+    }
+
+
+def _v3_subscription_template():
+    return str(
+        DOWNLOAD_ROOT
+        / "shows"
+        / "%(uploader,channel|Unknown Channel).80B"
+        / "Season %(upload_date>%Y)s"
+        / "s%(upload_date>%Y)sE%(upload_date>%m%d)s00 - %(title).180B [%(id)s].%(ext)s"
+    )
+
+
+def _v3_parse_entry_date(entry):
+    upload_date = str((entry or {}).get("upload_date") or "").strip()
+    if re.fullmatch(r"\d{8}", upload_date):
+        try:
+            return date(int(upload_date[:4]), int(upload_date[4:6]), int(upload_date[6:8]))
+        except ValueError:
+            pass
+    timestamp = (entry or {}).get("timestamp") or (entry or {}).get("release_timestamp")
+    if timestamp:
+        try:
+            return datetime.fromtimestamp(float(timestamp), tz=timezone.utc).date()
+        except (TypeError, ValueError, OSError):
+            pass
+    published = str((entry or {}).get("published_at") or "").strip()
+    if published:
+        try:
+            return datetime.fromisoformat(published.replace("Z", "+00:00")).date()
+        except ValueError:
+            pass
+    return None
+
+
+def _v3_queue_entry(sub, entry, redownload=False):
+    video_id = str((entry or {}).get("id") or (entry or {}).get("video_id") or "").strip()
+    if not video_id:
+        return False
+    cutoff = date.fromisoformat(subscription_cutoff(sub))
+    entry_date = _v3_parse_entry_date(entry)
+    if entry_date and entry_date < cutoff:
+        return False
+    video_url = str((entry or {}).get("webpage_url") or (entry or {}).get("url") or "").strip()
+    if not video_url.startswith("http"):
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+    published_at = entry_date.isoformat() if entry_date else str((entry or {}).get("published_at") or "")
+    _job_id, created = enqueue_download(
+        video_url,
+        source_type="subscription",
+        video_id=video_id,
+        title=str((entry or {}).get("title") or "YouTube video"),
+        channel_title=str((entry or {}).get("channel") or (entry or {}).get("uploader") or sub.get("title") or ""),
+        channel_id=str(sub.get("channel_id") or ""),
+        published_at=published_at,
+        profile_id=subscription_media_profile_id(sub),
+        redownload=redownload,
+    )
+    return bool(created)
+
+
+def v3_scan_subscription(channel_id, deep=False, redownload=False):
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscriptions WHERE channel_id = ? AND active = 1",
+            (channel_id,),
+        ).fetchone()
+    if not row:
+        raise RuntimeError("Subscription was not found.")
+    sub = dict(row)
+    if not subscription_download_enabled(sub):
+        return {"found": 0, "queued": 0, "message": "Downloads are disabled for this channel."}
+
+    entries = []
+    if not deep:
+        entries = youtube_channel_feed(channel_id, force=True)
+        entries = [
+            {
+                "id": item.get("video_id"),
+                "title": item.get("title"),
+                "url": item.get("video_url"),
+                "published_at": item.get("published_at"),
+                "channel": item.get("channel_title") or sub.get("title"),
+            }
+            for item in entries
+        ]
+    else:
+        channel_url = str(sub.get("channel_url") or f"https://www.youtube.com/channel/{channel_id}").rstrip("/")
+        if not channel_url.endswith("/videos"):
+            channel_url += "/videos"
+        limit = setting_int("downloader_deep_scan_limit", 500, 25, 5000)
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extract_flat": "in_playlist",
+            "playlistend": limit,
+            "socket_timeout": 30,
+        }
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(channel_url, download=False)
+        except Exception as exc:
+            if setting_bool("downloader_auth_retry", True) and should_retry_with_cookies(exc):
+                with yt_dlp.YoutubeDL(_v3_authenticated_options(options)) as ydl:
+                    info = ydl.extract_info(channel_url, download=False)
+            else:
+                raise
+        entries = list((info or {}).get("entries") or [])
+
+    queued = 0
+    cutoff = date.fromisoformat(subscription_cutoff(sub))
+    for entry in entries:
+        entry_date = _v3_parse_entry_date(entry)
+        # Channel playlists are newest first. Once a dated entry is older than
+        # the cutoff during a deep scan there is no value walking further back.
+        if deep and entry_date and entry_date < cutoff:
+            break
+        if _v3_queue_entry(sub, entry, redownload=redownload):
+            queued += 1
+    return {"found": len(entries), "queued": queued}
+
+
+def enqueue_subscription_scan(channel_id, deep=False, redownload=False):
+    with db() as conn:
+        existing = conn.execute(
+            """
+            SELECT id FROM subscription_scan_jobs
+            WHERE channel_id = ? AND status IN ('queued','running')
+              AND deep = ? AND redownload = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (channel_id, 1 if deep else 0, 1 if redownload else 0),
+        ).fetchone()
+        if existing:
+            return int(existing["id"]), False
+        cur = conn.execute(
+            """
+            INSERT INTO subscription_scan_jobs
+                (channel_id, deep, redownload, status, created_at)
+            VALUES (?, ?, ?, 'queued', ?)
+            """,
+            (channel_id, 1 if deep else 0, 1 if redownload else 0, now_iso()),
+        )
+        job_id = int(cur.lastrowid)
+    scan_queue.put(job_id)
+    return job_id, True
+
+
+def _v3_scan_worker():
+    while True:
+        scan_id = scan_queue.get()
+        try:
+            with db() as conn:
+                job = conn.execute(
+                    "SELECT * FROM subscription_scan_jobs WHERE id = ?",
+                    (scan_id,),
+                ).fetchone()
+                if not job:
+                    continue
+                conn.execute(
+                    "UPDATE subscription_scan_jobs SET status='running', started_at=? WHERE id=?",
+                    (now_iso(), scan_id),
+                )
+            try:
+                result = v3_scan_subscription(
+                    job["channel_id"],
+                    deep=bool(job["deep"]),
+                    redownload=bool(job["redownload"]),
+                )
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscription_scan_jobs
+                        SET status='completed', finished_at=?, found=?, queued=?, error=NULL
+                        WHERE id=?
+                        """,
+                        (now_iso(), result["found"], result["queued"], scan_id),
+                    )
+            except Exception as exc:
+                with db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE subscription_scan_jobs
+                        SET status='failed', finished_at=?, error=?
+                        WHERE id=?
+                        """,
+                        (now_iso(), str(exc)[:1500], scan_id),
+                    )
+                log_activity(
+                    "scan",
+                    "Channel scan failed",
+                    f"{job['channel_id']}: {exc}",
+                    "error",
+                    job["channel_id"],
+                )
+        finally:
+            scan_queue.task_done()
+
+
+def start_scan_worker():
+    global scan_worker_started
+    if scan_worker_started:
+        return
+    scan_worker_started = True
+    with db() as conn:
+        conn.execute(
+            "UPDATE subscription_scan_jobs SET status='queued', started_at=NULL WHERE status='running'"
+        )
+        rows = conn.execute(
+            "SELECT id FROM subscription_scan_jobs WHERE status='queued' ORDER BY id"
+        ).fetchall()
+    threading.Thread(
+        target=_v3_scan_worker,
+        name="youtube-subscription-scan-worker",
+        daemon=True,
+    ).start()
+    for row in rows:
+        scan_queue.put(int(row["id"]))
+
+
+def v3_scan_all_enabled():
+    with db() as conn:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE active=1 AND download_enabled=1
+                ORDER BY title COLLATE NOCASE
+                """
+            ).fetchall()
+        ]
+    workers = setting_int("downloader_scan_workers", 4, 1, 12)
+    found = queued = errors = 0
+
+    def scan(row):
+        return v3_scan_subscription(row["channel_id"], deep=False, redownload=False)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(scan, row) for row in rows]
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                found += int(result.get("found") or 0)
+                queued += int(result.get("queued") or 0)
+            except Exception:
+                errors += 1
+    return {"checked": len(rows), "found": found, "queued": queued, "errors": errors}
+
+
+def add_pending_sources():
+    # V3 "source registration" is local-only. Mark enabled rows registered and
+    # queue one serial deep scan so the chosen history window can be honoured.
+    with db() as conn:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT * FROM subscriptions
+                WHERE active=1 AND download_enabled=1 AND pinchflat_added=0
+                ORDER BY first_seen_at, title COLLATE NOCASE
+                """
+            ).fetchall()
+        ]
+        for row in rows:
+            conn.execute(
+                """
+                UPDATE subscriptions
+                SET pinchflat_added=1, pinchflat_source_id=channel_id,
+                    source_authorised=1, last_error=NULL
+                WHERE channel_id=?
+                """,
+                (row["channel_id"],),
+            )
+    for row in rows:
+        enqueue_subscription_scan(row["channel_id"], deep=True)
+    return {"pending": len(rows), "added": len(rows), "errors": 0}
+
+
+def apply_subscription_source_authority(sub, apply_settings=False):
+    channel_id = str(sub.get("channel_id") or "")
+    enabled = bool(sub.get("active")) and bool(sub.get("download_enabled"))
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET pinchflat_added=?, pinchflat_source_id=?, source_authorised=?,
+                last_error=NULL
+            WHERE channel_id=?
+            """,
+            (1 if enabled else 0, channel_id if enabled else None, 1 if enabled else 0, channel_id),
+        )
+        if not enabled:
+            conn.execute(
+                """
+                UPDATE downloads SET status='cancelled', phase='Cancelled'
+                WHERE channel_id=? AND status='queued' AND source_type LIKE 'subscription%'
+                """,
+                (channel_id,),
+            )
+    if enabled:
+        enqueue_subscription_scan(channel_id, deep=True)
+        return {"state": "enabled", "pending": False}
+    return {"state": "disabled", "pending": False}
+
+
+def resolve_pinchflat_source_id(sub, *args, **kwargs):
+    if bool(row_value(sub, "active", 0)) and bool(row_value(sub, "download_enabled", 0)):
+        return str(row_value(sub, "channel_id", "") or "")
+    return None
+
+
+def update_pinchflat_source_settings(*args, **kwargs):
+    return True
+
+
+def prepare_pinchflat_source_for_removal(*args, **kwargs):
+    return True
+
+
+def delete_pinchflat_source(*args, **kwargs):
+    return True
+
+
+def clear_subscription_pinchflat_link(channel_id, source_id=None):
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE subscriptions
+            SET pinchflat_added=0, pinchflat_source_id=NULL, source_authorised=0
+            WHERE channel_id=?
+            """,
+            (channel_id,),
+        )
+
+
+def reconcile_removed_pinchflat_sources():
+    return {"checked": 0, "removed": 0, "errors": 0}
+
+
+def reconcile_active_source_authority():
+    with db() as conn:
+        rows = [dict(row) for row in conn.execute("SELECT * FROM subscriptions WHERE active=1").fetchall()]
+    changed = errors = 0
+    for row in rows:
+        expected = bool(row.get("download_enabled"))
+        actual = bool(row.get("pinchflat_added"))
+        if expected != actual:
+            apply_subscription_source_authority(row)
+            changed += 1
+    return {"checked": len(rows), "changed": changed, "errors": errors}
+
+
+def retry_failed_source_updates():
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT channel_id FROM subscriptions WHERE active=1 AND COALESCE(last_error,'')!=''"
+        ).fetchall()
+        conn.execute(
+            "UPDATE subscriptions SET last_error=NULL, retry_count=0 WHERE active=1"
+        )
+    return {"attempted": len(rows), "fixed": len(rows), "errors": 0}
+
+
+def execute_pinchflat_source_action(source_id, action):
+    channel_id = str(source_id or "")
+    if action in {"force_scan", "download_pending"}:
+        enqueue_subscription_scan(channel_id, deep=True)
+        return {"queued": True}
+    if action == "redownload_existing":
+        enqueue_subscription_scan(channel_id, deep=True, redownload=True)
+        return {"queued": True}
+    if action == "refresh_metadata":
+        with db() as conn:
+            row = conn.execute("SELECT title FROM subscriptions WHERE channel_id=?", (channel_id,)).fetchone()
+        if row and emby_configured():
+            emby_refresh_library(channel_id=channel_id, channel_title=row["title"])
+        return {"queued": True}
+    if action == "sync_files":
+        storage_snapshot(force=True)
+        return {"queued": True}
+    raise RuntimeError("Unknown downloader action.")
+
+
+def pinchflat_sync_once():
+    if not sync_lock.acquire(blocking=False):
+        return {"status": "busy", "message": "Another sync is running."}
+    try:
+        add_pending_sources()
+        result = v3_scan_all_enabled()
+        message = (
+            f"Downloader scanned {result['checked']} enabled channel(s), "
+            f"found {result['found']} recent item(s), queued {result['queued']} download(s). "
+            f"Errors {result['errors']}."
+        )
+        log_activity(
+            "downloader_sync",
+            "Subscription downloader scan completed",
+            message,
+            "success" if result["errors"] == 0 else "warning",
+        )
+        return {
+            "status": "ok" if result["errors"] == 0 else "completed_with_errors",
+            "message": message,
+            **result,
+        }
+    except Exception as exc:
+        log_activity("downloader_sync", "Subscription downloader scan failed", str(exc), "error")
+        return {"status": "error", "message": str(exc), "errors": 1}
+    finally:
+        sync_lock.release()
+
+
+def scheduled_pinchflat_force_index():
+    # V2 compatibility scheduler: scheduled channel scans are lightweight RSS
+    # checks. Deep scans are explicit/manual so hundreds of channels can never
+    # create the force-index storm that prompted the V3 rewrite.
+    return {"status": "native", "message": "Native scheduled scans are handled by the downloader sync."}
+
+
+def pinchflat_force_index_status():
+    with db() as conn:
+        fav = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM subscriptions s
+            WHERE s.active=1 AND s.download_enabled=1
+              AND EXISTS (SELECT 1 FROM favourite_channels f WHERE f.channel_id=s.channel_id)
+            """
+        ).fetchone()["c"]
+        other = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM subscriptions s
+            WHERE s.active=1 AND s.download_enabled=1
+              AND NOT EXISTS (SELECT 1 FROM favourite_channels f WHERE f.channel_id=s.channel_id)
+            """
+        ).fetchone()["c"]
+    return {
+        "favourites": {"eligible": int(fav or 0)},
+        "non_favourites": {"eligible": int(other or 0)},
+    }
+
+
+def pinchflat_retention_inventory(channel_id=""):
+    query = """
+        SELECT id, video_id, channel_id, channel_title, title, output_path,
+               published_at, finished_at
+        FROM downloads
+        WHERE status='completed' AND source_type LIKE 'subscription%'
+    """
+    params = []
+    if channel_id:
+        query += " AND channel_id=?"
+        params.append(channel_id)
+    with db() as conn:
+        rows = [dict(row) for row in conn.execute(query, params).fetchall()]
+    result = []
+    for row in rows:
+        path = Path(str(row.get("output_path") or ""))
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        result.append({
+            "media_item_id": int(row["id"]),
+            "media_uuid": str(row["id"]),
+            "video_id": str(row.get("video_id") or ""),
+            "title": str(row.get("title") or "YouTube video"),
+            "channel_id": str(row.get("channel_id") or ""),
+            "channel_title": str(row.get("channel_title") or row.get("channel_id") or ""),
+            "source_id": str(row.get("channel_id") or ""),
+            "prevent_culling": False,
+            "uploaded_at": _retention_datetime(row.get("published_at")),
+            "downloaded_at": _retention_datetime(row.get("finished_at")),
+            "size_bytes": size,
+            "thumbnail_url": (
+                f"https://i.ytimg.com/vi/{row['video_id']}/hqdefault.jpg"
+                if row.get("video_id") else ""
+            ),
+            "video_url": (
+                f"https://www.youtube.com/watch?v={row['video_id']}"
+                if row.get("video_id") else ""
+            ),
+        })
+    return result
+
+
+def _retention_delete_media_batch(media_ids):
+    deleted = []
+    errors = {}
+    with db() as conn:
+        rows = {
+            int(row["id"]): dict(row)
+            for row in conn.execute(
+                f"SELECT * FROM downloads WHERE id IN ({','.join('?' for _ in media_ids)})",
+                media_ids,
+            ).fetchall()
+        } if media_ids else {}
+    for media_id in media_ids:
+        row = rows.get(int(media_id))
+        if not row:
+            errors[int(media_id)] = "Download record not found."
+            continue
+        try:
+            path = Path(str(row.get("output_path") or ""))
+            if path.exists() and path.is_file():
+                stem = path.with_suffix("")
+                path.unlink()
+                for suffix in (".info.json", ".jpg", ".jpeg", ".webp", ".png", ".nfo"):
+                    candidate = Path(str(stem) + suffix)
+                    if candidate.exists() and candidate.is_file():
+                        candidate.unlink()
+            with db() as conn:
+                conn.execute(
+                    "UPDATE downloads SET status='retention_deleted', phase='Removed by retention' WHERE id=?",
+                    (media_id,),
+                )
+            deleted.append(int(media_id))
+        except Exception as exc:
+            errors[int(media_id)] = str(exc)[:500]
+    return {"deleted": deleted, "errors": errors}
+
+
+def pinchflat_download_overview(queue_limit=100):
+    with db() as conn:
+        active_rows = [
+            dict(row) for row in conn.execute(
+                """
+                SELECT * FROM downloads
+                WHERE status IN ('downloading','processing')
+                ORDER BY id
+                """
+            ).fetchall()
+        ]
+        waiting_rows = [
+            dict(row) for row in conn.execute(
+                """
+                SELECT * FROM downloads
+                WHERE status='queued'
+                ORDER BY id
+                LIMIT ?
+                """,
+                (1000000 if int(queue_limit or 0) < 0 else max(20, min(int(queue_limit or 0) or 100, 500)),),
+            ).fetchall()
+        ]
+        scan_rows = [
+            dict(row) for row in conn.execute(
+                """
+                SELECT * FROM subscription_scan_jobs
+                WHERE status IN ('queued','running')
+                ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, id
+                LIMIT 20
+                """
+            ).fetchall()
+        ]
+        last = conn.execute(
+            """
+            SELECT * FROM downloads
+            WHERE status='completed'
+            ORDER BY finished_at DESC, id DESC LIMIT 1
+            """
+        ).fetchone()
+        membership_errors = conn.execute(
+            "SELECT COUNT(*) AS c FROM downloads WHERE failure_code='membership_required'"
+        ).fetchone()["c"]
+
+    def item(row):
+        return {
+            "job_id": row.get("job_id"),
+            "title": row.get("title") or row.get("youtube_url") or "YouTube video",
+            "channel_title": row.get("channel_title") or "",
+            "state": row.get("status") or "",
+            "status": row.get("phase") or str(row.get("status") or "").title(),
+            "started_at": row.get("started_at") or "",
+            "attempt": 1,
+            "speed": row.get("speed") or "",
+            "progress": float(row.get("progress") or 0),
+            "thumbnail_url": (
+                f"https://i.ytimg.com/vi/{row['video_id']}/hqdefault.jpg"
+                if row.get("video_id") else ""
+            ),
+            "video_id": row.get("video_id") or "",
+        }
+
+    tasks = [
+        {
+            "job_id": f"scan-{row['id']}",
+            "worker": "Channel Scanner",
+            "label": "Channel Scan",
+            "state": row["status"],
+            "status": "Running" if row["status"] == "running" else "Waiting",
+            "started_at": row.get("started_at") or "",
+            "scheduled_at": row.get("created_at") or "",
+        }
+        for row in scan_rows
+    ]
+    return {
+        "active": [item(row) for row in active_rows],
+        "waiting": [item(row) for row in waiting_rows],
+        "summary": {
+            "active": len(active_rows),
+            "waiting": len(waiting_rows),
+            "tasks_active": sum(1 for row in scan_rows if row["status"] == "running"),
+            "tasks_waiting": sum(1 for row in scan_rows if row["status"] == "queued"),
+            "membership_errors": int(membership_errors or 0),
+        },
+        "tasks": tasks,
+        "last_downloaded": item(dict(last)) if last else None,
+    }
+
+
+def pinchflat_pending_task_count():
+    with db() as conn:
+        return int(conn.execute(
+            "SELECT COUNT(*) AS c FROM subscription_scan_jobs WHERE status IN ('queued','running')"
+        ).fetchone()["c"] or 0)
+
+
+def pinchflat_task_block_enabled():
+    return setting_bool("pinchflat_task_block_enabled", False)
+
+
+def pinchflat_delete_all_tasks():
+    with db() as conn:
+        scan = conn.execute(
+            "UPDATE subscription_scan_jobs SET status='cancelled', finished_at=? WHERE status IN ('queued','running')",
+            (now_iso(),),
+        ).rowcount
+        downloads = conn.execute(
+            "UPDATE downloads SET status='cancelled', phase='Cancelled' WHERE status='queued' AND source_type LIKE 'subscription%'"
+        ).rowcount
+    return {"cancelled": int(scan or 0) + int(downloads or 0), "deleted": 0}
+
+
+def pinchflat_resume_all_tasks():
+    return {"resumed": True}
+
+
+def start_pinchflat_task_blocker():
+    # No external task database exists in V3. Task suppression is enforced
+    # when native scan/download work is queued.
+    return None
+
+
+def _v3_import_existing_library():
+    if setting_bool("v3_library_import_complete", False):
+        return
+    imported = 0
+    shows_root = DOWNLOAD_ROOT / "shows"
+    if not shows_root.exists():
+        set_setting("v3_library_import_complete", "1")
+        return
+    try:
+        for info_path in shows_root.rglob("*.info.json"):
+            try:
+                info = json.loads(info_path.read_text(encoding="utf-8"))
+                video_id = str(info.get("id") or "").strip()
+                if not video_id:
+                    continue
+                with db() as conn:
+                    exists = conn.execute(
+                        "SELECT 1 FROM downloads WHERE video_id=? AND source_type LIKE 'subscription%' LIMIT 1",
+                        (video_id,),
+                    ).fetchone()
+                if exists:
+                    continue
+                base = str(info_path)[:-10]  # strip .info.json
+                media_path = ""
+                for candidate in info_path.parent.glob(Path(base).name + ".*"):
+                    if candidate.suffix.lower() in {".mp4", ".mkv", ".webm", ".m4a", ".mp3", ".opus", ".flac"}:
+                        media_path = str(candidate)
+                        break
+                if not media_path:
+                    continue
+                upload_date = str(info.get("upload_date") or "")
+                published = (
+                    f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+                    if re.fullmatch(r"\d{8}", upload_date) else ""
+                )
+                with db() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO downloads (
+                            job_id, source_type, youtube_url, video_id, title,
+                            channel_title, status, phase, progress, output_path,
+                            created_at, started_at, finished_at, channel_id,
+                            published_at, profile_id, auth_mode
+                        ) VALUES (?, 'subscription_import', ?, ?, ?, ?, 'completed',
+                                  'Imported existing library', 100, ?, ?, ?, ?, ?, ?, ?, 'import')
+                        """,
+                        (
+                            "import-" + secrets.token_hex(10),
+                            str(info.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}"),
+                            video_id,
+                            str(info.get("title") or "YouTube video"),
+                            str(info.get("channel") or info.get("uploader") or ""),
+                            media_path,
+                            now_iso(), now_iso(), now_iso(),
+                            str(info.get("channel_id") or ""),
+                            published,
+                            "1080p",
+                        ),
+                    )
+                imported += 1
+            except Exception:
+                continue
+        set_setting("v3_library_import_complete", "1")
+        log_activity(
+            "migration",
+            "Existing YouTube library imported",
+            f"Imported {imported} existing media item(s) into the V3 downloader database.",
+            "success",
+        )
+    except Exception as exc:
+        log_activity("migration", "Existing library import failed", str(exc), "warning")
+
+
+@app.post("/settings/downloader/auth/upload")
+def downloader_cookie_upload():
+    try:
+        stats = save_cookie_upload(request.files.get("cookie_file"), YOUTUBE_COOKIE_PATH)
+        log_activity(
+            "downloader_auth",
+            "YouTube cookies uploaded",
+            f"Stored {stats['youtube_cookies']} YouTube cookie(s).",
+            "success",
+        )
+        flash("YouTube cookie file uploaded and validated.", "success")
+    except Exception as exc:
+        flash(f"Cookie file could not be saved: {exc}", "error")
+    return redirect(url_for("index") + "#pinchflat")
+
+
+@app.post("/settings/downloader/auth/remove")
+def downloader_cookie_remove():
+    try:
+        YOUTUBE_COOKIE_PATH.unlink(missing_ok=True)
+        flash("YouTube cookie file removed.", "success")
+    except Exception as exc:
+        flash(f"Cookie file could not be removed: {exc}", "error")
+    return redirect(url_for("index") + "#pinchflat")
+
+
+@app.post("/settings/downloader/auth/test")
+def downloader_cookie_test():
+    try:
+        result = test_cookie_authentication(
+            YOUTUBE_COOKIE_PATH,
+            po_token=get_setting("downloader_po_token", ""),
+            custom_options=_v3_custom_yt_dlp_options(),
+        )
+        flash(f"Authenticated yt-dlp test succeeded ({result['title']}).", "success")
+    except Exception as exc:
+        flash(f"Authenticated yt-dlp test failed: {exc}", "error")
+    return redirect(url_for("index") + "#pinchflat")
+
+
+@app.post("/settings/downloader/advanced")
+def save_downloader_advanced():
+    profile_id = v3_profile_id(request.form.get("downloader_default_profile"))
+    concurrency = max(1, min(8, int(request.form.get("downloader_worker_concurrency", "1") or 1)))
+    scan_workers = max(1, min(12, int(request.form.get("downloader_scan_workers", "4") or 4)))
+    deep_limit = max(25, min(5000, int(request.form.get("downloader_deep_scan_limit", "500") or 500)))
+    custom = str(request.form.get("downloader_custom_yt_dlp_options", "{}") or "{}").strip()
+    parse_custom_yt_dlp_options(custom)
+    set_setting("downloader_default_profile", profile_id)
+    set_setting("downloader_worker_concurrency", str(concurrency))
+    set_setting("downloader_scan_workers", str(scan_workers))
+    set_setting("downloader_deep_scan_limit", str(deep_limit))
+    set_setting("downloader_po_token", str(request.form.get("downloader_po_token", "") or "").strip())
+    set_setting("downloader_custom_yt_dlp_options", custom or "{}")
+    set_setting("downloader_auth_retry", "1" if request.form.get("downloader_auth_retry") == "1" else "0")
+    start_download_worker()
+    flash("Downloader settings saved.", "success")
+    return redirect(url_for("index") + "#pinchflat")
+
+
+
 @app.route("/setup", methods=["GET", "POST"])
 def setup_admin():
     if users_exist():
@@ -14513,12 +15554,8 @@ def index():
         pinchflat_profile_ready=profile_status["ready"],
         pinchflat_profile_message=profile_status["message"],
         pinchflat_stats=pinchflat_stats,
-        pinchflat_public_url=PINCHFLAT_PUBLIC_URL,
-        pinchflat_open_url=(
-            f"{PINCHFLAT_PUBLIC_URL}/?onboarding=0"
-            if profile_status["ready"]
-            else PINCHFLAT_PUBLIC_URL
-        ),
+        pinchflat_public_url=effective_app_url(),
+        pinchflat_open_url=effective_app_url(),
         subs=subs,
         counts=counts,
         last_run=last_run,
@@ -14592,6 +15629,14 @@ def index():
         retention=retention_settings(),
         retention_day_options=RETENTION_DAY_OPTIONS,
         retention_cleanup_interval_options=RETENTION_CLEANUP_INTERVAL_OPTIONS,
+        downloader_auth_status=_v3_cookie_status(),
+        downloader_po_token=get_setting("downloader_po_token", ""),
+        downloader_custom_options=get_setting("downloader_custom_yt_dlp_options", "{}"),
+        downloader_auth_retry=setting_bool("downloader_auth_retry", True),
+        downloader_default_profile=effective_media_profile_id(),
+        downloader_worker_concurrency=setting_int("downloader_worker_concurrency", 1, 1, 8),
+        downloader_scan_workers=setting_int("downloader_scan_workers", 4, 1, 12),
+        downloader_deep_scan_limit=setting_int("downloader_deep_scan_limit", 500, 25, 5000),
 
         page_view=page_view,
         page_section_order=page_section_order,
@@ -18059,8 +19104,10 @@ def health():
 
 
 init_db()
+init_v3_db()
 start_download_worker()
-start_pinchflat_task_blocker()
+start_scan_worker()
+threading.Thread(target=_v3_import_existing_library, name="v3-library-import", daemon=True).start()
 
 scheduler = BackgroundScheduler(
     timezone=os.getenv("TZ", "Europe/London")
