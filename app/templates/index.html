@@ -735,6 +735,46 @@
       font-size:12px;
     }
 
+    .subscription-progress-wrap {
+      grid-column:2 / -1;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      align-items:center;
+      gap:10px;
+      margin-top:-2px;
+    }
+    .subscription-progress {
+      width:100%;
+      height:9px;
+      overflow:hidden;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:#07101d;
+    }
+    .subscription-progress > span {
+      display:block;
+      height:100%;
+      width:0;
+      border-radius:inherit;
+      background:linear-gradient(90deg,#2563eb,#60a5fa);
+      transition:width .35s ease;
+    }
+    .subscription-progress.is-indeterminate > span {
+      width:34%;
+      animation:subscription-progress-slide 1.15s linear infinite;
+    }
+    .subscription-progress-label {
+      min-width:42px;
+      color:var(--muted);
+      font-size:12px;
+      font-variant-numeric:tabular-nums;
+      text-align:right;
+    }
+    @keyframes subscription-progress-slide {
+      from { transform:translateX(-110%); }
+      to { transform:translateX(310%); }
+    }
+
     .pinchflat-last-download {
       display:grid;
       grid-template-columns:128px minmax(0,1fr);
@@ -3381,29 +3421,30 @@
     {% if page_view.show_summary_pinchflat %}
     <div class="card" id="top" data-summary-tile="pinchflat">
       <div class="muted small">Downloader</div>
-      <div class="metric ok">Online</div>
-      <div class="muted small">Native yt-dlp · {{ downloader_worker_concurrency }} worker{{ '' if downloader_worker_concurrency == 1 else 's' }}</div>
-      {% if downloader_auth_status.configured and downloader_auth_status.valid %}
-        <div class="muted small ok" style="margin-top:6px">Authenticated retry ready</div>
-      {% else %}
-        <div class="muted small" style="margin-top:6px">Anonymous downloads</div>
-      {% endif %}
-    </div>
-    {% endif %}
-
-    {% if page_view.show_summary_pinchflat_tasks %}
-    <div class="card" data-summary-tile="pinchflat_tasks" id="pinchflat-tasks-summary-card">
-      <div class="muted small">Tasks</div>
-      <div class="metric" id="pinchflat-tasks-active">0</div>
-      <div class="muted small" id="pinchflat-tasks-status">No active background tasks</div>
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+        <div>
+          <div class="metric ok">Online</div>
+          <div class="muted small">Native yt-dlp · {{ downloader_worker_concurrency }} worker{{ '' if downloader_worker_concurrency == 1 else 's' }}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="metric" id="pinchflat-tasks-active">0</div>
+          <div class="muted small">tasks</div>
+        </div>
+      </div>
+      <div class="muted small" id="pinchflat-tasks-status" style="margin-top:8px">No active background tasks</div>
       <div class="warn small hidden" id="pinchflat-tasks-membership-errors"></div>
       <div class="muted small" id="pinchflat-tasks-current"></div>
+      {% if downloader_auth_status.configured and downloader_auth_status.valid %}
+        <div class="muted small ok" style="margin-top:7px">Cookies ready for authenticated retry</div>
+      {% else %}
+        <div class="muted small" style="margin-top:7px">Anonymous downloads</div>
+      {% endif %}
       {% if is_admin %}
-      <div class="pinchflat-task-block-wrap">
-        <label class="source-toggle" title="When enabled, stop and delete all current native tasks and automatically cancel any new tasks until switched off.">
+      <div class="pinchflat-task-block-wrap" style="margin-top:10px">
+        <label class="source-toggle" title="Suppress new background channel scan tasks until switched off.">
           <input id="pinchflat-task-block-toggle" type="checkbox" onchange="setDownloaderTaskBlock(this.checked)">
           <span class="toggle-track"></span>
-          <span class="source-toggle-text">Suppress scan tasks</span>
+          <span class="source-toggle-text">Suppress scans</span>
         </label>
         <div id="pinchflat-task-block-status" class="pinchflat-task-block-status"></div>
       </div>
@@ -3435,9 +3476,9 @@
     {% if page_view.show_summary_downloads %}
     <div class="card" data-summary-tile="downloads">
       <div class="muted small">Downloads</div>
-      <div class="metric ok" id="dashboard-downloads-enabled">{{ counts.enabled }}</div>
-      <div class="muted small" id="dashboard-downloads-status">{{ counts.disabled }} disabled · {{ counts.pending }} pending</div>
-      <div class="muted small">{{ storage_total }} used · {{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
+      <div class="metric ok" id="dashboard-downloads-completed">{{ download_counts.completed }}</div>
+      <div class="muted small" id="dashboard-downloads-queue-status">{{ download_counts.running }} active · {{ download_counts.queued }} queued</div>
+      <div class="muted small">{{ counts.enabled }} channels enabled · {{ storage_total }} used</div>
     </div>
     {% endif %}
 
@@ -3463,7 +3504,7 @@
       <div>
         <h2>subscription downloads</h2>
         <div class="muted small" id="pinchflat-download-summary">
-          Loading current Downloader download activity…
+          Loading subscription download activity…
         </div>
       </div>
 
@@ -3517,7 +3558,7 @@
 
     <div class="pinchflat-download-body" id="pinchflat-download-body">
       <div id="pinchflat-active-downloads" class="pinchflat-active-list">
-        <div class="pinchflat-download-empty">Checking Downloader for active downloads…</div>
+        <div class="pinchflat-download-empty">Checking for active downloads…</div>
       </div>
 
       {% if not (page_view.load_summary and page_view.show_summary_latest_download) %}
@@ -4962,10 +5003,9 @@
               {% for item in page_summary_order %}
               <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
                 <span class="page-order-handle" aria-hidden="true">☰</span>
-                <span style="flex:1"><strong>{% if item == "google" %}Google{% elif item == "pinchflat" %}Downloader{% elif item == "pinchflat_tasks" %}Tasks{% elif item == "latest_download" %}Latest download{% elif item == "subscriptions" %}Subscriptions{% elif item == "downloads" %}Downloads{% elif item == "errors" %}Errors{% endif %}</strong></span>
+                <span style="flex:1"><strong>{% if item == "google" %}Google{% elif item == "pinchflat" %}Downloader{% elif item == "latest_download" %}Latest download{% elif item == "subscriptions" %}Subscriptions{% elif item == "downloads" %}Downloads{% elif item == "errors" %}Errors{% endif %}</strong></span>
                 {% if item == "google" %}<label><input type="checkbox" name="page_show_summary_google" value="1" {% if page_view.show_summary_google %}checked{% endif %}> Show</label>
                 {% elif item == "pinchflat" %}<label><input type="checkbox" name="page_show_summary_pinchflat" value="1" {% if page_view.show_summary_pinchflat %}checked{% endif %}> Show</label>
-                {% elif item == "pinchflat_tasks" %}<label><input type="checkbox" name="page_show_summary_pinchflat_tasks" value="1" {% if page_view.show_summary_pinchflat_tasks %}checked{% endif %}> Show</label>
                 {% elif item == "latest_download" %}<label><input type="checkbox" name="page_show_summary_latest_download" value="1" {% if page_view.show_summary_latest_download %}checked{% endif %}> Show</label>
                 {% elif item == "subscriptions" %}<label><input type="checkbox" name="page_show_summary_subscriptions" value="1" {% if page_view.show_summary_subscriptions %}checked{% endif %}> Show</label>
                 {% elif item == "downloads" %}<label><input type="checkbox" name="page_show_summary_downloads" value="1" {% if page_view.show_summary_downloads %}checked{% endif %}> Show</label>
@@ -5130,274 +5170,120 @@
 
     <section class="tab-panel" data-panel="pinchflat">
       <div class="settings-panel-intro">
-        <div>
-          <h3>Downloader</h3>
-          <p>Native yt-dlp subscription scanning, download profiles and YouTube authentication. V3 no longer requires Downloader.</p>
-        </div>
+        <div><h3>Downloader</h3><p>Native yt-dlp downloads, authentication and channel scanning.</p></div>
       </div>
 
-      <div class="setting-box">
-        <div class="profile-editor-heading">
-          <div>
-            <h3>YouTube Authentication</h3>
-            <div class="muted small">Public videos are downloaded anonymously first. Cookies are used only when YouTube requires an authenticated account.</div>
-          </div>
-          {% if downloader_auth_status.configured and downloader_auth_status.valid %}
-            <span class="retention-pill">Cookies configured</span>
-          {% elif downloader_auth_status.configured %}
-            <span class="retention-pill warn">Cookies need attention</span>
-          {% else %}
-            <span class="retention-pill">Anonymous only</span>
-          {% endif %}
-        </div>
-
-        <div class="settings-grid" style="margin-top:14px">
-          <div class="settings-path-card">
-            <span class="muted small">Cookie file</span>
-            <strong>
-              {% if downloader_auth_status.configured and downloader_auth_status.valid %}
-                Valid · {{ downloader_auth_status.youtube_cookies }} YouTube cookies
-              {% elif downloader_auth_status.configured %}
-                Invalid
-              {% else %}
-                Not configured
-              {% endif %}
-            </strong>
-            {% if downloader_auth_status.error %}
-              <span class="small bad">{{ downloader_auth_status.error }}</span>
+      <div class="settings-grid">
+        <div class="setting-box">
+          <div class="profile-editor-heading">
+            <div><h3>YouTube cookies</h3><div class="muted small">Used only when an anonymous download needs sign-in.</div></div>
+            {% if downloader_auth_status.configured and downloader_auth_status.valid %}
+              <span class="retention-pill ok">Ready · {{ downloader_auth_status.youtube_cookies }}</span>
+            {% elif downloader_auth_status.configured %}
+              <span class="retention-pill warn">Needs attention</span>
             {% else %}
-              <span class="muted small">Stored privately inside <code>/data/auth</code>. Cookie contents are never displayed.</span>
+              <span class="retention-pill">Anonymous only</span>
             {% endif %}
           </div>
-
-          <div class="settings-path-card">
-            <span class="muted small">Authenticated retry</span>
-            <strong>{{ 'Enabled' if downloader_auth_retry else 'Disabled' }}</strong>
-            <span class="muted small">Age-restricted or sign-in-required downloads can retry with the uploaded cookies. Members-only content still requires the account to have access.</span>
-          </div>
-        </div>
-
-        <form method="post" action="/settings/downloader/auth/upload" enctype="multipart/form-data" style="margin-top:14px">
-          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-          <label>Upload YouTube cookies.txt
+          <form method="post" action="/settings/downloader/auth/upload" enctype="multipart/form-data" style="margin-top:12px">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <input type="file" name="cookie_file" accept=".txt,text/plain" required>
-            <span class="muted small">Upload a Mozilla/Netscape format cookies.txt export. The app validates it before replacing the active cookie file.</span>
-          </label>
-          <div class="actions">
-            <button class="btn" type="submit">{{ 'Replace Cookies' if downloader_auth_status.configured else 'Upload Cookies' }}</button>
+            <div class="actions" style="margin-top:10px"><button class="btn" type="submit">{{ 'Replace cookies' if downloader_auth_status.configured else 'Upload cookies.txt' }}</button></div>
+          </form>
+          {% if downloader_auth_status.configured %}
+          <div class="actions" style="margin-top:10px">
+            <form method="post" action="/settings/downloader/auth/test"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn secondary" type="submit">Test</button></form>
+            <form method="post" action="/settings/downloader/auth/remove" onsubmit="return confirm('Remove the stored YouTube cookie file?')"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn ghost" type="submit">Remove</button></form>
           </div>
-        </form>
-
-        {% if downloader_auth_status.configured %}
-        <div class="actions" style="margin-top:10px">
-          <form method="post" action="/settings/downloader/auth/test">
-            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <button class="btn secondary" type="submit">Test Authentication</button>
-          </form>
-          <form method="post" action="/settings/downloader/auth/remove" onsubmit="return confirm('Remove the stored YouTube cookie file?')">
-            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-            <button class="btn ghost" type="submit">Remove Cookies</button>
-          </form>
+          {% endif %}
+          {% if downloader_auth_status.error %}<div class="bad small" style="margin-top:10px">{{ downloader_auth_status.error }}</div>{% endif %}
         </div>
-        {% endif %}
+
+        <div class="setting-box">
+          <h3>Existing library</h3>
+          <div class="mini-stat-grid">
+            <div><span class="muted small">In database</span><strong>{{ library_import_status.database_total }}</strong></div>
+            <div><span class="muted small">Last scan</span><strong>{{ library_import_status.last_scanned }}</strong></div>
+            <div><span class="muted small">Imported</span><strong>{{ library_import_status.last_imported }}</strong></div>
+            <div><span class="muted small">No YouTube ID</span><strong>{{ library_import_status.last_unmatched }}</strong></div>
+          </div>
+          <form method="post" action="/settings/downloader/library/import" style="margin-top:12px">
+            <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+            <button class="btn secondary" type="submit">Import / rescan existing media</button>
+          </form>
+          <div class="muted small" style="margin-top:8px">Imports old V2/V3 files from <code>/downloads/shows</code> and refreshes channel artwork.</div>
+        </div>
       </div>
 
-      <div class="setting-box" style="margin-top:14px">
-        <div class="profile-editor-heading">
-          <div>
-            <h3>Native yt-dlp Downloader</h3>
-            <div class="muted small">Subscription downloads and channel scans are now managed directly by this application.</div>
-          </div>
-        </div>
-
-        <form method="post" action="/settings/downloader/advanced">
-          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-
+      <form method="post" action="/settings/downloader/advanced">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <div class="setting-box" style="margin-top:14px">
+          <h3>Downloads</h3>
           <div class="profile-settings-grid">
-            <div class="compact-setting">
-              <label>Default quality
-                <select name="downloader_default_profile">
-                  {% for profile in profiles %}
-                    <option value="{{ profile.id }}" {% if downloader_default_profile|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <div class="profile-control-help">New channels use this profile unless an individual channel has its own selection.</div>
-            </div>
-
-            <div class="compact-setting">
-              <label>Concurrent downloads
-                <select name="downloader_worker_concurrency">
-                  {% for value in range(1, 9) %}
-                    <option value="{{ value }}" {% if downloader_worker_concurrency|int == value %}selected{% endif %}>{{ value }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <div class="profile-control-help">The number of native yt-dlp download workers. Start with 1 for the lightest load on BUTANE.</div>
-            </div>
-
-            <div class="compact-setting">
-              <label>Channel scan workers
-                <select name="downloader_scan_workers">
-                  {% for value in range(1, 13) %}
-                    <option value="{{ value }}" {% if downloader_scan_workers|int == value %}selected{% endif %}>{{ value }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <div class="profile-control-help">RSS checks are lightweight. Deep channel scans remain individually queued so they cannot create a large indexing storm.</div>
-            </div>
-
-            <div class="compact-setting">
-              <label>Deep scan maximum videos
-                <input type="number" min="25" max="5000" step="25" name="downloader_deep_scan_limit" value="{{ downloader_deep_scan_limit }}">
-              </label>
-              <div class="profile-control-help">Maximum number of channel entries inspected by a manual deep scan. The channel's Download Range is still enforced.</div>
-            </div>
-          </div>
-
-          <div class="page-view-grid" style="margin-top:12px">
-            <label class="page-view-option">
-              <input type="checkbox" name="downloader_auth_retry" value="1" {% if downloader_auth_retry %}checked{% endif %}>
-              <span><strong>Retry account-required videos with cookies</strong><small>Anonymous first, authenticated only when yt-dlp reports an account/sign-in restriction.</small></span>
+            <label>Default quality
+              <select name="downloader_default_profile">{% for profile in profiles %}<option value="{{ profile.id }}" {% if downloader_default_profile|string == profile.id|string %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}</select>
+            </label>
+            <label>Concurrent downloads
+              <select name="downloader_worker_concurrency">{% for value in range(1, 9) %}<option value="{{ value }}" {% if downloader_worker_concurrency|int == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+            </label>
+            <label>Scan workers
+              <select name="downloader_scan_workers">{% for value in range(1, 13) %}<option value="{{ value }}" {% if downloader_scan_workers|int == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+            </label>
+            <label>Deep scan maximum
+              <input type="number" min="25" max="5000" step="25" name="downloader_deep_scan_limit" value="{{ downloader_deep_scan_limit }}">
             </label>
           </div>
+          <label class="page-view-option" style="margin-top:12px"><input type="checkbox" name="downloader_auth_retry" value="1" {% if downloader_auth_retry %}checked{% endif %}><span><strong>Authenticated retry</strong><small>Retry sign-in or age-restricted failures with uploaded cookies.</small></span></label>
+        </div>
 
-          <div class="setting-box" style="margin-top:14px;padding:14px">
-            <h3>Subscription media profile</h3>
-            <p class="muted small">These replace the media options previously supplied by the external download manager and apply to native subscription downloads.</p>
-
+        <details class="settings-details" open style="margin-top:14px">
+          <summary>Media &amp; Emby</summary>
+          <div>
             <div class="page-view-grid">
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_download_subtitles" value="1" {% if downloader_download_subtitles %}checked{% endif %}>
-                <span><strong>Download subtitles</strong><small>Save available subtitle tracks alongside subscription media.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_embed_subtitles" value="1" {% if downloader_embed_subtitles %}checked{% endif %}>
-                <span><strong>Embed subtitles</strong><small>Embed downloaded subtitles into compatible output files.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_download_thumbnail" value="1" {% if downloader_download_thumbnail %}checked{% endif %}>
-                <span><strong>Download thumbnails</strong><small>Keep thumbnail artwork with downloaded media.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_embed_thumbnail" value="1" {% if downloader_embed_thumbnail %}checked{% endif %}>
-                <span><strong>Embed thumbnails</strong><small>Embed artwork into supported media containers.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_download_metadata" value="1" {% if downloader_download_metadata %}checked{% endif %}>
-                <span><strong>Download metadata</strong><small>Keep yt-dlp info JSON for history, migration and reconciliation.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_embed_metadata" value="1" {% if downloader_embed_metadata %}checked{% endif %}>
-                <span><strong>Embed metadata</strong><small>Embed YouTube metadata into compatible media files.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_write_nfo" value="1" {% if downloader_write_nfo %}checked{% endif %}>
-                <span><strong>Write Emby NFO</strong><small>Create media-centre metadata for subscription channels.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_series_images" value="1" {% if downloader_series_images %}checked{% endif %}>
-                <span><strong>Series artwork</strong><small>Create poster, fanart and banner artwork for Emby.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_include_shorts" value="1" {% if downloader_include_shorts %}checked{% endif %}>
-                <span><strong>Include Shorts</strong><small>Allow native subscription jobs identified as YouTube Shorts.</small></span>
-              </label>
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_include_livestreams" value="1" {% if downloader_include_livestreams %}checked{% endif %}>
-                <span><strong>Include livestreams</strong><small>Allow live and previously-live videos when yt-dlp exposes them.</small></span>
-              </label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_download_subtitles" value="1" {% if downloader_download_subtitles %}checked{% endif %}><span><strong>Subtitles</strong><small>Download subtitle tracks.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_embed_subtitles" value="1" {% if downloader_embed_subtitles %}checked{% endif %}><span><strong>Embed subtitles</strong><small>Embed where supported.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_download_thumbnail" value="1" {% if downloader_download_thumbnail %}checked{% endif %}><span><strong>Thumbnails</strong><small>Keep video thumbnails.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_embed_thumbnail" value="1" {% if downloader_embed_thumbnail %}checked{% endif %}><span><strong>Embed thumbnail</strong><small>Embed where supported.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_download_metadata" value="1" {% if downloader_download_metadata %}checked{% endif %}><span><strong>Info JSON</strong><small>Keep yt-dlp metadata.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_embed_metadata" value="1" {% if downloader_embed_metadata %}checked{% endif %}><span><strong>Embed metadata</strong><small>Write into media files.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_write_nfo" value="1" {% if downloader_write_nfo %}checked{% endif %}><span><strong>Emby NFO</strong><small>Create channel metadata.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_series_images" value="1" {% if downloader_series_images %}checked{% endif %}><span><strong>Channel artwork</strong><small>Use the YouTube channel avatar/banner.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_include_shorts" value="1" {% if downloader_include_shorts %}checked{% endif %}><span><strong>Shorts</strong><small>Include Shorts.</small></span></label>
+              <label class="page-view-option"><input type="checkbox" name="downloader_include_livestreams" value="1" {% if downloader_include_livestreams %}checked{% endif %}><span><strong>Livestreams</strong><small>Include live/previous live.</small></span></label>
             </div>
-
             <div class="settings-grid" style="margin-top:12px">
-              <label>Subtitle languages
-                <input type="text" name="downloader_subtitle_languages" value="{{ downloader_subtitle_languages }}" placeholder="en.*,en">
-                <span class="muted small">Comma-separated yt-dlp language selectors.</span>
-              </label>
-              <label>SponsorBlock behaviour
-                <select name="downloader_sponsorblock_behaviour">
-                  <option value="disabled" {% if downloader_sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option>
-                  <option value="mark" {% if downloader_sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark as chapters</option>
-                  <option value="remove" {% if downloader_sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove segments</option>
-                </select>
-              </label>
+              <label>Subtitle languages<input type="text" name="downloader_subtitle_languages" value="{{ downloader_subtitle_languages }}" placeholder="en.*,en"></label>
+              <label>SponsorBlock<select name="downloader_sponsorblock_behaviour"><option value="disabled" {% if downloader_sponsorblock_behaviour == 'disabled' %}selected{% endif %}>Disabled</option><option value="mark" {% if downloader_sponsorblock_behaviour == 'mark' %}selected{% endif %}>Mark chapters</option><option value="remove" {% if downloader_sponsorblock_behaviour == 'remove' %}selected{% endif %}>Remove segments</option></select></label>
             </div>
-
             {% set sponsor_categories = downloader_sponsorblock_categories.split(',') %}
-            <div class="page-view-grid" style="margin-top:10px">
-              {% for value,label in [('sponsor','Sponsor'),('outro','Outro / credits'),('preview','Preview'),('intro','Intro'),('selfpromo','Self promotion'),('interaction','Interaction')] %}
-              <label class="page-view-option">
-                <input type="checkbox" name="downloader_sponsorblock_categories" value="{{ value }}" {% if value in sponsor_categories %}checked{% endif %}>
-                <span><strong>{{ label }}</strong><small>SponsorBlock category</small></span>
-              </label>
+            <div class="actions" style="margin-top:10px">
+              {% for value,label in [('sponsor','Sponsor'),('outro','Outro'),('preview','Preview'),('intro','Intro'),('selfpromo','Self promo'),('interaction','Interaction')] %}
+              <label class="retention-pill"><input type="checkbox" name="downloader_sponsorblock_categories" value="{{ value }}" {% if value in sponsor_categories %}checked{% endif %}> {{ label }}</label>
               {% endfor %}
             </div>
           </div>
+        </details>
 
-          <details class="settings-details" style="margin-top:14px">
-            <summary>Advanced yt-dlp options</summary>
-            <div>
-              <label>Custom yt-dlp options (JSON)
-                <textarea name="downloader_custom_yt_dlp_options" rows="7" spellcheck="false">{{ downloader_custom_options }}</textarea>
-                <span class="muted small">Advanced options are merged into native subscription downloads. Managed path, cookie and progress settings cannot be overridden here.</span>
-              </label>
-              <label style="margin-top:12px">Manual GVS PO token
-                <input type="password" name="downloader_po_token" value="{{ downloader_po_token }}" autocomplete="off">
-                <span class="muted small">Optional expert setting. Current yt-dlp guidance recommends a PO Token Provider plugin because YouTube increasingly binds tokens to individual videos.</span>
-              </label>
-            </div>
-          </details>
-
-          <div class="actions" style="margin-top:14px">
-            <button class="btn" type="submit">Save Downloader Settings</button>
+        <details class="settings-details" style="margin-top:14px">
+          <summary>Advanced yt-dlp</summary>
+          <div>
+            <label>Custom options (JSON)<textarea name="downloader_custom_yt_dlp_options" rows="5" spellcheck="false">{{ downloader_custom_options }}</textarea></label>
+            <label style="margin-top:10px">Manual GVS PO token<input type="password" name="downloader_po_token" value="{{ downloader_po_token }}" autocomplete="off"></label>
           </div>
-        </form>
-      </div>
+        </details>
+        <div class="actions" style="margin-top:14px"><button class="btn" type="submit">Save downloader</button></div>
+      </form>
 
       <div class="setting-box" style="margin-top:14px">
-        <div class="profile-editor-heading">
-          <div>
-            <h3>Scheduled Channel Scans</h3>
-            <div class="muted small">Favourite and non-favourite channels can be deep-scanned on different schedules. Work is staggered and queued rather than launched in one large burst.</div>
-          </div>
-        </div>
-
+        <h3>Scan schedule</h3>
         <form method="post" action="/settings/downloader/scan-schedule">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <div class="settings-grid">
-            <label>Favourite channels
-              <select name="pinchflat_force_index_favourite_minutes">
-                {% for value, label in pinchflat_force_index_favourite_options %}
-                  <option value="{{ value }}" {% if pinchflat_force_index_favourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              <span class="muted small">{{ pinchflat_force_index_status.favourites.eligible }} enabled favourite channel(s).</span>
-            </label>
-            <label>Non-favourite channels
-              <select name="pinchflat_force_index_nonfavourite_minutes">
-                {% for value, label in pinchflat_force_index_nonfavourite_options %}
-                  <option value="{{ value }}" {% if pinchflat_force_index_nonfavourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-              <span class="muted small">{{ pinchflat_force_index_status.non_favourites.eligible }} enabled non-favourite channel(s).</span>
-            </label>
+            <label>Favourite channels<select name="pinchflat_force_index_favourite_minutes">{% for value, label in pinchflat_force_index_favourite_options %}<option value="{{ value }}" {% if pinchflat_force_index_favourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <label>Other channels<select name="pinchflat_force_index_nonfavourite_minutes">{% for value, label in pinchflat_force_index_nonfavourite_options %}<option value="{{ value }}" {% if pinchflat_force_index_nonfavourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
           </div>
-          <div class="profile-control-help" style="margin-top:10px">Each due channel is placed into the native serial deep-scan queue. It no longer creates external Scheduled Scan or Oban jobs.</div>
-          <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Save Scan Schedule</button></div>
+          <div class="actions" style="margin-top:12px"><button class="btn secondary" type="submit">Save schedule</button></div>
         </form>
-      </div>
-
-      <div class="setting-box" style="margin-top:14px">
-        <h3>Downloader status</h3>
-        <div class="mini-stat-grid">
-          <div><span class="muted small">Engine</span><strong>yt-dlp</strong></div>
-          <div><span class="muted small">Enabled channels</span><strong>{{ pinchflat_stats.enabled }}</strong></div>
-          <div><span class="muted small">Disabled channels</span><strong>{{ pinchflat_stats.disabled }}</strong></div>
-          <div><span class="muted small">Pending scans</span><strong>{{ pinchflat_stats.pending }}</strong></div>
-          <div><span class="muted small">Download workers</span><strong>{{ downloader_worker_concurrency }}</strong></div>
-          <div><span class="muted small">Shared storage</span><strong>{{ pinchflat_stats.storage }}</strong></div>
-        </div>
-        <p class="muted small" style="margin-top:10px">No application container, Downloader database or Oban queue is used by V3.</p>
       </div>
     </section>
 
@@ -5980,7 +5866,9 @@ let youtubeIframeApiPromise = null;
 
 let pinchflatDownloadTimer = null;
 let pinchflatQueueTimer = null;
-let pinchflatDownloadSnapshot = null;
+const serverInitialDownloadOverview = {{ initial_download_overview|tojson }};
+const serverInitialLatestSubscriptions = {{ initial_latest_subscriptions|tojson }};
+let pinchflatDownloadSnapshot = serverInitialDownloadOverview || null;
 
 function openDebugReference() {
   if (!debugReferenceDialog) return;
@@ -6330,6 +6218,15 @@ function renderDownloaderActiveDownloads(data) {
     ? `${active.length} active · ${waiting} waiting`
     : `No active downloads · ${waiting} waiting`;
 
+  const completedMetric = document.getElementById("dashboard-downloads-completed");
+  const queueStatus = document.getElementById("dashboard-downloads-queue-status");
+  if (completedMetric && Number.isFinite(Number(data.summary?.completed))) {
+    completedMetric.textContent = String(Number(data.summary.completed || 0));
+  }
+  if (queueStatus) {
+    queueStatus.textContent = `${active.length} active · ${waiting} queued`;
+  }
+
   badge.textContent = String(waiting);
   badge.classList.toggle(
     "hidden",
@@ -6342,7 +6239,7 @@ function renderDownloaderActiveDownloads(data) {
     const empty = document.createElement("div");
     empty.className = "pinchflat-download-empty";
     empty.textContent = waiting
-      ? `${waiting} download${waiting === 1 ? "" : "s"} waiting in Downloader.`
+      ? `${waiting} download${waiting === 1 ? "" : "s"} waiting.`
       : "No active subscription downloads.";
     target.appendChild(empty);
     return;
@@ -6421,6 +6318,39 @@ function renderDownloaderActiveDownloads(data) {
     );
 
     card.appendChild(mediaRow);
+
+    const progressWrap = document.createElement("div");
+    progressWrap.className = "subscription-progress-wrap";
+
+    const progressBar = document.createElement("div");
+    progressBar.className = "subscription-progress";
+
+    const progressFill = document.createElement("span");
+    progressBar.appendChild(progressFill);
+
+    const progressValue = Math.max(
+      0,
+      Math.min(100, Number(item.progress || 0))
+    );
+    const hasMeasuredProgress =
+      progressValue > 0
+      || Number(item.total_bytes || 0) > 0
+      || ["processing", "completed"].includes(String(item.state || ""));
+
+    if (hasMeasuredProgress) {
+      progressFill.style.width = String(progressValue) + "%";
+    } else {
+      progressBar.classList.add("is-indeterminate");
+    }
+
+    const progressLabel = document.createElement("span");
+    progressLabel.className = "subscription-progress-label";
+    progressLabel.textContent = hasMeasuredProgress
+      ? Math.round(progressValue) + "%"
+      : "…";
+
+    progressWrap.append(progressBar, progressLabel);
+    card.appendChild(progressWrap);
     target.appendChild(card);
   }
 }
@@ -6440,7 +6370,7 @@ function renderDownloaderTasks(data) {
   const waitingCount = Number(data.summary?.tasks_waiting || 0);
   const membershipErrors = Number(data.summary?.membership_errors || 0);
   const tasks = Array.isArray(data.tasks) ? data.tasks : [];
-  const running = tasks.filter(item => item.state === "executing");
+  const running = tasks.filter(item => ["executing", "running"].includes(item.state));
   const blockEnabled = !!data.task_block?.enabled;
 
   activeTarget.textContent = String(activeCount);
@@ -7038,7 +6968,11 @@ function settingsActionNeedsPageRefresh(path) {
 function settingsActionNeedsDialogRefresh(path) {
   return new Set([
     "/settings/downloader/advanced",
-    "/settings/downloader/scan-schedule"
+    "/settings/downloader/scan-schedule",
+    "/settings/downloader/auth/upload",
+    "/settings/downloader/auth/remove",
+    "/settings/downloader/auth/test",
+    "/settings/downloader/library/import"
   ]).has(path);
 }
 
@@ -7801,9 +7735,19 @@ function toggleChannelFavouriteFromButton(button) {
 }
 
 async function toggleChannelFavourite(button, channelId, channelTitle, channelUrl, thumbnailUrl) {
-  const viewport = captureViewportState(
-    button?.closest(".source-row") || null
-  );
+  const viewport = captureViewportState(button?.closest(".source-row") || null);
+  const before = getChannelControlState(channelId, {
+    channel_title: channelTitle,
+    channel_url: channelUrl,
+    thumbnail_url: thumbnailUrl
+  });
+  const optimistic = !before.favourite;
+
+  const selector = `.heart-btn[data-channel-id="${CSS.escape(channelId)}"], .discover-channel-heart[data-channel-id="${CSS.escape(channelId)}"], [data-channel-favourite-control="1"][data-channel-id="${CSS.escape(channelId)}"]`;
+  document.querySelectorAll(selector).forEach(btn => setHeartButton(btn, optimistic, "channel"));
+  syncChannelAvatarControls(channelId, {favourite: optimistic});
+  const sourceRow = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
+  if (sourceRow) sourceRow.dataset.favourite = optimistic ? "1" : "0";
 
   try {
     const data = await apiPost("/api/favourites/channel/toggle", {
@@ -7813,19 +7757,9 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       thumbnail_url: thumbnailUrl
     });
 
-    document.querySelectorAll(
-      `.heart-btn[data-channel-id="${CSS.escape(channelId)}"], .discover-channel-heart[data-channel-id="${CSS.escape(channelId)}"], [data-channel-favourite-control="1"][data-channel-id="${CSS.escape(channelId)}"]`
-    ).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
-    syncChannelAvatarControls(channelId, {favourite:data.favourite});
-
-    document.querySelectorAll(`.source-row`).forEach(row => {
-      const heart = row.querySelector(
-        `.heart-btn[data-channel-id="${CSS.escape(channelId)}"]`
-      );
-      if (heart) {
-        row.dataset.favourite = data.favourite ? "1" : "0";
-      }
-    });
+    document.querySelectorAll(selector).forEach(btn => setHeartButton(btn, data.favourite, "channel"));
+    syncChannelAvatarControls(channelId, {favourite: data.favourite});
+    if (sourceRow) sourceRow.dataset.favourite = data.favourite ? "1" : "0";
 
     [
       discoverResults.downloaded,
@@ -7835,15 +7769,12 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       discoverResults.shorts,
       discoverResults.top100
     ].forEach(items => items.forEach(item => {
-      if (item.channel_id === channelId) {
-        item.is_favourite_channel = data.favourite;
-      }
+      if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     }));
 
     latestSubscriptionVideos.forEach(item => {
       if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     });
-
     latestSubscriptionShorts.forEach(item => {
       if (item.channel_id === channelId) item.is_favourite_channel = data.favourite;
     });
@@ -7858,28 +7789,26 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
       if (currentSubscriptionChannelData.subscription) {
         currentSubscriptionChannelData.subscription.favourite = data.favourite;
       }
-      syncChannelAvatarControls(channelId, {favourite:data.favourite});
     }
 
     const favouritesSettingsOpen = !!document.querySelector('.tab-panel[data-panel="favourites"].active');
     if (favouritesDialog?.open || favouritesSettingsOpen) {
-      await loadFavourites();
-    } else {
-      renderSettingsFavouriteOverview();
+      loadFavourites();
     }
 
-    applyFilters({
-      preserveScroll: true,
-      anchorRow: viewport.anchorRow
-    });
-
-    restoreViewportState(viewport);
+    if (pinFavouritesToTop || statusFilter?.value === "favourites") {
+      const resort = () => applyFilters({preserveScroll:true, anchorRow:sourceRow});
+      if ("requestIdleCallback" in window) requestIdleCallback(resort, {timeout:500});
+      else setTimeout(resort, 0);
+    }
   } catch (err) {
+    document.querySelectorAll(selector).forEach(btn => setHeartButton(btn, before.favourite, "channel"));
+    syncChannelAvatarControls(channelId, {favourite: before.favourite});
+    if (sourceRow) sourceRow.dataset.favourite = before.favourite ? "1" : "0";
     restoreViewportState(viewport);
-    window.alert(err.message || String(err));
+    showAjaxToast(err.message || String(err), "error");
   }
 }
-
 
 async function toggleVideoFavourite(button, item) {
   try {
@@ -13006,27 +12935,32 @@ function startDeferredDashboardWork() {
   setDownloaderDownloadMinimised(
     {{ 'true' if page_view.min_pinchflat_downloads else 'false' }}
   );
-  // Start the summary/download request first. Fetch is asynchronous, so the
-  // already-rendered status tiles stay responsive while the request runs.
-  Promise.resolve(loadDownloaderDownloadOverview(true))
-    .finally(() => startDownloaderDownloadPolling());
-  {% elif page_view.load_summary and (page_view.show_summary_latest_download or page_view.show_summary_pinchflat_tasks) %}
-  Promise.resolve(loadDownloaderDownloadOverview(true));
-  setInterval(
-    () => loadDownloaderDownloadOverview(false),
-    {{ '4000' if page_view.show_summary_pinchflat_tasks else '15000' }}
-  );
+  if (serverInitialDownloadOverview) {
+    renderDownloaderActiveDownloads(serverInitialDownloadOverview);
+    renderDownloaderTasks(serverInitialDownloadOverview);
+    renderDownloaderLastDownload(serverInitialDownloadOverview);
+    renderLatestDownloadSummary(serverInitialDownloadOverview.last_downloaded || null);
+  }
+  startDownloaderDownloadPolling();
+  {% elif page_view.load_summary and (page_view.show_summary_latest_download or page_view.show_summary_pinchflat) %}
+  if (serverInitialDownloadOverview) {
+    renderDownloaderTasks(serverInitialDownloadOverview);
+    renderLatestDownloadSummary(serverInitialDownloadOverview.last_downloaded || null);
+  }
+  setInterval(() => loadDownloaderDownloadOverview(false), 5000);
   {% endif %}
 
   {% if google_connected and page_view.load_latest_videos %}
   setLatestSectionMinimised(
     {{ 'true' if page_view.min_latest_videos else 'false' }}
   );
-  // YouTube remains the last network-heavy dashboard request.
-  setTimeout(
-    () => loadLatestSubscriptionVideos(false),
-    900
-  );
+  const initialLatest = serverInitialLatestSubscriptions || {};
+  if ((initialLatest.results || []).length || (initialLatest.shorts || []).length) {
+    renderLatestSubscriptionVideos(initialLatest.results || [], initialLatest.shorts || []);
+    setTimeout(() => loadLatestSubscriptionVideos(false), 5000);
+  } else {
+    setTimeout(() => loadLatestSubscriptionVideos(false), 1200);
+  }
   {% endif %}
 
   {% if page_view.load_subscriptions %}

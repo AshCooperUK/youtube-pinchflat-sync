@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - v3-youtube-subscription-downloader
+      - v3.0.1-performance-ui
 
 permissions:
   contents: read
@@ -37,7 +38,7 @@ jobs:
           mkdir -p "$DATA_DIR" "$DOWNLOAD_ROOT"
           PYTHONPATH=app python - <<'PY'
           import app
-          assert app.VERSION == "3.0.0"
+          assert app.VERSION == "3.0.1"
           assert app.YOUTUBE_COOKIE_PATH.name == "youtube-cookies.txt"
           print("Application import OK", app.VERSION)
           PY
@@ -87,3 +88,19 @@ jobs:
 
       - name: Build application image
         run: docker build -t youtube-subscription-downloader:v3-test ./app
+
+
+      - name: Stage clean source package
+        run: |
+          mkdir -p /tmp/v13.0.1
+          git archive HEAD | tar -x -C /tmp/v13.0.1
+          rm -rf /tmp/v13.0.1/app/__pycache__
+
+      - name: Upload v13.0.1 source package
+        uses: actions/upload-artifact@v4
+        with:
+          name: v13.0.1
+          path: /tmp/v13.0.1
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
