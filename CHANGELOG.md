@@ -4,6 +4,28 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.11
+
+- Move Scan schedule from Downloader to Automation, preserving existing favourite/other intervals and legacy save URLs.
+- Explain scheduled deep scans versus the manual YTSD Sync & Scan action and the separate recent-upload scan.
+- Fix the native downloader scheduler job ID used when saving Automation intervals and displaying its next run. Previously, interval changes could silently fail to take effect until restart.
+- Include all v3.0.10 fixes for guide layout, inline Favourites, provider metadata, Emby refresh and Shorts/force scanning.
+
+## v3.0.10
+
+- Fix clipped Upload Guide Day cards. Programme titles, info/play controls and durations stay inside each card at desktop and mobile sizes. Keep the release-time bars and match the Week/Month card styling.
+- Centre the Single Download icon in Latest Downloaded.
+- Show Favourite Channels and Favourite Videos inside the existing Discover popup. Keep the shared channel and video popups for individual entries.
+- Hide YouTube-only actions on downloaded videos from other providers. Show their programme/provider name without a disabled YouTube channel button or an invented view count.
+- Save source descriptions, programme titles, season/episode numbers, durations, thumbnails and release dates for one-time downloads. Use these saved details in the existing media player without a YouTube lookup.
+- Write provider-aware movie or episode NFOs. Recognised TV episodes use their real programme name, season and episode number. BBC combined titles have a specific fallback when the extractor omits separate episode fields.
+- Organise recognised one-time TV episodes under Programme/Season N with SxxExx filenames when the default output template is selected. Keep custom output templates in use.
+- Repair existing registered non-YouTube downloads automatically from saved local metadata. Keep video bytes, subtitles and watched/rating NFO fields. Refuse destination collisions and report each result in Activity. Add Repair one-time metadata in Settings > Downloader for a manual retry.
+- Fix targeted Emby library detection for separate one-time libraries and new folders under mapped library roots. Notify Emby after completion without waiting for a full filesystem inventory.
+- Make Force Scan check recent uploads before deep history and artwork preparation. Eligible jobs enter the worker queue immediately. Log the scan result and exclusions with video thumbnails and links.
+- Identify Shorts through YouTube channel-tab membership, including watch URLs with no Shorts flag. Cache the result locally and recheck exclusions before media transfer. Defer unverified entries instead of downloading an unknown type. Keep short regular videos eligible.
+- Use the configured timezone for download cutoffs and exact publication times. Keep scanner and download workers running after an individual job error. Report suppressed scans instead of claiming they started.
+
 ## v3.0.9
 
 - Enable upload estimates from saved channel history, with labelled time windows, supporting observation counts and qualitative confidence. Keep genuine YouTube announcements separate. Predictions never create video IDs or download jobs.

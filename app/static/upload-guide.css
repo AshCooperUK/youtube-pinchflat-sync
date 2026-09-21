@@ -273,3 +273,18 @@ body.guide-is-fullscreen {overflow:hidden}
 #ytsd-guide .yt-channel-link {position:sticky;top:54px}
 #ytsd-guide .yt-channel-name {font-weight:600}
 @media(max-width:550px){#ytsd-guide .yt-channel-link {position:static}}
+
+/* Day cards flow with their content, including larger touch controls. */
+#ytsd-guide .yt-hour-lane .yt-programme {top:auto;height:auto;min-height:0;padding:23px 8px 10px;overflow:visible}
+#ytsd-guide .yt-hour-lane .yt-day-text {position:relative;top:auto;left:auto;width:min(320px,100%);margin-left:clamp(0px,calc(var(--release-left) - 8px),calc(100% - 320px));padding:9px;gap:4px;border:1px solid #2e4564;border-left:3px solid #527ba9;border-radius:6px;background:#192c45}
+#ytsd-guide .yt-hour-lane .downloaded .yt-day-text {border-left-color:var(--yt-green)}
+#ytsd-guide .yt-hour-lane .scheduled .yt-day-text {border-left-color:#76c9ff;background:#122e43}
+#ytsd-guide .yt-hour-lane .expected .yt-day-text {border-style:dashed;border-color:#a88b49;background:#302b1d}
+#ytsd-guide .yt-hour-lane [data-selected="true"] .yt-day-text {box-shadow:0 0 0 1px #8eb8ff}
+#ytsd-guide .yt-hour-lane .yt-programme-title {-webkit-line-clamp:2;min-height:32px}
+#ytsd-guide .yt-hour-lane .yt-programme-time {font-size:11px}
+#ytsd-guide .yt-time-bar {pointer-events:none}
+@media(max-width:550px){
+ #ytsd-guide .yt-hour-lane .yt-programme {padding:0;background:none;border:0;flex-basis:100%}
+ #ytsd-guide .yt-hour-lane .yt-day-text {width:100%;margin-left:0}
+}

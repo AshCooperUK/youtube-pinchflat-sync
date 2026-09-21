@@ -1882,8 +1882,7 @@
     .top100-rank { font-size:13px; color:var(--accent); font-weight:800; }
     .top100-subs { color:var(--text); font-weight:800; }
     .top100-country { color:var(--muted); font-size:12px; min-height:18px; }
-    #favourites-dialog { width:min(1220px,96vw); height:min(850px,92vh); }
-    #favourites-dialog .modal-body { height:calc(100% - 73px); max-height:none; overflow-y:auto; }
+
     .favourites-grid {
       display:grid;
       grid-template-columns:repeat(auto-fill,minmax(270px,1fr));
@@ -4597,6 +4596,7 @@
 
           <div class="latest-video-about-card">
             <div class="latest-video-card-heading"><h3>About this video</h3></div>
+            <dl id="latest-native-details" hidden></dl>
             <div id="latest-popup-description" class="latest-popup-description"></div>
             <div id="latest-popup-tags" class="latest-popup-tags"></div>
           </div>
@@ -4746,6 +4746,17 @@
     </div>
     <div id="discover-loading" class="empty hidden">Finding something different…</div>
     <div id="discover-error" class="flash error hidden"></div>
+    <section id="discover-favourites-panel" class="hidden">
+    <div class="tabs favourites-tabs">
+      <button id="fav-tab-channels" class="tab-btn active" type="button" onclick="showFavouriteTab('channels')">Favourite Channels</button>
+      <button id="fav-tab-videos" class="tab-btn" type="button" onclick="showFavouriteTab('videos')">Favourite Videos</button>
+    </div>
+    <div id="favourites-loading" class="empty hidden">Loading favourites…</div>
+    <div id="favourites-error" class="flash error hidden"></div>
+    <section id="fav-panel-channels"><div id="favourite-channels-grid" class="favourites-grid favourite-channels-grid"></div></section>
+    <section id="fav-panel-videos" class="hidden"><div id="favourite-videos-grid" class="favourites-grid favourite-videos-grid"></div></section>
+
+    </section>
     <div id="discover-videos-panel">
       <div id="discover-grid" class="discover-video-grid"></div>
     </div>
@@ -4823,23 +4834,7 @@
   </div>
 </dialog>
 
-<dialog id="favourites-dialog">
-  <div class="modal-head">
-    <div><h2 style="margin:0">Favourites</h2><div class="muted small">Your favourite channels and saved videos.</div></div>
-    <button class="modal-close" onclick="closeFavourites()" aria-label="Close">×</button>
-  </div>
-  <div class="modal-body">
-    <div class="tabs favourites-tabs">
-      <button id="fav-tab-channels" class="tab-btn active" type="button" onclick="showFavouriteTab('channels')">Favourite Channels</button>
-      <button id="fav-tab-videos" class="tab-btn" type="button" onclick="showFavouriteTab('videos')">Favourite Videos</button>
-    </div>
-    <div id="favourites-loading" class="empty hidden">Loading favourites…</div>
-    <div id="favourites-error" class="flash error hidden"></div>
-    <section id="fav-panel-channels"><div id="favourite-channels-grid" class="favourites-grid favourite-channels-grid"></div></section>
-    <section id="fav-panel-videos" class="hidden"><div id="favourite-videos-grid" class="favourites-grid favourite-videos-grid"></div></section>
 
-  </div>
-</dialog>
 
 <dialog id="list-picker-dialog">
   <div class="modal-head">
@@ -5317,6 +5312,11 @@
           <button class="btn ghost smallbtn" type="submit">Repair Emby release dates</button>
           <span class="muted small">Use YouTube publication dates for existing video NFOs. Then refresh metadata in Emby.</span>
         </form>
+        <form method="post" action="/settings/downloader/repair-source" style="margin-top:8px">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn ghost smallbtn" type="submit">Repair one-time metadata</button>
+          <span class="muted small">Restore saved source details, organise recognised TV episodes and refresh their Emby library.</span>
+        </form>
           <div class="muted small" style="margin-top:8px">Imports existing media and enables matched subscriptions, including channels with files already imported. Keeps their range and media profile. Repairs channel folder names for Windows shares and rebuilds artwork and NFO. Active channel folders wait until their downloads finish.</div>
         </div>
       </div>
@@ -5387,17 +5387,7 @@
         <div class="actions" style="margin-top:14px"><button class="btn" type="submit">Save downloader</button></div>
       </form>
 
-      <div class="setting-box" style="margin-top:14px">
-        <h3>Scan schedule</h3>
-        <form method="post" action="/settings/downloader/scan-schedule">
-          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-          <div class="settings-grid">
-            <label>Favourite channels<select name="pinchflat_force_index_favourite_minutes">{% for value, label in pinchflat_force_index_favourite_options %}<option value="{{ value }}" {% if pinchflat_force_index_favourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-            <label>Other channels<select name="pinchflat_force_index_nonfavourite_minutes">{% for value, label in pinchflat_force_index_nonfavourite_options %}<option value="{{ value }}" {% if pinchflat_force_index_nonfavourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-          </div>
-          <div class="actions" style="margin-top:12px"><button class="btn secondary" type="submit">Save schedule</button></div>
-        </form>
-      </div>
+
     </section>
 
     <section class="tab-panel" data-panel="downloads">
@@ -5700,6 +5690,19 @@
 
     <section class="tab-panel" data-panel="automation">
       <div class="settings-panel-intro"><div><h3>Automation</h3><p>Schedules which run without opening the dashboard. Each job has one clear purpose and uses the settings shown here.</p></div></div>
+      <div class="setting-box" style="margin-top:14px">
+        <h3>Scan schedule</h3>
+        <p class="muted small">Deep scans of enabled channels, staggered across each interval. Available downloads enter the queue automatically, using your range, media profile and Shorts settings. Suppress scans pauses these scans.</p>
+        <p class="muted small">The YTSD icon runs a separate Sync &amp; Scan now: it refreshes YouTube subscriptions, scans recent uploads across enabled channels and checks the Emby Download playlist.</p>
+        <form method="post" action="/settings/automation/scan-schedule">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <div class="settings-grid">
+            <label>Favourite channels<select name="pinchflat_force_index_favourite_minutes">{% for value, label in pinchflat_force_index_favourite_options %}<option value="{{ value }}" {% if pinchflat_force_index_favourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <label>Other channels<select name="pinchflat_force_index_nonfavourite_minutes">{% for value, label in pinchflat_force_index_nonfavourite_options %}<option value="{{ value }}" {% if pinchflat_force_index_nonfavourite_minutes|int == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+          </div>
+          <div class="actions" style="margin-top:12px"><button class="btn secondary" type="submit">Save schedule</button></div>
+        </form>
+      </div>
       <form method="post" action="/settings/automation"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         {% set schedule_options = [(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
         {% set emby_schedule_options = [(1,'Every minute'),(5,'Every 5 minutes'),(15,'Every 15 minutes'),(30,'Every 30 minutes'),(60,'Every hour'),(120,'Every 2 hours'),(360,'Every 6 hours'),(720,'Every 12 hours'),(1440,'Every day')] %}
@@ -5718,8 +5721,8 @@
           </div>
 
           <div class="setting-box compact-setting">
-            <h3>download monitoring sync</h3>
-            <label>Reconcile Downloader every
+            <h3>Recent upload scan</h3>
+            <label>Scan enabled channels every
               <select name="pinchflat_sync_interval_minutes">
                 {% for value, label in schedule_options %}
                   <option value="{{ value }}" {% if pinchflat_sync_interval == value %}selected{% endif %}>{{ label }}</option>
@@ -5727,7 +5730,7 @@
               </select>
             </label>
             <label><input type="checkbox" name="auto_retry" value="1" {% if auto_retry %}checked{% endif %}> Retry failed download monitoring updates</label>
-            <p class="muted small">Adds authorised sources, removes disabled sources and repairs mismatches.</p>
+            <p class="muted small">Registers enabled channels and checks their recent uploads for downloads. Runs independently of the deeper Scan schedule above.</p>
             <p class="muted small">Next run: {{ next_pinchflat_sync or "not available" }}</p>
           </div>
 
@@ -5963,7 +5966,6 @@ const singleDownloadDialog = document.getElementById("single-download-dialog");
 const pinchflatQueueDialog = document.getElementById("pinchflat-queue-dialog");
 const profileTemplateHelpDialog = document.getElementById("profile-template-help-dialog");
 const discoverDialog = document.getElementById("discover-dialog");
-const favouritesDialog = document.getElementById("favourites-dialog");
 const listPickerDialog = document.getElementById("list-picker-dialog");
 const latestVideoDialog = document.getElementById("latest-video-dialog");
 latestVideoDialog.addEventListener('close',()=>{const native=document.getElementById('latest-native-player');native.pause();native.removeAttribute('src');native.load();});
@@ -7136,6 +7138,7 @@ function settingsActionNeedsPageRefresh(path) {
     "/settings/apis",
     "/settings/downloader/advanced",
     "/settings/downloader/scan-schedule",
+    "/settings/automation/scan-schedule",
     "/settings/single-download",
     "/settings/history",
     "/settings/video-retention",
@@ -7147,6 +7150,7 @@ function settingsActionNeedsDialogRefresh(path) {
   return new Set([
     "/settings/downloader/advanced",
     "/settings/downloader/scan-schedule",
+    "/settings/automation/scan-schedule",
     "/settings/downloader/auth/upload",
     "/settings/downloader/auth/remove",
     "/settings/downloader/auth/test",
@@ -7995,7 +7999,7 @@ async function toggleChannelFavourite(button, channelId, channelTitle, channelUr
     }
 
     const favouritesSettingsOpen = !!document.querySelector('.tab-panel[data-panel="favourites"].active');
-    if (favouritesDialog?.open || favouritesSettingsOpen) {
+    if (favouritesAreVisible() || favouritesSettingsOpen) {
       loadFavourites();
     }
 
@@ -8036,7 +8040,7 @@ async function toggleVideoFavourite(button, item) {
       latestPopupVideo.is_favourite_video = data.favourite;
       updateLatestPopupButtons();
     }
-    if (favouritesDialog?.open) await loadFavourites();
+    if (favouritesAreVisible()) await loadFavourites();
     return data.favourite;
   } catch (err) {
     window.alert(err.message || String(err));
@@ -8175,6 +8179,31 @@ function updateLatestPopupButtons() {
 
 function renderLatestVideoDetails(item) {
   if (!item) return;
+
+  const nativeDetails = document.getElementById('latest-native-details');
+  nativeDetails.hidden = !item.is_external;
+  if (item.is_external) {
+    document.getElementById('latest-popup-tags')?.replaceChildren();
+    document.getElementById('latest-popup-header-video').textContent = item.title || 'Downloaded video';
+    const heading = document.getElementById('latest-popup-header-channel');
+    heading.textContent = item.series || item.channel_title || item.provider || 'Online video';
+    heading.disabled = true;
+    heading.onclick = null;
+    heading.title = item.provider || 'Source provider';
+    nativeDetails.replaceChildren();
+    const fields = [['Source', item.provider], ['Programme', item.series],
+      ['Season', item.season_number], ['Episode', item.episode_number],
+      ['Released', item.published_at ? formatChannelDate(item.published_at) : ''], ['Duration', item.duration]];
+    fields.forEach(([label, value]) => {
+      if (value === undefined || value === null || value === '') return;
+      const group = document.createElement('div');
+      const key = document.createElement('dt'); key.textContent = label;
+      const val = document.createElement('dd'); val.textContent = String(value);
+      group.append(key, val); nativeDetails.append(group);
+    });
+    renderChannelDescriptionWithLinks(document.getElementById('latest-popup-description'), item.description || 'No description was supplied by the source.');
+    return;
+  }
 
   const headerChannel = document.getElementById("latest-popup-header-channel");
   const headerVideo = document.getElementById("latest-popup-header-video");
@@ -8368,13 +8397,23 @@ function openLatestVideo(item) {
   const remote=document.getElementById('latest-video-player');
   const local=!!(item?.is_external && /^\/downloads\/[a-zA-Z0-9_-]+\/media$/.test(item.local_media_url || ''));
   latestVideoDialog.classList.toggle('native-media',local);
+  document.querySelector('#latest-video-dialog .latest-popup-shell')?.classList.toggle('short-mode', !local && !!item?.is_short);
   native.pause();native.removeAttribute('src');native.hidden=!local;remote.hidden=local;
   if(local){
     latestPopupVideo={...item,video_id:'',channel_id:''};
     remote.src='';native.src=item.local_media_url;
     renderLatestVideoDetails(latestPopupVideo);
     if(!latestVideoDialog.open)latestVideoDialog.showModal();
-    native.play().catch(()=>{});return;
+    native.play().catch(()=>{});
+    const mediaUrl = item.local_media_url;
+    fetch(mediaUrl.replace(/\/media$/, '/metadata'), {cache:'no-store'}).then(async response => {
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Saved metadata could not be loaded.');
+      if (latestPopupVideo?.local_media_url !== mediaUrl || !latestVideoDialog.open) return;
+      latestPopupVideo = {...latestPopupVideo, ...data.item, video_id:'', channel_id:''};
+      renderLatestVideoDetails(latestPopupVideo);
+    }).catch(() => {});
+    return;
   }
   const videoId = item?.video_id || item?.youtube_id || "";
   if (!videoId) return;
@@ -8746,7 +8785,7 @@ function renderLatestSubscriptionVideos(items, shorts=latestSubscriptionShorts) 
     stats.className = "latest-video-stats";
 
     const bits = [
-      formatLatestViewCount(item.view_count),
+      youtube ? formatLatestViewCount(item.view_count) : item.provider,
       formatLatestAge(item.published_at)
     ].filter(Boolean);
 
@@ -8832,14 +8871,18 @@ window.addEventListener("resize", () => {
 });
 
 
-async function openFavourites(tab="channels") {
-  favouriteTab = tab;
-  if (!favouritesDialog.open) favouritesDialog.showModal();
-  await loadFavourites();
-  showFavouriteTab(tab);
+function favouritesAreVisible() {
+  return discoverDialog?.open && discoverMode === "favourites";
 }
 
-function closeFavourites() { favouritesDialog.close(); }
+async function openFavourites(tab="channels") {
+  favouriteTab = tab;
+  if (!discoverDialog.open) discoverDialog.showModal();
+  startDownloadedDiscoverPolling();
+  await showDiscoverMode("favourites");
+}
+
+function closeFavourites() { closeDiscover(); }
 
 function showFavouriteTab(tab) {
   favouriteTab = ["channels","videos"].includes(tab) ? tab : "channels";
@@ -9400,10 +9443,15 @@ async function refreshDownloadedDiscoverIfChanged(forceRender=false) {
 }
 
 async function showDiscoverMode(mode) {
-  discoverMode = ["downloaded", "latest", "liked", "disliked", "videos", "shorts", "top100"].includes(mode)
+  discoverMode = ["favourites", "downloaded", "latest", "liked", "disliked", "videos", "shorts", "top100"].includes(mode)
     ? mode
     : "downloaded";
 
+  document.getElementById("discover-favourites-panel").classList.toggle("hidden", discoverMode !== "favourites");
+  document.getElementById("discover-favourites-btn")?.classList.toggle("secondary", discoverMode !== "favourites");
+  document.getElementById("discover-loading").classList.add("hidden");
+  document.getElementById("discover-error").classList.add("hidden");
+  if (discoverMode !== "shorts") { try { shortsPlayer?.pauseVideo(); } catch (_) {} }
   discoverDialog.classList.toggle(
     "shorts-mode",
     discoverMode === "shorts"
@@ -9455,6 +9503,13 @@ async function showDiscoverMode(mode) {
     "secondary",
     discoverMode !== "top100"
   );
+
+  if (discoverMode === "favourites") {
+    document.getElementById("discover-quota").textContent = "Your favourite channels and saved videos";
+    showFavouriteTab(favouriteTab);
+    await loadFavourites();
+    return;
+  }
 
   if (discoverMode === "downloaded") {
     // Replace any Random Videos tiles immediately, then check Downloader
@@ -9545,6 +9600,7 @@ function clearDiscoverPanelForLoading(mode) {
 }
 
 async function refreshDiscover() {
+  if (discoverMode === "favourites") { await loadFavourites(); return; }
   clearDiscoverPanelForLoading(discoverMode);
   await loadDiscover(discoverMode, true);
 }
@@ -9797,6 +9853,12 @@ function makeDiscoverActionButton(kind, item) {
 }
 
 function makeDiscoverChannelName(item) {
+  if (item.is_external) {
+    const label = document.createElement('span');
+    label.className = 'discover-hover-channel';
+    label.textContent = item.series || item.channel_title || item.provider || 'Online video';
+    return label;
+  }
   const channel = document.createElement("button");
   channel.type = "button";
   channel.className = "discover-hover-channel channel-popup-link";
@@ -9828,7 +9890,8 @@ function renderDiscoverTiles(items) {
 
   items.forEach(item => {
     const card = document.createElement("article");
-    card.className = "discover-video-tile has-subscribe-action";
+    const youtube = !item.is_external && /^[A-Za-z0-9_-]{11}$/.test(item.video_id || "");
+    card.className = "discover-video-tile" + (youtube ? " has-subscribe-action" : " external-media");
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.title = `${item.channel_title || item.channel || "YouTube"}: ${item.title || "YouTube video"}`;
@@ -9840,13 +9903,12 @@ function renderDiscoverTiles(items) {
     image.loading = "lazy";
     image.referrerPolicy = "no-referrer";
 
-    const favourite = makeDiscoverActionButton("favourite", item);
-    const primary = makeDiscoverActionButton(
-      discoverMode === "downloaded" ? "emby" : "download",
-      item
-    );
-    const subscribe = makeDiscoverActionButton("subscribe", item);
-    const protect = userIsAdmin && item.video_id ? makeDiscoverActionButton("protect", item) : null;
+    const actions = youtube ? [
+      makeDiscoverActionButton("favourite", item),
+      makeDiscoverActionButton(discoverMode === "downloaded" ? "emby" : "download", item),
+      makeDiscoverActionButton("subscribe", item)
+    ] : [];
+    const protect = userIsAdmin && youtube ? makeDiscoverActionButton("protect", item) : null;
 
     const overlay = document.createElement("div");
     overlay.className = "discover-video-overlay";
@@ -9866,7 +9928,7 @@ function renderDiscoverTiles(items) {
     meta.textContent = bits.join(" · ");
 
     overlay.append(title, channel, meta);
-    card.append(image, favourite, primary, subscribe);
+    card.append(image, ...actions);
     if (protect) card.appendChild(protect);
     card.appendChild(overlay);
 
@@ -11576,7 +11638,7 @@ async function deleteCurrentChannelFromDownloaderSync(removeDownloader) {
     closeChannelDeleteMenu();
     showAjaxToast(data.message || "Channel removed from YouTube Subscription Downloader.", "success");
 
-    if (favouritesDialog?.open || document.querySelector('.tab-panel[data-panel="favourites"].active')) {
+    if (favouritesAreVisible() || document.querySelector('.tab-panel[data-panel="favourites"].active')) {
       await loadFavourites();
     }
   } catch (error) {
@@ -12240,7 +12302,7 @@ async function unsubscribeCurrentChannel() {
       enabled:data.subscription ? !!data.subscription.download_enabled : false,
       sourceId:data.subscription?.pinchflat_source_id || ""
     });
-    if (favouritesDialog?.open) await loadFavourites();
+    if (favouritesAreVisible()) await loadFavourites();
 
     showAjaxToast(data.message || "Unsubscribed.", "success");
     closeSubscriptionChannelActions();
@@ -13466,7 +13528,7 @@ latestVideoDialog?.addEventListener(
   }
 );
 
-[settingsDialog, debugReferenceDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, favouritesDialog, listPickerDialog].forEach(d => {
+[settingsDialog, debugReferenceDialog, pinchflatQueueDialog, singleDownloadDialog, discoverDialog, listPickerDialog].forEach(d => {
   d?.addEventListener("click", event => {
     if (event.target === d) d.close();
   });

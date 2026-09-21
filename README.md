@@ -2,7 +2,7 @@
 
 A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
 
-Version: **3.0.9** · [Latest changes](RELEASE-v3.0.9.md) · [Full changelog](CHANGELOG.md)
+Version: **3.0.11** · [Latest changes](RELEASE-v3.0.11.md) · [Full changelog](CHANGELOG.md)
 
 ## Install: set up your Cloudflare domain first
 
@@ -134,7 +134,7 @@ Predictions are enabled and labelled **Expected upload**. They show an estimated
 
 Click a programme title or its info icon for details; use its play icon for playback. **Settings > Dashboard** controls the Guide tile's visibility, automatic loading, starting state and position. Its maximise control fills the screen; Escape restores the tile.
 
-Single Download now lives under the download icon in **Latest Downloaded**. Paste a supported HTTP/HTTPS video URL; yt-dlp selects the extractor. Provider support follows the installed [yt-dlp extractors and generic extractor](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md). Completed non-YouTube files play locally in the shared popup. Favourites is inside Discover, and smaller or touch devices use the hamburger menu.
+Single Download now lives under the download icon in **Latest Downloaded**. Paste a supported HTTP/HTTPS video URL; yt-dlp selects the extractor. Provider support follows the installed [yt-dlp extractors and generic extractor](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md). Completed non-YouTube files play locally in the shared popup with saved source descriptions, release dates and episode details. Recognised TV episodes use the default Programme/Season N layout and episode NFOs. Existing registered downloads are repaired from their local metadata on upgrade; **Settings > Downloader > Repair one-time metadata** retries this repair. Custom templates and the NFO toggle remain in effect. Favourites uses a panel inside Discover, and smaller or touch devices use the hamburger menu.
 
 ## V3 architecture and upgrades
 
@@ -147,7 +147,7 @@ V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, r
 
 For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
 
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.9 ZIP targets v3.0.8. It contains the same updated files as the full-source ZIP.
+For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.11 ZIP targets v3.0.9 and also includes the v3.0.10 changes. It contains the same updated files as the full-source ZIP.
 
 ## Development
 
@@ -171,6 +171,30 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 
 <details>
 <summary>V3: native downloader and current releases</summary>
+
+### v3.0.11
+
+- Move Scan schedule from Downloader to Automation, preserving existing favourite/other intervals and legacy save URLs.
+- Explain scheduled deep scans versus the manual YTSD Sync & Scan action and the separate recent-upload scan.
+- Fix the native downloader scheduler job ID used when saving Automation intervals and displaying its next run. Previously, interval changes could silently fail to take effect until restart.
+- Include all v3.0.10 fixes for guide layout, inline Favourites, provider metadata, Emby refresh and Shorts/force scanning.
+
+### v3.0.10
+
+- Fix clipped Upload Guide Day cards. Programme titles, info/play controls and durations stay inside each card at desktop and mobile sizes. Keep the release-time bars and match the Week/Month card styling.
+- Centre the Single Download icon in Latest Downloaded.
+- Show Favourite Channels and Favourite Videos inside the existing Discover popup. Keep the shared channel and video popups for individual entries.
+- Hide YouTube-only actions on downloaded videos from other providers. Show their programme/provider name without a disabled YouTube channel button or an invented view count.
+- Save source descriptions, programme titles, season/episode numbers, durations, thumbnails and release dates for one-time downloads. Use these saved details in the existing media player without a YouTube lookup.
+- Write provider-aware movie or episode NFOs. Recognised TV episodes use their real programme name, season and episode number. BBC combined titles have a specific fallback when the extractor omits separate episode fields.
+- Organise recognised one-time TV episodes under Programme/Season N with SxxExx filenames when the default output template is selected. Keep custom output templates in use.
+- Repair existing registered non-YouTube downloads automatically from saved local metadata. Keep video bytes, subtitles and watched/rating NFO fields. Refuse destination collisions and report each result in Activity. Add Repair one-time metadata in Settings > Downloader for a manual retry.
+- Fix targeted Emby library detection for separate one-time libraries and new folders under mapped library roots. Notify Emby after completion without waiting for a full filesystem inventory.
+- Make Force Scan check recent uploads before deep history and artwork preparation. Eligible jobs enter the worker queue immediately. Log the scan result and exclusions with video thumbnails and links.
+- Identify Shorts through YouTube channel-tab membership, including watch URLs with no Shorts flag. Cache the result locally and recheck exclusions before media transfer. Defer unverified entries instead of downloading an unknown type. Keep short regular videos eligible.
+- Use the configured timezone for download cutoffs and exact publication times. Keep scanner and download workers running after an individual job error. Report suppressed scans instead of claiming they started.
+
+[Release details and one-time metadata repair](RELEASE-v3.0.10.md).
 
 ### v3.0.9
 
@@ -2172,4 +2196,3 @@ This version adds:
 [Archived release documentation](https://github.com/AshCooperUK/youtube-pinchflat-sync/blob/63fabba3842f1202dbc905faa3f9f2177140719b/README.md).
 
 </details>
-

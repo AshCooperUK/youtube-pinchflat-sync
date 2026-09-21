@@ -49,10 +49,12 @@ from downloader_auth import (
     test_cookie_authentication,
 )
 from downloader_media import MediaYoutubeDL, SUBTITLE_EXTENSIONS, safe_media_component
-from publication_metadata import publication_value, write_video_nfo
+from publication_metadata import publication_value, publication_date, write_video_nfo, atomic_xml, xml_text
+from zoneinfo import ZoneInfo
+from source_metadata import normalise_source_info, is_external_info, is_series_episode, metadata_json, media_details
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.9"
+VERSION = "3.0.11"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -1002,6 +1004,8 @@ def init_v3_db():
         ensure_column(conn, "downloads", "auth_mode", "TEXT")
         ensure_column(conn, "downloads", "warning", "TEXT")
         ensure_column(conn, "downloads", "thumbnail_url", "TEXT")
+        ensure_column(conn, "downloads", "metadata_json", "TEXT")
+        conn.execute("CREATE TABLE IF NOT EXISTS download_video_types (video_id TEXT PRIMARY KEY, channel_id TEXT, media_type TEXT, checked_at TEXT)")
         ensure_column(conn, "subscriptions", "download_folder", "TEXT")
         conn.executescript(
             """
@@ -1322,6 +1326,12 @@ def emby_detect_download_library(relative_folder=""):
                         score = candidate_score
                         reason = candidate_reason
 
+                elif normal_location and _normalise_media_path(candidate).startswith(normal_location + "/"):
+                    # The download folder need not be a separate library root.
+                    prefix_score = candidate_score - 10 + min(8, normal_location.count("/"))
+                    if prefix_score > score:
+                        score, reason = prefix_score, candidate_reason + " (parent library)"
+
             if relative_folder and target_basename:
                 if _path_basename(location).casefold() == target_basename.casefold() and score < 92:
                     score = 92
@@ -1361,7 +1371,7 @@ def emby_detect_download_library(relative_folder=""):
 
     # If the direct-download subfolder is not its own Emby library, refresh
     # that folder item inside the main YouTube library where possible.
-    if relative_folder and (not best or best_score < 100):
+    if relative_folder and (not best or best_score < 90):
         root_library = emby_detect_youtube_library()
         target_path = _join_emby_path(root_library.get("location"), relative_folder)
         target_item_id = _emby_item_id_for_path(target_path)
@@ -5860,7 +5870,7 @@ def update_download_job(job_id, **values):
         "video_id", "title", "channel_title", "status", "phase", "progress", "speed",
         "eta", "downloaded_bytes", "total_bytes", "output_path", "error",
         "started_at", "finished_at", "channel_id", "published_at", "profile_id",
-        "failure_code", "auth_mode", "warning", "thumbnail_url",
+        "failure_code", "auth_mode", "warning", "thumbnail_url", "metadata_json",
     }
     values = {key: value for key, value in values.items() if key in allowed}
     if not values:
@@ -6172,6 +6182,149 @@ def subscription_channel_directory(output_path):
     return parent.parent if parent.name.casefold().startswith("season ") else parent
 
 
+SINGLE_DEFAULT_TEMPLATES = {
+    "", "%(uploader,channel|Unknown Channel).80B/%(title).180B [%(id)s].%(ext)s",
+    "%(uploader,channel|Unknown Channel)s/%(title)s [%(id)s].%(ext)s",
+}
+source_metadata_repair_lock = threading.Lock()
+
+
+def stored_download_info(row):
+    try:
+        info = json.loads(row.get('metadata_json') or '{}')
+        if not isinstance(info, dict):
+            info = {}
+    except (TypeError, ValueError):
+        info = {}
+    path = Path(str(row.get('output_path') or '')).resolve()
+    if not info and path.is_relative_to(DOWNLOAD_ROOT.resolve()) and path.is_file():
+        info = _read_media_info_sidecar(path)
+    identity = str(row.get('video_id') or '')
+    if identity.startswith('media:'):
+        _, provider, media_id = identity.split(':', 2)
+        info.setdefault('extractor_key', provider)
+        info.setdefault('id', media_id)
+    for key, value in {'title': row.get('title'), 'thumbnail': row.get('thumbnail_url'),
+                       'original_url': row.get('youtube_url'), 'published_at': row.get('published_at')}.items():
+        if not info.get(key) and value:
+            info[key] = value
+    return normalise_source_info(info)
+
+
+def stored_download_details(row):
+    return media_details(stored_download_info(row))
+
+
+def write_source_download_metadata(info, output_path, write_nfo=True, write_images=True):
+    """BBC and other providers retain their own episode, programme and date fields."""
+    info = normalise_source_info(info)
+    path = Path(output_path)
+    episodic = is_series_episode(info)
+    folder = path.parent.parent if episodic and re.fullmatch(r'Season \d+', path.parent.name) else path.parent
+    if write_nfo:
+        if episodic:
+            target = folder / 'tvshow.nfo'
+            root = ET.parse(target).getroot() if target.is_file() else ET.Element('tvshow')
+            for key, value in {'title': info['series'], 'sorttitle': info['series'], 'studio': info['provider']}.items():
+                node = root.find(key)
+                if node is None:
+                    node = ET.SubElement(root, key)
+                node.text = xml_text(value)
+            atomic_xml(root, target)
+        write_video_nfo(info, path, episode=episodic, tz_name=get_setting('guide_timezone', 'Europe/London'))
+    if not write_images:
+        return
+    thumb = path.with_suffix('.jpg')
+    image = Image.open(thumb).convert('RGB') if thumb.is_file() else _download_image(_best_thumbnail_url(info))
+    if image is None:
+        return
+    try:
+        if not thumb.is_file():
+            image.save(thumb, format='JPEG', quality=90)
+        if episodic:
+            for name, size in [('fanart.jpg', (1920, 1080)), ('poster.jpg', (1000, 1500)), ('banner.jpg', (1920, 480))]:
+                if not (folder / name).is_file():
+                    _write_jpeg_variant(image, folder / name, size)
+    finally:
+        image.close()
+
+
+def repair_source_downloads(force=False):
+    """Backfill registered one-time media from local sidecars without re-downloading."""
+    if not source_metadata_repair_lock.acquire(blocking=False):
+        return {'updated': 0, 'errors': 0}
+    updated = errors = 0
+    try:
+        with db() as conn:
+            rows = [dict(row) for row in conn.execute("SELECT * FROM downloads WHERE status='completed' AND source_type='single' AND video_id LIKE 'media:%'")]
+        for row in rows:
+            if not force and row.get('metadata_json'):
+                continue
+            moved = []
+            try:
+                path = Path(str(row.get('output_path') or '')).resolve()
+                if not path.is_relative_to(DOWNLOAD_ROOT.resolve()) or not is_finished_media_file(path):
+                    continue
+                info = stored_download_info(row)
+                if not info.get('description') and not info.get('series'):
+                    # A missing sidecar cannot supply the original programme details.
+                    log_activity('download_metadata', 'Source metadata unavailable', 'No saved programme metadata was found beside this download.',
+                                 'warning', job_id=row['job_id'])
+                    continue
+                if is_series_episode(info) and get_setting('single_download_output_template', '') in SINGLE_DEFAULT_TEMPLATES:
+                    folder = DOWNLOAD_ROOT / get_setting('single_download_folder', 'Single Downloads').strip('/\\')
+                    if path.is_relative_to(folder.resolve()):
+                        options = {'quiet': True, '_ytsd_single_series_root': str(folder),
+                                   '_ytsd_source_key': hashlib.sha256(row['youtube_url'].encode()).hexdigest()[:12]}
+                        with MediaYoutubeDL(options, output_root=DOWNLOAD_ROOT) as ydl:
+                            target = Path(ydl.prepare_filename({**info, 'ext': path.suffix[1:]}))
+                        if target != path:
+                            # Plan every move before changing anything. Never overwrite media.
+                            moves = [(path, target)]
+                            for sidecar in path.parent.iterdir():
+                                if (sidecar != path and sidecar.is_file() and not sidecar.is_symlink()
+                                        and sidecar.name.startswith(path.stem + '.')
+                                        and sidecar.suffix.lower().lstrip('.') in SUBTITLE_EXTENSIONS | {'json', 'nfo', 'jpg', 'jpeg', 'png', 'webp'}):
+                                    moves.append((sidecar, target.parent / (target.stem + sidecar.name[len(path.stem):])))
+                            if any(dest.exists() for _, dest in moves):
+                                raise RuntimeError('A file already exists at the programme destination. No files were moved.')
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            for source, dest in moves:
+                                source.rename(dest)
+                                moved.append((source, dest))
+                            path = target
+                try:
+                    update_download_job(row['job_id'], output_path=str(path), metadata_json=metadata_json(info),
+                                        channel_title=media_details(info)['channel_title'], published_at=publication_value(info) or row.get('published_at'),
+                                        thumbnail_url=info.get('thumbnail') or row.get('thumbnail_url'))
+                except Exception:
+                    for source, dest in reversed(moved):
+                        dest.rename(source)
+                    moved = []
+                    raise
+                moved = []  # Database now owns the new path even if optional artwork fails.
+                write_source_download_metadata(info, path, write_nfo=setting_bool('single_download_write_nfo', True),
+                                               write_images=path.with_suffix('.jpg').is_file())
+                updated += 1
+                log_activity('download_metadata', 'One-time metadata repaired', 'Programme details, episode numbers and release date were restored from saved metadata.',
+                             'success', job_id=row['job_id'])
+            except Exception as exc:
+                for source, dest in reversed(moved):
+                    dest.rename(source)
+                errors += 1
+                log_activity('download_metadata', 'One-time metadata repair failed', str(exc), 'warning', job_id=row['job_id'])
+        if updated:
+            invalidate_video_inventory()
+            if emby_configured():
+                try:
+                    emby_refresh_download_library(get_setting('single_download_folder', 'Single Downloads'), 'One-time metadata repair')
+                except Exception as exc:
+                    log_activity('emby', 'One-time metadata refresh failed', str(exc), 'warning')
+        return {'updated': updated, 'errors': errors}
+    finally:
+        source_metadata_repair_lock.release()
+
+
 def write_direct_download_series_metadata(
     info,
     output_path,
@@ -6184,6 +6337,10 @@ def write_direct_download_series_metadata(
     if not output_path:
         return
 
+    info = normalise_source_info(info)
+    if not channel_root and is_external_info(info):
+        write_source_download_metadata(info, output_path, write_nfo, write_images)
+        return
     channel_dir = Path(output_path).parent
     if channel_root:
         channel_dir = subscription_channel_directory(output_path)
@@ -6682,6 +6839,10 @@ def run_download_job(job_id):
 
     if source_type == "single":
         ydl_opts.update(single_download_ydl_settings())
+        configured_template = get_setting("single_download_output_template", "")
+        if configured_template in SINGLE_DEFAULT_TEMPLATES:
+            ydl_opts['_ytsd_single_series_root'] = str(output_dir)
+        ydl_opts['_ytsd_source_key'] = hashlib.sha256(job['youtube_url'].encode()).hexdigest()[:12] if not valid_youtube_url(job['youtube_url']) else ''
     elif subscription_job:
         ydl_opts.update(_v3_profile_ydl_options(job.get("profile_id")))
     else:
@@ -6709,6 +6870,7 @@ def run_download_job(job_id):
             info = next((entry for entry in info.get('entries', []) if entry), None)
         if not info:
             raise RuntimeError('No downloadable media was returned for this URL.')
+        info = normalise_source_info({**info, 'original_url': job['youtube_url']})
 
         output_path = ""
         requested = info.get("requested_downloads") or []
@@ -6724,9 +6886,10 @@ def run_download_job(job_id):
         if not output_path:
             raise RuntimeError("The downloader did not produce a final media file.")
         update_download_job(job_id, status="processing", output_path=output_path,
+                            metadata_json=metadata_json(info),
                             video_id=download_info_id(info) or job.get("video_id"),
                             title=info.get("title") or job.get("title"),
-                            channel_title=info.get("channel") or info.get("uploader") or job.get("channel_title"),
+                            channel_title=info.get("series") or info.get("channel") or info.get("uploader") or job.get("channel_title"),
                             channel_id=download_info_channel(info) or job.get("channel_id"),
                             thumbnail_url=info.get("thumbnail") or job.get("thumbnail_url"),
                             phase="Finalising downloaded media", speed="", eta="")
@@ -6812,8 +6975,10 @@ def run_download_job(job_id):
             job_id,
             video_id=download_info_id(info) or job.get("video_id"),
             title=info.get("title") or job.get("title"),
+            metadata_json=metadata_json(info),
             channel_title=(
-                info.get("uploader")
+                info.get("series")
+                or info.get("uploader")
                 or info.get("channel")
                 or job.get("channel_title")
             ),
@@ -6860,7 +7025,8 @@ def run_download_job(job_id):
                 job_id=job_id,
             )
 
-        storage_snapshot(force=True)
+        # Do not let a slow filesystem inventory delay the Emby notification.
+        invalidate_video_inventory()
 
         if emby_configured():
             try:
@@ -6936,6 +7102,9 @@ def download_worker():
         job_id = download_queue.get()
         try:
             run_download_job(job_id)
+        except Exception as exc:
+            update_download_job(job_id, status='failed', phase='Worker error', error=str(exc)[:1500], finished_at=now_iso())
+            log_activity('download', 'Download worker error', str(exc), 'error', job_id=job_id)
         finally:
             download_queue.task_done()
 
@@ -7904,6 +8073,7 @@ def native_recent_downloaded_videos(limit=100):
             "metadata_complete": False,
             "from_pinchflat": False,
             "from_downloader": True,
+            **(stored_download_details(row) if external else {}),
         })
     return annotate_favourites(results)
 
@@ -8454,7 +8624,7 @@ def resolve_history_cutoff(
             years = 1
         effective_mode = f"years_{years}"
 
-    today = date.today()
+    today = datetime.now(ZoneInfo(get_setting('guide_timezone', 'Europe/London'))).date()
 
     if effective_mode == "today":
         cutoff = today
@@ -14719,6 +14889,62 @@ def subscription_media_exclusion(info, include_shorts=None, include_livestreams=
     return None
 
 
+def _v3_record_video_types(channel_id, entries, media_type):
+    with db() as conn:
+        conn.executemany("INSERT OR REPLACE INTO download_video_types VALUES (?,?,?,?)",
+                         [(str(entry.get('id') or entry.get('video_id')), channel_id, media_type, now_iso())
+                          for entry in entries if entry and (entry.get('id') or entry.get('video_id'))])
+
+
+def _v3_channel_tab(channel_id, tab, limit=50):
+    options = {'quiet': True, 'no_warnings': True, 'skip_download': True,
+               'extract_flat': 'in_playlist', 'playlistend': limit, 'socket_timeout': 20}
+    url = f'https://www.youtube.com/channel/{channel_id}/{tab}'
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            result = ydl.extract_info(url, download=False) or {}
+    except Exception as exc:
+        if 'does not have a' in str(exc).lower() and 'tab' in str(exc).lower():
+            return []
+        if setting_bool('downloader_auth_retry', True) and should_retry_with_cookies(exc):
+            with yt_dlp.YoutubeDL(_v3_authenticated_options(options)) as ydl:
+                result = ydl.extract_info(url, download=False) or {}
+        else:
+            raise
+    entries = [dict(entry) for entry in result.get('entries', []) if entry]
+    kind = {'videos': 'video', 'shorts': 'short', 'streams': 'livestream'}[tab]
+    for entry in entries:
+        entry['media_type'] = kind
+    _v3_record_video_types(channel_id, entries, kind)
+    return entries
+
+
+def _v3_resolve_media_type(channel_id, video_id, context=None):
+    """The channel tabs provide real Shorts membership. Duration is not a type."""
+    context = context if context is not None else {}
+    with db() as conn:
+        row = conn.execute("SELECT media_type FROM download_video_types WHERE video_id=? AND checked_at>=?",
+                           (video_id, (datetime.now(timezone.utc)-timedelta(days=30)).isoformat())).fetchone()
+        skipped = conn.execute("SELECT failure_code FROM downloads WHERE video_id=? AND status='skipped' ORDER BY id DESC LIMIT 1", (video_id,)).fetchone()
+    if row:
+        return row['media_type']
+    if skipped and skipped['failure_code'] in ('shorts_excluded', 'livestream_excluded'):
+        return 'short' if skipped['failure_code'] == 'shorts_excluded' else 'livestream'
+    if not channel_id:
+        return ''
+    for tab in ('videos', 'shorts', 'streams'):
+        key = (channel_id, tab)
+        if key not in context:
+            try:
+                context[key] = _v3_channel_tab(channel_id, tab)
+            except Exception as exc:
+                context[key] = []
+                log_activity('scan', 'Channel tab could not be checked', str(exc), 'warning', channel_id)
+        if any(str(entry.get('id') or entry.get('video_id')) == video_id for entry in context[key]):
+            return {'videos': 'video', 'shorts': 'short', 'streams': 'livestream'}[tab]
+    return ''
+
+
 def _v3_profile_ydl_options(profile_id):
     profile_id = v3_profile_id(profile_id)
     options = {}
@@ -14801,6 +15027,13 @@ def _v3_profile_ydl_options(profile_id):
     include_livestreams = setting_bool("downloader_include_livestreams", True)
 
     def match_filter(info, incomplete=False):
+        info = dict(info or {})
+        known = info.get('media_type') or info.get('is_short') is True or '/shorts/' in str(info.get('original_url') or '')
+        youtube = str(info.get('extractor_key') or info.get('extractor') or '').lower() == 'youtube'
+        if not incomplete and youtube and not known and (not include_shorts or not include_livestreams):
+            info['media_type'] = _v3_resolve_media_type(info.get('channel_id'), info.get('id'))
+            if not info['media_type']:
+                raise SubscriptionMediaExcluded('media_type_unverified', 'Skipped: video type could not be verified. Retry the channel scan.')
         excluded = subscription_media_exclusion(info, include_shorts, include_livestreams)
         if excluded:
             # Stop before sidecars/media are written and retain the reason in
@@ -14823,6 +15056,9 @@ def _v3_subscription_template(channel_dir=None):
 
 
 def _v3_parse_entry_date(entry):
+    published = publication_date(publication_value(entry), get_setting('guide_timezone', 'Europe/London'))
+    if published:
+        return published
     upload_date = str((entry or {}).get("upload_date") or "").strip()
     if re.fullmatch(r"\d{8}", upload_date):
         try:
@@ -14923,77 +15159,80 @@ def _v3_enrich_flat_entry(entry):
 
 def v3_scan_subscription(channel_id, deep=False, redownload=False):
     with db() as conn:
-        row = conn.execute(
-            "SELECT * FROM subscriptions WHERE channel_id = ? AND active = 1",
-            (channel_id,),
-        ).fetchone()
+        row = conn.execute("SELECT * FROM subscriptions WHERE channel_id=? AND active=1", (channel_id,)).fetchone()
     if not row:
-        raise RuntimeError("Subscription was not found.")
+        raise RuntimeError('Subscription was not found.')
     sub = dict(row)
     if not subscription_download_enabled(sub):
-        return {"found": 0, "queued": 0, "message": "Downloads are disabled for this channel."}
-
-    try:
-        prepare_subscription_metadata(sub, subscription_output_directory(sub))
-    except Exception as exc:
-        log_activity("download_metadata", "Channel metadata preparation failed", str(exc), "warning", channel_id)
-
-    entries = []
-    if not deep:
-        entries = youtube_channel_feed(channel_id, force=True)
-        entries = [
-            {
-                "id": item.get("video_id"),
-                "title": item.get("title"),
-                "url": item.get("video_url"),
-                "published_at": item.get("published_at"),
-                "channel": item.get("channel_title") or sub.get("title"),
-            }
-            for item in entries
-        ]
-    else:
-        channel_url = str(sub.get("channel_url") or f"https://www.youtube.com/channel/{channel_id}").rstrip("/")
-        if not channel_url.endswith("/videos"):
-            channel_url += "/videos"
-        limit = setting_int("downloader_deep_scan_limit", 500, 25, 5000)
-        options = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "extract_flat": "in_playlist",
-            "playlistend": limit,
-            "socket_timeout": 30,
-        }
-        try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(channel_url, download=False)
-        except Exception as exc:
-            if setting_bool("downloader_auth_retry", True) and should_retry_with_cookies(exc):
-                with yt_dlp.YoutubeDL(_v3_authenticated_options(options)) as ydl:
-                    info = ydl.extract_info(channel_url, download=False)
-            else:
-                raise
-        entries = list((info or {}).get("entries") or [])
-
-    queued = 0
-    job_ids = []
+        return {'found': 0, 'queued': 0, 'job_ids': [], 'excluded': 0, 'message': 'Downloads are disabled for this channel.'}
     cutoff = date.fromisoformat(subscription_cutoff(sub))
-    for entry in entries:
-        if deep and not _v3_parse_entry_date(entry):
-            entry = _v3_enrich_flat_entry(entry)
+    job_ids, visited, type_context = [], set(), {}
+    excluded = found = 0
+    # Recent uploads enter the worker queue before the historical scan or artwork.
+    try:
+        feed = youtube_channel_feed(channel_id, force=True)
+    except Exception as exc:
+        if not deep:
+            raise
+        feed = []
+        log_activity('scan', 'Recent feed unavailable', str(exc), 'warning', channel_id)
+    dates = {item['video_id']: item.get('published_at') for item in feed if item.get('video_id')}
+
+    def enqueue_entry(entry, classify=False):
+        nonlocal found, excluded
+        entry = dict(entry)
+        video_id = str(entry.get('id') or entry.get('video_id') or '')
+        if not video_id or video_id in visited:
+            return
+        found += 1
+        entry.setdefault('published_at', dates.get(video_id))
         entry_date = _v3_parse_entry_date(entry)
-        # Channel playlists are newest first. Once a dated entry is older than
-        # the cutoff during a deep scan there is no value walking further back.
-        if deep and entry_date and entry_date < cutoff:
-            break
-        # For a deep historical scan, do not queue an entry whose date still
-        # cannot be established. This prevents a flat 500-item playlist from
-        # bypassing a "Today" or "This week" cutoff.
-        if deep and not entry_date:
-            continue
-        if _v3_queue_entry(sub, entry, redownload=redownload, job_ids=job_ids):
-            queued += 1
-    return {"found": len(entries), "queued": queued, "job_ids": job_ids}
+        if entry_date and entry_date < cutoff:
+            return
+        if classify and not subscription_media_exclusion(entry) and not entry.get('media_type') and (not setting_bool('downloader_include_shorts', False) or not setting_bool('downloader_include_livestreams', True)):
+            entry['media_type'] = _v3_resolve_media_type(channel_id, video_id, type_context)
+            if not entry['media_type']:
+                # Do not advertise an unverified feed entry as a media transfer.
+                log_activity('scan', 'Video type check deferred', 'The video was not found in the channel tabs. A later scan will retry.',
+                             'warning', channel_id, video_id=video_id, video_title=entry.get('title'))
+                return
+        reason = subscription_media_exclusion(entry)
+        if reason:
+            excluded += 1
+            visited.add(video_id)
+            log_activity('scan', 'Upload excluded', reason[1], 'info', channel_id, video_id=video_id, video_title=entry.get('title'))
+            return
+        visited.add(video_id)
+        _v3_queue_entry(sub, entry, redownload=redownload, job_ids=job_ids)
+
+    for item in feed:
+        enqueue_entry({**item, 'id': item.get('video_id'), 'url': item.get('video_url'),
+                       'channel': item.get('channel_title') or sub.get('title')}, classify=True)
+    if deep:
+        tabs = ['videos']
+        if setting_bool('downloader_include_shorts', False):
+            tabs.append('shorts')
+        if setting_bool('downloader_include_livestreams', True):
+            tabs.append('streams')
+        limit = setting_int('downloader_deep_scan_limit', 500, 25, 5000)
+        for tab in tabs:
+            for entry in _v3_channel_tab(channel_id, tab, limit):
+                video_id = str(entry.get('id') or '')
+                if video_id in visited:
+                    continue
+                entry.setdefault('published_at', dates.get(video_id))
+                if not _v3_parse_entry_date(entry):
+                    entry = _v3_enrich_flat_entry(entry)
+                entry_date = _v3_parse_entry_date(entry)
+                if entry_date and entry_date < cutoff:
+                    break
+                if entry_date:
+                    enqueue_entry(entry)
+    result = {'found': found, 'queued': len(job_ids), 'job_ids': job_ids, 'excluded': excluded}
+    outcomes = scan_download_outcomes(result)
+    log_activity('scan', 'Channel scan completed', f"{outcomes['message']} Excluded {excluded} upload(s) by media settings.",
+                 'success', channel_id)
+    return result
 
 
 def enqueue_subscription_scan(channel_id, deep=False, redownload=False):
@@ -15024,53 +15263,36 @@ def enqueue_subscription_scan(channel_id, deep=False, redownload=False):
     return job_id, True
 
 
+def run_subscription_scan_job(scan_id):
+    with db() as conn:
+        job = conn.execute("SELECT * FROM subscription_scan_jobs WHERE id=? AND status='queued'", (scan_id,)).fetchone()
+        if not job:
+            return
+        claimed = conn.execute("UPDATE subscription_scan_jobs SET status='running', started_at=? WHERE id=? AND status='queued'", (now_iso(), scan_id)).rowcount
+        if not claimed:
+            return
+    try:
+        result = v3_scan_subscription(job['channel_id'], deep=bool(job['deep']), redownload=bool(job['redownload']))
+        with db() as conn:
+            conn.execute("UPDATE subscription_scan_jobs SET status='completed', finished_at=?, found=?, queued=?, error=NULL WHERE id=?",
+                         (now_iso(), result['found'], result['queued'], scan_id))
+    except Exception as exc:
+        with db() as conn:
+            conn.execute("UPDATE subscription_scan_jobs SET status='failed', finished_at=?, error=? WHERE id=?", (now_iso(), str(exc)[:1500], scan_id))
+        log_activity('scan', 'Channel scan failed', str(exc), 'error', job['channel_id'])
+
+
 def _v3_scan_worker():
     while True:
         scan_id = scan_queue.get()
         try:
-            with db() as conn:
-                job = conn.execute(
-                    "SELECT * FROM subscription_scan_jobs WHERE id = ?",
-                    (scan_id,),
-                ).fetchone()
-                if not job:
-                    continue
-                conn.execute(
-                    "UPDATE subscription_scan_jobs SET status='running', started_at=? WHERE id=?",
-                    (now_iso(), scan_id),
-                )
+            run_subscription_scan_job(scan_id)
+        except Exception as exc:
+            # A database/filesystem failure must not silently kill the only scanner.
             try:
-                result = v3_scan_subscription(
-                    job["channel_id"],
-                    deep=bool(job["deep"]),
-                    redownload=bool(job["redownload"]),
-                )
-                with db() as conn:
-                    conn.execute(
-                        """
-                        UPDATE subscription_scan_jobs
-                        SET status='completed', finished_at=?, found=?, queued=?, error=NULL
-                        WHERE id=?
-                        """,
-                        (now_iso(), result["found"], result["queued"], scan_id),
-                    )
-            except Exception as exc:
-                with db() as conn:
-                    conn.execute(
-                        """
-                        UPDATE subscription_scan_jobs
-                        SET status='failed', finished_at=?, error=?
-                        WHERE id=?
-                        """,
-                        (now_iso(), str(exc)[:1500], scan_id),
-                    )
-                log_activity(
-                    "scan",
-                    "Channel scan failed",
-                    f"{job['channel_id']}: {exc}",
-                    "error",
-                    job["channel_id"],
-                )
+                log_activity('scan', 'Scan worker error', str(exc), 'error')
+            except Exception:
+                app.logger.exception('Unable to process subscription scan %s', scan_id)
         finally:
             scan_queue.task_done()
 
@@ -15259,8 +15481,10 @@ def retry_failed_source_updates():
 def execute_pinchflat_source_action(source_id, action):
     channel_id = str(source_id or "")
     if action in {"force_scan", "download_pending"}:
-        enqueue_subscription_scan(channel_id, deep=True)
-        return {"queued": True}
+        scan_id, created = enqueue_subscription_scan(channel_id, deep=True)
+        if scan_id is None:
+            raise RuntimeError('Scans are suppressed. Turn off Suppress scans in the Downloader tile to start this scan.')
+        return {"queued": created, "scan_id": scan_id}
     if action == "redownload_existing":
         enqueue_subscription_scan(channel_id, deep=True, redownload=True)
         return {"queued": True}
@@ -15516,6 +15740,7 @@ def pinchflat_download_overview(queue_limit=100):
             "output_path": str(row.get("output_path") or ""),
             "file_size": file_size,
             "file_size_text": format_bytes(file_size) if file_size else "",
+            **(stored_download_details(row) if str(row.get('video_id') or '').startswith('media:') else {}),
         }
 
     tasks = [
@@ -15719,10 +15944,18 @@ def reconcile_existing_library(force=False, enable_channels=False):
 
             with db() as conn:
                 existing = conn.execute(
-                    "SELECT id,channel_id FROM downloads WHERE output_path=? AND status='completed' LIMIT 1",
+                    "SELECT id,channel_id,video_id FROM downloads WHERE output_path=? AND status='completed' LIMIT 1",
                     (media_path_text,),
                 ).fetchone()
             info = _read_media_info_sidecar(media_path)
+            if is_external_info(info) or (existing and str(existing['video_id'] or '').startswith('media:')):
+                # Importing a broadcaster/provider file must not attach it to a
+                # YouTube subscription with the same display name or ID length.
+                if existing:
+                    known += 1
+                else:
+                    unmatched += 1
+                continue
             channel_id, channel_title = identify_channel(media_path, info, existing, root)
             if channel_id in known_channels:
                 matched_channels.add(channel_id)
@@ -15859,6 +16092,7 @@ def _v3_import_existing_library():
 
 def refresh_existing_channel_artwork():
     """Repair known channel folders and metadata, including subtitle-only folders."""
+    repair_source_downloads(force=True)
     repair_publication_dates()
     try:
         with db() as conn:
@@ -16757,7 +16991,7 @@ def index():
     next_emby_sync = None
     for job_id, target_name in [
         ("youtube-subscription-sync", "youtube"),
-        ("pinchflat-source-sync", "pinchflat"),
+        ("native-downloader-sync", "pinchflat"),
         ("emby-download-sync", "emby"),
     ]:
         try:
@@ -17508,7 +17742,7 @@ def reschedule_sync_job():
             current_youtube_sync_interval(),
         ),
         (
-            "pinchflat-source-sync",
+            "native-downloader-sync",
             current_pinchflat_sync_interval(),
         ),
         (
@@ -18217,6 +18451,7 @@ def save_pinchflat_advanced_settings():
     )
 
 
+@app.post("/settings/automation/scan-schedule")
 @app.post("/settings/downloader/scan-schedule")
 @app.post("/settings/pinchflat/force-index")
 def save_pinchflat_force_index_settings():
@@ -18271,7 +18506,7 @@ def save_pinchflat_force_index_settings():
         "success",
     )
     flash("Scheduled channel scan settings saved.", "success")
-    return redirect(url_for("index") + "#pinchflat")
+    return redirect(url_for("index") + "#automation")
 
 
 @app.post("/settings/pinchflat/profile/create")
@@ -18929,7 +19164,7 @@ def subscription_source_action_api(channel_id):
 
     try:
         with pinchflat_source_action_lock:
-            execute_pinchflat_source_action(
+            result = execute_pinchflat_source_action(
                 source_id,
                 action,
             )
@@ -18938,6 +19173,8 @@ def subscription_source_action_api(channel_id):
             f"{friendly[action]} started for "
             f"{item.get('title') or channel_id}."
         )
+        if result.get('scan_id'):
+            message += ' Recent uploads will be checked first. Progress and exclusions appear in Diagnostics > Activity.'
 
         log_activity(
             "pinchflat",
@@ -19391,6 +19628,20 @@ def single_download_start():
         )
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.get('/downloads/<job_id>/metadata')
+def completed_download_metadata(job_id):
+    job = download_job_row(job_id)
+    if not job or job.get('status') != 'completed':
+        abort(404)
+    path = Path(str(job.get('output_path') or '')).resolve()
+    if not path.is_relative_to(DOWNLOAD_ROOT.resolve()) or not is_finished_media_file(path):
+        abort(404)
+    response = jsonify(ok=True, item={**stored_download_details(job), 'is_external': str(job.get('video_id') or '').startswith('media:'),
+                                     'video_url': job.get('youtube_url') or '', 'local_media_url': url_for('completed_download_media', job_id=job_id)})
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 @app.get('/downloads/<job_id>/media')
@@ -20439,7 +20690,8 @@ def repair_publication_dates(video_ids=None, quiet=False):
                     missing += 1
                     continue
                 info['published_at'] = published
-                changed = write_video_nfo(info, path, episode=subscription,
+                info = normalise_source_info(info)
+                changed = write_video_nfo(info, path, episode=subscription or is_series_episode(info),
                                           tz_name=get_setting('guide_timezone', 'Europe/London'))
                 with db() as conn:
                     conn.execute("UPDATE downloads SET published_at=? WHERE id=?", (published, row['id']))
@@ -20515,6 +20767,13 @@ def repair_emby_release_dates():
     return redirect(url_for('index'))
 
 
+@app.post('/settings/downloader/repair-source')
+def repair_one_time_metadata():
+    threading.Thread(target=lambda: repair_source_downloads(force=True), name='source-metadata-repair', daemon=True).start()
+    flash('One-time metadata repair started. Saved source details and Emby refresh results appear in Diagnostics > Activity.', 'success')
+    return redirect(url_for('index'))
+
+
 init_db()
 init_v3_db()
 init_v303_defaults()
@@ -20522,6 +20781,7 @@ cache_restored = load_persistent_dashboard_cache()
 start_download_worker()
 start_scan_worker()
 threading.Thread(target=_v3_import_existing_library, name="v3-library-import", daemon=True).start()
+threading.Thread(target=repair_source_downloads, name="source-metadata-repair", daemon=True).start()
 start_dashboard_preload(force_storage=not cache_restored)
 
 scheduler = BackgroundScheduler(

@@ -4,6 +4,7 @@ import re
 import unicodedata
 
 import yt_dlp
+from source_metadata import normalise_source_info, is_external_info, is_series_episode
 
 
 SUBTITLE_EXTENSIONS = {"vtt", "srt", "ass", "ssa", "ttml", "dfxp", "srv1", "srv2", "srv3", "json3", "lrc"}
@@ -34,13 +35,33 @@ class MediaYoutubeDL(yt_dlp.YoutubeDL):
         self.sidecar_notice = sidecar_notice
         super().__init__({**params, "windowsfilenames": True})
 
+    def process_video_result(self, info_dict, download=True):
+        info_dict.update(normalise_source_info(info_dict))
+        return super().process_video_result(info_dict, download=download)
+
     def prepare_filename(self, info_dict, dir_type="", *, outtmpl=None, warn=False):
         # Work on a copy. Emby and the dashboard retain the original titles.
-        info = dict(info_dict)
-        for key, limit in (("title", 180), ("uploader", 80), ("channel", 80), ("creator", 80)):
+        info = normalise_source_info(info_dict)
+        series_root = self.params.get('_ytsd_single_series_root')
+        if not outtmpl and series_root and is_external_info(info) and is_series_episode(info):
+            source_key = self.params.get('_ytsd_source_key', '')
+            suffix = f' [source-{source_key}]' if source_key else ''
+            outtmpl = str(Path(str(series_root).replace('%', '%%')) / '%(series).80B' / 'Season %(season_number)d'
+                          / ('S%(season_number)02dE%(episode_number)02d - %(title).140B [%(id)s]' + suffix + '.%(ext)s'))
+        for key, limit in (("title", 180), ("uploader", 80), ("channel", 80), ("creator", 80), ("series", 80)):
             if info.get(key):
                 info[key] = safe_media_component(info[key], limit)
-        filename = super().prepare_filename(info, dir_type, outtmpl=outtmpl, warn=warn)
+        if outtmpl and series_root and is_external_info(info) and is_series_episode(info):
+            # Let yt-dlp select the .info.json/.jpg/.vtt suffix for each sidecar.
+            # Passing a custom outtmpl together with a sidecar dir_type is invalid.
+            previous_templates = self.params['outtmpl']
+            self.params['outtmpl'] = {**previous_templates, 'default': outtmpl}
+            try:
+                filename = super().prepare_filename(info, dir_type, warn=warn)
+            finally:
+                self.params['outtmpl'] = previous_templates
+        else:
+            filename = super().prepare_filename(info, dir_type, outtmpl=outtmpl, warn=warn)
         if not filename:
             return filename
         path = Path(filename)

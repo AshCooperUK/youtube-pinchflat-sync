@@ -99,7 +99,8 @@ class SubscriptionTests(unittest.TestCase):
                    for vid,url in [('abcdefghijk','https://www.youtube.com/watch?v=abcdefghijk'),
                                    ('bcdefghijkl','https://www.youtube.com/shorts/bcdefghijkl'),
                                    ('cdefghijklm','https://www.youtube.com/watch?v=cdefghijklm')]]
-        with patch.object(app, 'youtube_channel_feed', return_value=entries), patch.object(app, 'prepare_subscription_metadata'):
+        with patch.object(app, 'youtube_channel_feed', return_value=entries), patch.object(app, 'prepare_subscription_metadata'), \
+                patch.object(app, '_v3_channel_tab', return_value=[{'id':'cdefghijklm','media_type':'video'}]):
             result = app.v3_scan_all_enabled()
             again = app.v3_scan_all_enabled()
         self.assertEqual(result['queued'], 1)

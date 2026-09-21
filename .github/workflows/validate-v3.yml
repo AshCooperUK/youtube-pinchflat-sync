@@ -26,7 +26,7 @@ jobs:
         run: pip install -r app/requirements.txt
 
       - name: Compile Python
-        run: python -m py_compile app/app.py app/downloader_auth.py app/downloader_media.py app/publication_metadata.py app/upload_guide.py app/guide_forecasts.py app/manage_user.py
+        run: python -m py_compile app/app.py app/downloader_auth.py app/downloader_media.py app/publication_metadata.py app/source_metadata.py app/upload_guide.py app/guide_forecasts.py app/manage_user.py
 
       - name: Import application with temporary V3 storage
         env:
@@ -38,7 +38,7 @@ jobs:
           mkdir -p "$DATA_DIR" "$DOWNLOAD_ROOT"
           PYTHONPATH=app python - <<'PY'
           import app
-          assert app.VERSION == "3.0.9"
+          assert app.VERSION == "3.0.11"
           assert app.YOUTUBE_COOKIE_PATH.name == "youtube-cookies.txt"
           assert app.subscription_download_compatibility_profile() == "emby_tv"
           profile = app._v3_profile_ydl_options("1080p")
@@ -102,15 +102,15 @@ jobs:
         run: docker build -t youtube-subscription-downloader:v3-test ./app
 
 
-      - name: Package V3.0.9 source
+      - name: Package V3.0.11 source
         run: |
-          zip -qr youtube-subscription-downloader-v3.0.9.zip . \
+          zip -qr youtube-subscription-downloader-v3.0.11.zip . \
             -x ".git/*" "*/__pycache__/*" "*.pyc" \
-            -x "youtube-subscription-downloader-v3.0.9.zip"
+            -x "youtube-subscription-downloader-v3.0.11.zip"
 
-      - name: Upload V3.0.9 source package
+      - name: Upload V3.0.11 source package
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-subscription-downloader-v3.0.9
-          path: youtube-subscription-downloader-v3.0.9.zip
+          name: youtube-subscription-downloader-v3.0.11
+          path: youtube-subscription-downloader-v3.0.11.zip
           if-no-files-found: error

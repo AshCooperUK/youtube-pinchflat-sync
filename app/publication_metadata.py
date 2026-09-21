@@ -91,6 +91,9 @@ def atomic_xml(root, path):
 def write_video_nfo(info, output_path, episode=True, tz_name='Europe/London'):
     path = Path(output_path).with_suffix('.nfo')
     root = ET.parse(path).getroot() if path.is_file() else ET.Element('episodedetails' if episode else 'movie')
+    external = str(info.get('extractor_key') or info.get('extractor') or 'youtube').lower() != 'youtube'
+    if external:
+        root.tag = 'episodedetails' if episode else 'movie'
     # Preserve ratings, watched state, user edits and all unrelated NFO fields.
     def put(key, value, replace=True):
         node = root.find(key)
@@ -98,16 +101,28 @@ def write_video_nfo(info, output_path, episode=True, tz_name='Europe/London'):
             node = ET.SubElement(root, key)
         if replace or not node.text:
             node.text = xml_text(value)
-    put('title', info.get('title') or Path(output_path).stem, False)
-    put('plot', info.get('description') or '', False)
+    put('title', (info.get('episode') if external and episode else None) or info.get('title') or Path(output_path).stem, external)
+    put('plot', info.get('description') or '', external)
     if episode:
-        put('showtitle', info.get('channel') or info.get('uploader') or 'YouTube', False)
+        put('showtitle', info.get('series') or info.get('channel') or info.get('uploader') or 'YouTube', external)
+    if external:
+        if episode:
+            for key in ('season', 'episode'):
+                if info.get(key + '_number') is not None:
+                    put(key, str(info[key + '_number']))
+        if info.get('provider'):
+            put('studio', info['provider'])
+        try:
+            if float(info.get('duration') or 0) > 0:
+                put('runtime', str(round(float(info['duration']) / 60)))
+        except (TypeError, ValueError):
+            pass
     released = publication_date(publication_value(info), tz_name)
     if released:
         for key in ('premiered', 'releasedate') + (('aired',) if episode else ()):
             put(key, released.isoformat())
         put('year', str(released.year))
-        if episode:
+        if episode and not external:
             # Filename-based episode numbering remains unchanged on repair.
             match = re.match(r's(\d+)E(\d+)', Path(output_path).stem, re.I)
             put('season', match[1] if match else str(released.year), False)
