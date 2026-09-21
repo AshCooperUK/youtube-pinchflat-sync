@@ -4,6 +4,18 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.12
+
+- Show all active YouTube subscriptions in Guide, including channels without download monitoring, with favourites first.
+- Add searchable Guide channel visibility switches, Show all / Hide all, and a separate programme-thumbnail background switch in Settings > Guide. Preserve the expected-upload prediction toggle. New subscriptions appear by default. Guide switches do not change downloads.
+- Keep Guide browsing on the server catalogue. Hidden channels pause indexing, channel descriptions/images use a seven-day refresh cache, and recent-upload checks retain the daily schedule and API allowance.
+- Fix channel action menus appearing behind modal channel/player views. Menus open in the active dialog and browser top layer, receive focus and return focus to their trigger when dismissed. Escape closes the menu before the channel dialog.
+- Add hand cursors to Guide links and controls. Increase Guide avatars to 76px, matching featured-channel cards elsewhere in the app.
+- Request browser fullscreen with navigation controls hidden. Restore the layout on fullscreen exit. Retain a labelled in-page fallback when fullscreen is unavailable.
+- Support horizontal trackpad scrolling, Shift+wheel, touch swipes and focused-grid arrow keys. Day moves by one hour, Week by one day and Month by one calendar month. Preserve vertical channel scrolling.
+- Move Previous/Next into full-height rails beside the listings. Keep Today beside the date, add short transitions and honour reduced-motion preferences.
+- Hide Minimise on the standalone Guide page while retaining the dashboard tile control.
+
 ## v3.0.11
 
 - Move Scan schedule from Downloader to Automation, preserving existing favourite/other intervals and legacy save URLs.

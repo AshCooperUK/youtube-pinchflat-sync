@@ -24,3 +24,9 @@
 #latest-native-details dd {margin:4px 0 0;font-weight:600}
 button.activity-video-link {padding:0;background:none;border:0;cursor:pointer}
 button.activity-video-link:disabled {cursor:default}
+
+.subscription-actions-menu[popover] {margin:0;inset:auto;max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);overflow:auto}
+.guide-channel-options {max-height:340px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px;margin:10px 0}
+.guide-channel-options .media-option {padding:8px;min-height:44px;margin:0}
+.guide-channel-options [hidden] {display:none!important}
+.guide-channel-settings {margin:18px 0}

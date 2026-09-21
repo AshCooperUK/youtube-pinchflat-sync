@@ -288,3 +288,30 @@ body.guide-is-fullscreen {overflow:hidden}
  #ytsd-guide .yt-hour-lane .yt-programme {padding:0;background:none;border:0;flex-basis:100%}
  #ytsd-guide .yt-hour-lane .yt-day-text {width:100%;margin-left:0}
 }
+
+/* Guide navigation and readable optional programme artwork. */
+#ytsd-guide button:not(:disabled),#ytsd-guide a {cursor:pointer}
+#ytsd-guide .yt-channel-link .yt-avatar {width:76px;height:76px}
+#ytsd-guide .yt-channel-link:hover .yt-channel-name {text-decoration:underline}
+#ytsd-guide .yt-timeline-shell {position:relative;isolation:isolate}
+#ytsd-guide .yt-grid {padding-right:36px;touch-action:pan-y;overscroll-behavior-x:contain;scrollbar-gutter:stable}
+#ytsd-guide .yt-axis,#ytsd-guide .yt-lane {margin-left:36px}
+#ytsd-guide .yt-side-nav {position:absolute;top:0;bottom:0;width:34px;padding:0;z-index:8;border:1px solid var(--yt-line);background:#142338eb;color:#bcd5fa;font-size:28px;display:grid;place-items:center;transition:background .18s,color .18s}
+#ytsd-guide .yt-side-nav:hover {background:#23436b;color:white}
+#ytsd-guide .yt-side-nav:active {background:#305986}
+#ytsd-guide .yt-previous {left:220px;border-radius:6px 0 0 6px}
+#ytsd-guide .yt-next {right:16px;border-radius:0 6px 6px 0}
+#ytsd-guide .yt-card-art {background-size:cover!important;background-position:center!important;border-radius:5px;padding:8px}
+#ytsd-guide .yt-card-art .yt-programme-time,#ytsd-guide .yt-card-art .yt-programme-length {color:#d7e5f7}
+#ytsd-guide .yt-lane {animation:guide-arrive .15s ease-out}
+@keyframes guide-arrive {from{opacity:.65}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){#ytsd-guide .yt-lane {animation:none}#ytsd-guide .yt-side-nav {transition:none}}
+@media(max-width:550px){
+ #ytsd-guide .yt-grid {padding:0 30px;overflow:auto;max-height:70dvh}
+ #ytsd-guide .yt-previous {left:0}
+ #ytsd-guide .yt-next {right:12px}
+ #ytsd-guide .yt-side-nav {width:27px}
+ #ytsd-guide .yt-lane {margin-left:0}
+ #ytsd-guide .yt-channel-link .yt-avatar {width:76px;height:76px}
+ #ytsd-guide.yt-fullscreen .yt-grid {max-height:calc(100dvh - 330px)}
+}

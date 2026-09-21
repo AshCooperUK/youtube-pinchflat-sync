@@ -54,7 +54,7 @@ from zoneinfo import ZoneInfo
 from source_metadata import normalise_source_info, is_external_info, is_series_episode, metadata_json, media_details
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.11"
+VERSION = "3.0.12"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -17023,6 +17023,8 @@ def index():
         version=VERSION,
         guide_view=request.path == "/guide",
         guide_timezone=get_setting("guide_timezone", "Europe/London"),
+        guide_channel_choices=guide_channel_choices(),
+        guide_show_thumbnails=setting_bool("guide_show_thumbnails", False),
         guide_history=get_setting("guide_history", "all"),
         guide_daily_budget=setting_int("guide_daily_budget", 1000, 50, 10000),
         guide_refresh_time=get_setting("guide_refresh_time", "04:00"),
@@ -20735,6 +20737,13 @@ def upload_guide_refresh():
     return jsonify(ok=True, channels=count, message=f'Metadata refresh requested for {count} enabled channels. Progress appears in the guide.')
 
 
+def guide_channel_choices():
+    favourites = favourite_channel_ids()
+    with db() as conn:
+        rows = [dict(row) for row in conn.execute("SELECT s.channel_id,s.title,COALESCE(p.visible,1) AS visible FROM subscriptions s LEFT JOIN guide_channel_preferences p USING(channel_id) WHERE s.active=1")]
+    return sorted(rows, key=lambda row: (row['channel_id'] not in favourites, (row['title'] or '').casefold()))
+
+
 @app.post('/settings/guide')
 def save_guide_settings():
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -20754,10 +20763,15 @@ def save_guide_settings():
         abort(400)
     for key, value in [('guide_timezone', name), ('guide_history', history), ('guide_daily_budget', str(budget)), ('guide_refresh_time', clock), ('guide_predictions_enabled', '1' if request.form.get('guide_predictions_enabled') == '1' else '0')]:
         set_setting(key, value)
+    set_setting('guide_show_thumbnails', '1' if request.form.get('guide_show_thumbnails') == '1' else '0')
     with db() as conn:
+        if request.form.get('guide_channels_present') == '1':
+            selected = set(request.form.getlist('guide_channel_ids'))
+            for row in conn.execute('SELECT channel_id FROM subscriptions WHERE active=1').fetchall():
+                conn.execute('INSERT INTO guide_channel_preferences(channel_id,visible) VALUES(?,?) ON CONFLICT(channel_id) DO UPDATE SET visible=excluded.visible', (row['channel_id'], int(row['channel_id'] in selected)))
         conn.execute("UPDATE guide_runtime SET forecast_revision='' WHERE id=1")
     flash('Upload guide settings saved. Metadata updates automatically each day.', 'success')
-    return redirect(url_for('index'))
+    return redirect(url_for('index') + '#guide')
 
 
 @app.post('/settings/downloader/repair-dates')

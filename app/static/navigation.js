@@ -16,3 +16,12 @@
     if(channelId){event.preventDefault();event.stopPropagation();openChannelDetails(channelId);}
   });
 })();
+
+// Escape dismisses a nested channel menu before its containing dialog.
+document.addEventListener('keydown',event=>{
+ if(event.key!=='Escape')return;
+ const menu=document.querySelector('.subscription-actions-menu:not(.hidden)');
+ if(!menu)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ closeChannelDeleteMenu();closeSubscriptionChannelActions();
+},true);

@@ -114,6 +114,10 @@
     node.dataset.programmeId=item.id;
     node.dataset.selected=String(state.selected===item.id);
     const copy=element('div',day?'yt-day-text':'yt-programme-copy');
+    if(data.show_thumbnails && /^https:\/\//.test(item.thumbnail_url || '')) {
+      copy.classList.add('yt-card-art');
+      copy.style.backgroundImage=`linear-gradient(rgba(8,17,31,.78),rgba(8,17,31,.9)),url(${JSON.stringify(item.thumbnail_url)})`;
+    }
     const timeLabel=element('span','yt-programme-time');
     if(state.zoom==='month')timeLabel.textContent=(item.event_at?formatDate(localDay(item.event_at,data.window.timezone),{day:'numeric',month:'short'})+' · ':'')+eventTime(item);
     else timeLabel.textContent=eventTime(item,{weekday:'short'});
@@ -142,7 +146,7 @@
     const w=data.window;
     if(state.zoom==='day') {
       const count=Math.ceil((Date.parse(w.end)-Date.parse(w.start))/3600000);
-      state.hour=Math.min(state.hour,Math.floor((count-1)/6)*6);
+      state.hour=Math.min(state.hour,count-1);
       return Array.from({length:Math.min(6,count-state.hour)},(_,i)=>({start:Date.parse(w.start)+(state.hour+i)*3600000,end:Date.parse(w.start)+(state.hour+i+1)*3600000}));
     }
     const result=[];
@@ -158,7 +162,7 @@
     const active=document.activeElement?.dataset.focusKey;
     const cols=columns();grid.style.setProperty('--yt-columns',cols.length);
     const fragment=document.createDocumentFragment();
-    const axis=element('div','yt-axis-row');axis.append(element('div','yt-axis-label','ENABLED CHANNELS'));
+    const axis=element('div','yt-axis-row');axis.append(element('div','yt-axis-label','GUIDE CHANNELS'));
     const dates=element('div','yt-axis');
     for(const col of cols) {
       const heading=button(`yt-axis-cell${col.day===data.window.today?' today':''}`,'',()=>{
@@ -205,9 +209,9 @@
 
       row.append(lane);fragment.append(row);
     }
-    if(!data.channels.length)fragment.append(element('div','yt-empty',state.search?'No matching enabled channels.':'Enable channels in Subscriptions to see their uploads here.'));
+    if(!data.channels.length)fragment.append(element('div','yt-empty',state.search?'No matching channels.':'Choose channels in Settings > Guide, or connect YouTube to import subscriptions.'));
     grid.replaceChildren(fragment);
-    $('yt-channel-count').textContent=`${data.enabled_channels} enabled channels`;
+    $('yt-channel-count').textContent=`${data.enabled_channels} Guide channels`;
     $('yt-date-picker').value=state.date;
     $('yt-date-title').textContent=state.zoom==='day'?formatDate(state.date,{weekday:'long',day:'numeric',month:'long',year:'numeric'}):state.zoom==='month'?formatDate(state.date,{month:'long',year:'numeric'}):`${formatDate(data.window.start_date,{day:'numeric',month:'short'})} – ${formatDate(moveDay(data.window.end_date,-1),{day:'numeric',month:'short',year:'numeric'})}`;
     $('yt-zone-label').textContent=data.window.timezone;
@@ -215,8 +219,8 @@
     for(const b of root.querySelectorAll('[data-filter]')) b.setAttribute('aria-pressed',String(b.dataset.filter===state.filter));
     $('yt-hour-controls').hidden=state.zoom!=='day';
     if(state.zoom==='day') {
-      $('yt-earlier').disabled=state.hour===0;
-      $('yt-later').disabled=cols[cols.length-1].end>=Date.parse(data.window.end);
+      $('yt-earlier').disabled=false;
+      $('yt-later').disabled=false;
       $('yt-hours-label').textContent=`${eventTime({event_at:new Date(cols[0].start).toISOString()})} – ${eventTime({event_at:new Date(cols[cols.length-1].end).toISOString()})} · ${data.window.timezone}`;
     }
 
@@ -250,15 +254,38 @@
     } catch(error) {if(error.name!=='AbortError' && requestId===sequence)$('yt-guide-state').textContent=error.message;}
   }
   function navigate(direction) {
-    if(state.zoom==='month') {const d=calendarDate(state.date);d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+direction);state.date=d.toISOString().slice(0,10);}
-    else state.date=moveDay(state.date,direction*(state.zoom==='week'?7:1));
+    if(hasDialog())return;
+    if(state.zoom==='month') {
+      const d=calendarDate(state.date);d.setUTCDate(1);d.setUTCMonth(d.getUTCMonth()+direction);state.date=d.toISOString().slice(0,10);
+    } else if(state.zoom==='day') {
+      const hours=data?Math.round((Date.parse(data.window.end)-Date.parse(data.window.start))/3600000):24;
+      state.hour+=direction;
+      if(state.hour<0){state.date=moveDay(state.date,-1);state.hour=23;}
+      else if(state.hour>=hours){state.date=moveDay(state.date,1);state.hour=0;}
+      else if(data){render();saveState();return;}
+    } else state.date=moveDay(state.date,direction);
     load();
   }
+  let wheelDistance=0,lastGesture=0,touchStart=null;
+  grid.addEventListener('wheel',event=>{
+    const horizontal=event.shiftKey?event.deltaY:event.deltaX;
+    if(hasDialog() || (!event.shiftKey && Math.abs(horizontal)<=Math.abs(event.deltaY)) || !horizontal)return;
+    event.preventDefault();
+    if(performance.now()-lastGesture<350)return;
+    wheelDistance+=horizontal*(event.deltaMode===1?16:event.deltaMode===2?300:1);
+    if(Math.abs(wheelDistance)>=70){navigate(Math.sign(wheelDistance));wheelDistance=0;lastGesture=performance.now();}
+  },{passive:false});
+  grid.addEventListener('touchstart',event=>{const t=event.touches[0];touchStart=event.touches.length===1?{x:t.clientX,y:t.clientY}:null;},{passive:true});
+  grid.addEventListener('touchend',event=>{
+    if(!touchStart)return;const t=event.changedTouches[0],dx=touchStart.x-t.clientX,dy=touchStart.y-t.clientY;touchStart=null;
+    if(Math.abs(dx)>60 && Math.abs(dx)>Math.abs(dy)*1.5)navigate(Math.sign(dx));
+  },{passive:true});
+  grid.addEventListener('keydown',event=>{if(event.target!==grid)return;if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();navigate(event.key==='ArrowLeft'?-1:1);}});
   $('yt-prev').onclick=()=>navigate(-1);$('yt-next').onclick=()=>navigate(1);
   $('yt-today').onclick=()=>{state.date=localDay(new Date(),data?.window.timezone);state.hour=0;load();};
   $('yt-date-picker').onchange=event=>{if(event.target.value){state.date=event.target.value;state.hour=0;load();}};
-  $('yt-earlier').onclick=()=>{state.hour=Math.max(0,state.hour-6);render();saveState();};
-  $('yt-later').onclick=()=>{state.hour+=6;render();saveState();};
+  $('yt-earlier').onclick=()=>navigate(-1);
+  $('yt-later').onclick=()=>navigate(1);
   root.querySelectorAll('[data-zoom]').forEach(b=>b.onclick=()=>{state.zoom=b.dataset.zoom;state.hour=0;load();});
   root.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{state.filter=b.dataset.filter;load();});
   $('yt-channel-search').value=state.search;
@@ -300,13 +327,25 @@
   }
   $('yt-load-guide').onclick=()=>{started=true;updateTile();load();};
   $('yt-guide-minimise').onclick=()=>{const collapse=!minimised;if(collapse && root.classList.contains('yt-fullscreen'))maximise(false);minimised=collapse;updateTile();if(!minimised && started && !data)load();};
-  function maximise(on) {
+  function applyFullscreen(on) {
     root.classList.toggle('yt-fullscreen',on);document.body.classList.toggle('guide-is-fullscreen',on);
     $('yt-guide-maximise').setAttribute('aria-pressed',String(on));
     $('yt-guide-maximise').setAttribute('aria-label',on?'Restore guide size':'Maximise guide');
     $('yt-guide-maximise').title=on?'Restore guide size':'Maximise guide';
     if(on){minimised=false;updateTile();} if(data)render();
   }
+  async function maximise(on) {
+    if(on) {
+      try {
+        if(!document.fullscreenElement)await document.documentElement.requestFullscreen({navigationUI:'hide'});
+        applyFullscreen(true);
+      } catch(error) {applyFullscreen(true);$('yt-guide-state').textContent='Browser fullscreen is unavailable here. Use your browser fullscreen control for the whole screen.';}
+    } else {
+      if(document.fullscreenElement)await document.exitFullscreen();
+      applyFullscreen(false);
+    }
+  }
+  document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)applyFullscreen(false);});
   $('yt-guide-maximise').onclick=()=>maximise(!root.classList.contains('yt-fullscreen'));
   document.addEventListener('keydown',event=>{if(event.key==='Escape' && !hasDialog() && root.classList.contains('yt-fullscreen')){maximise(false);$('yt-guide-maximise').focus();}});
   updateTile();

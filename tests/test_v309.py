@@ -56,9 +56,9 @@ class GuideReleaseTests(unittest.TestCase):
             tomorrow=NOW+timedelta(days=1)
             with patch.object(catalogue,'now',return_value=tomorrow):
                 self.guide.tick()
-                self.assertEqual(api.call_count,3)
+                self.assertEqual(api.call_count,2)
                 self.guide.tick()
-                self.assertEqual(api.call_count,3)
+                self.assertEqual(api.call_count,2)
         self.assertEqual(self.guide.next_refresh(),'2026-09-21T03:00:00+00:00')
 
     def test_guide_settings_schedule_predictions_and_permissions(self):

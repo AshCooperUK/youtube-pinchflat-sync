@@ -5022,7 +5022,7 @@
     </section>
 
     <section class="tab-panel" data-panel="guide">
-      <div class="settings-panel-intro"><div><h3>Guide</h3><p>All enabled channels and uploads appear from the saved server catalogue. Opening the guide does not use YouTube API credits.</p></div></div>
+      <div class="settings-panel-intro"><div><h3>Guide</h3><p>All subscribed channels appear by default, with favourites first. Guide visibility is separate from download monitoring. Opening the guide does not use YouTube API credits.</p></div></div>
       <form method="post" action="/settings/guide"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <div class="setting-box"><div class="settings-grid">
           <label>Timezone<input name="guide_timezone" value="{{ guide_timezone }}" required placeholder="Europe/London"></label>
@@ -5030,7 +5030,18 @@
           <label>Metadata history<select name="guide_history"><option value="all" {% if guide_history == 'all' %}selected{% endif %}>All available</option><option value="year" {% if guide_history == 'year' %}selected{% endif %}>Past year</option></select></label>
           <label>Daily guide API allowance<input name="guide_daily_budget" type="number" min="50" max="10000" value="{{ guide_daily_budget }}" required></label>
         </div><label class="source-toggle media-option"><input type="checkbox" name="guide_predictions_enabled" value="1" {% if guide_predictions_enabled %}checked{% endif %}><span class="toggle-track"></span><span>Predict uploads from channel history</span></label>
-        <p class="muted small">Initial indexing starts automatically after Google is connected and channels are enabled. Large catalogues build in batches within the allowance and resume after restarts. Daily refresh uses the timezone above; older metadata is renewed before it expires.</p>
+        <label class="source-toggle media-option"><input type="checkbox" name="guide_show_thumbnails" value="1" {% if guide_show_thumbnails %}checked{% endif %}><span class="toggle-track"></span><span>Video thumbnails behind programme text</span></label>
+        <div class="guide-channel-settings">
+          <h4>Channels shown in Guide</h4>
+          <input type="hidden" name="guide_channels_present" value="1">
+          <input type="search" id="guide-settings-search" placeholder="Search subscribed channels…" aria-label="Search Guide channels" oninput="filterGuideSettingsChannels(this.value)">
+          <div class="actions"><button type="button" class="btn ghost smallbtn" onclick="setGuideChannelVisibility(true)">Show all</button><button type="button" class="btn ghost smallbtn" onclick="setGuideChannelVisibility(false)">Hide all</button></div>
+          <div class="guide-channel-options">
+            {% for channel in guide_channel_choices %}<label class="source-toggle media-option guide-channel-option" data-guide-title="{{ channel.title }}"><input type="checkbox" name="guide_channel_ids" value="{{ channel.channel_id }}" {% if channel.visible %}checked{% endif %}><span class="toggle-track"></span><span>{{ channel.title }}</span></label>{% endfor %}
+          </div>
+          <p class="muted small">New subscriptions appear automatically. Hidden channels pause Guide indexing. These switches do not enable or disable downloads.</p>
+        </div>
+        <p class="muted small">Initial indexing starts automatically after Google is connected. Browsing reads saved metadata without YouTube API calls. Large catalogues build in batches within the allowance and resume after restarts. Daily refresh uses the timezone above; older metadata is renewed before it expires.</p>
         <p class="muted small">Predictions show estimated windows for the next 14 days, with confidence and supporting history. Times assume this timezone. Irregular or insufficient history produces no estimate. These are YTSD estimates, not announced uploads.</p>
         <button class="btn" type="submit">Save guide settings</button></div>
       </form>
@@ -7148,6 +7159,7 @@ function settingsActionNeedsPageRefresh(path) {
 
 function settingsActionNeedsDialogRefresh(path) {
   return new Set([
+    "/settings/guide",
     "/settings/downloader/advanced",
     "/settings/downloader/scan-schedule",
     "/settings/automation/scan-schedule",
@@ -11269,13 +11281,36 @@ function closeSubscriptionTools() {
 }
 
 function closeChannelDetails() {
+  closeChannelDeleteMenu();
+  closeSubscriptionChannelActions();
   if (subscriptionChannelDialog?.open) subscriptionChannelDialog.close();
   currentSubscriptionChannelId = "";
   currentSubscriptionChannelData = null;
 }
 
+function mountChannelActionMenu(menu, trigger) {
+  const parent = trigger.closest('dialog') || document.body;
+  if(menu.parentElement !== parent) parent.append(menu);
+  menu._trigger = trigger;
+  menu.classList.remove('hidden');
+  if(menu.showPopover) {menu.setAttribute('popover','manual'); if(!menu.matches(':popover-open'))menu.showPopover();}
+  menu.querySelector('button:not(:disabled)')?.focus({preventScroll:true});
+}
+function hideChannelActionMenu(menu) {
+  if(!menu)return;
+  if(menu.hidePopover && menu.matches(':popover-open'))menu.hidePopover();
+  const restore=menu.contains(document.activeElement);
+  menu.classList.add('hidden');
+  if(restore && menu._trigger?.isConnected)menu._trigger.focus({preventScroll:true});
+}
+function filterGuideSettingsChannels(value) {
+  document.querySelectorAll('.guide-channel-option').forEach(row=>row.hidden=!row.dataset.guideTitle.toLocaleLowerCase().includes(value.toLocaleLowerCase()));
+}
+function setGuideChannelVisibility(visible) {
+  document.querySelectorAll('.guide-channel-option input').forEach(input=>input.checked=visible);
+}
 function closeSubscriptionChannelActions(clearState=true) {
-  if (subscriptionActionsMenu) subscriptionActionsMenu.classList.add("hidden");
+  hideChannelActionMenu(subscriptionActionsMenu);
   document.querySelectorAll(".source-actions-btn[aria-expanded=\"true\"]").forEach(btn => btn.setAttribute("aria-expanded", "false"));
   if (clearState) {
     currentActionChannelId = "";
@@ -11404,7 +11439,7 @@ function openSubscriptionChannelActions(button) {
     actionButton.title = sourceId ? "" : "This channel is not currently a download monitoring";
   });
 
-  subscriptionActionsMenu.classList.remove("hidden");
+  mountChannelActionMenu(subscriptionActionsMenu, button);
   button.setAttribute("aria-expanded", "true");
 
   const rect = button.getBoundingClientRect();
@@ -11424,7 +11459,7 @@ function openSubscriptionChannelActions(button) {
 
 
 function closeChannelDeleteMenu(clearState=true) {
-  if (channelDeleteMenu) channelDeleteMenu.classList.add("hidden");
+  hideChannelActionMenu(channelDeleteMenu);
   if (clearState) {
     currentDeleteChannelId = "";
     currentDeleteChannelData = null;
@@ -11505,7 +11540,7 @@ async function openChannelDeleteMenu(event, button) {
   if (titleNode) titleNode.textContent = state.title || "Channel removal";
   updateChannelDeleteMenuAvailability(state);
 
-  channelDeleteMenu.classList.remove("hidden");
+  mountChannelActionMenu(channelDeleteMenu, button);
   const rect = button.getBoundingClientRect();
   const menuRect = channelDeleteMenu.getBoundingClientRect();
   const gap = 7;

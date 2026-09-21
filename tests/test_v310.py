@@ -240,6 +240,7 @@ class ScanTests(unittest.TestCase):
         self.assertIsNone(match({**info,'id':'cdefghijklm','duration':25}))
 
     def test_real_ytdlp_worker_blocks_cached_short_without_explicit_short_flag(self):
+        app.set_setting('downloader_sponsorblock_behaviour', 'off')
         self.job('cached-short', status='queued', exists=False)
         app._v3_record_video_types('UCsample', [{'id':'abcdefghijk'}], 'short')
         info = {'id':'abcdefghijk', 'title':'Watch URL without a Shorts flag',

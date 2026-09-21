@@ -120,7 +120,7 @@ class GuideTests(unittest.TestCase):
         with self.client.session_transaction() as session:session['auth_user_id']=2
         self.assertEqual(self.get()['channels'][0]['channel_id'],'UCb')
         with app.db() as conn:conn.execute("UPDATE subscriptions SET download_enabled=0 WHERE channel_id='UCb'")
-        self.assertNotIn('UCb',[c['channel_id'] for c in self.get()['channels']])
+        self.assertIn('UCb',[c['channel_id'] for c in self.get()['channels']])
 
     def test_search_description_and_older_video_title_and_stable_channel_pages(self):
         self.guide.save_videos([video(published='2020-01-01T12:00:00Z')])
@@ -223,7 +223,7 @@ class GuideTests(unittest.TestCase):
         data=self.get(date='2020-01-01',search='different',selected='abcdefghijk')
         self.assertEqual(data['channels'],[])
         self.assertEqual(data['selection']['item']['video_id'],'abcdefghijk')
-        with app.db() as conn:conn.execute("UPDATE subscriptions SET download_enabled=0 WHERE channel_id='UCsample'")
+        with app.db() as conn:conn.execute("INSERT INTO guide_channel_preferences(channel_id,visible) VALUES('UCsample',0)")
         self.assertIsNone(self.get(selected='abcdefghijk')['selection'])
 
     def test_renewal_removes_unavailable_video_and_keeps_valid_older_catalogue(self):

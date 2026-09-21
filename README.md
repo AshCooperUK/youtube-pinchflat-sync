@@ -2,7 +2,7 @@
 
 A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
 
-Version: **3.0.11** · [Latest changes](RELEASE-v3.0.11.md) · [Full changelog](CHANGELOG.md)
+Version: **3.0.12** · [Latest changes](RELEASE-v3.0.12.md) · [Full changelog](CHANGELOG.md)
 
 ## Install: set up your Cloudflare domain first
 
@@ -126,9 +126,9 @@ Upload a Mozilla/Netscape-format `cookies.txt` file under **Settings → Downloa
 
 The native downloader defaults to one download worker, lightweight feed scans, four RSS scan workers and queued deeper scans. Duplicate checks use YouTube video IDs. Optional expert yt-dlp JSON settings cannot override application-managed safety and filtering options.
 
-The Upload Guide is available on the dashboard and at `/guide`. It shows all enabled channels and every upload in the selected period from a server-side catalogue. Opening the guide, navigating dates or opening its video-info popup uses saved metadata, not YouTube Data API calls. The play and channel icons reuse the app's existing popups; opening those may refresh their own details or stream media.
+The Upload Guide is available on the dashboard and at `/guide`. It shows all active subscribed channels by default, including channels without download monitoring, and every indexed upload in the selected period from a server-side catalogue. Opening the guide, navigating dates or opening its video-info popup uses saved metadata, not YouTube Data API calls. The play and channel icons reuse the app's existing popups; opening those may refresh their own details or stream media.
 
-Initial indexing starts automatically once Google is connected and channels are enabled. **Settings > Guide** controls the timezone, history depth, daily API allowance, prediction toggle and daily refresh time (default **04:00 Europe/London**). Channel metadata and recent uploads refresh daily. Older video metadata is renewed before its 30-day expiry. A large initial catalogue appears progressively in background batches, resumes after restarts and stays within the configured allowance.
+Initial indexing starts automatically once Google is connected. Guide channel visibility switches are independent of download monitoring. **Settings > Guide** controls the timezone, history depth, daily API allowance, channel visibility, prediction and thumbnail-background toggles, and daily refresh time (default **04:00 Europe/London**). Recent uploads refresh daily. Channel descriptions and images reuse a seven-day cache unless you request a manual refresh. Older video metadata is renewed before its 30-day expiry. A large initial catalogue appears progressively in background batches, resumes after restarts and stays within the configured allowance.
 
 Predictions are enabled and labelled **Expected upload**. They show an estimated window, supporting history and confidence, rather than an announced release. Daily, weekday, fortnightly and calendar-month patterns are tested against later historical observations. Sparse history, irregular uploads or a changed schedule can produce no estimate. Forecasts cover up to 14 days, use the configured guide timezone as an explicit assumption, and never start downloads.
 
@@ -147,7 +147,7 @@ V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, r
 
 For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
 
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.11 ZIP targets v3.0.9 and also includes the v3.0.10 changes. It contains the same updated files as the full-source ZIP.
+For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.12 ZIP targets v3.0.11. It contains the same updated files as the full-source ZIP.
 
 ## Development
 
@@ -171,6 +171,18 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 
 <details>
 <summary>V3: native downloader and current releases</summary>
+
+### v3.0.12
+
+- Show all active YouTube subscriptions in Guide, including channels without download monitoring, with favourites first.
+- Add searchable Guide channel visibility switches, Show all / Hide all, and a separate programme-thumbnail background switch in Settings > Guide. Preserve the expected-upload prediction toggle. New subscriptions appear by default. Guide switches do not change downloads.
+- Keep Guide browsing on the server catalogue. Hidden channels pause indexing, channel descriptions/images use a seven-day refresh cache, and recent-upload checks retain the daily schedule and API allowance.
+- Fix channel action menus appearing behind modal channel/player views. Menus open in the active dialog and browser top layer, receive focus and return focus to their trigger when dismissed. Escape closes the menu before the channel dialog.
+- Add hand cursors to Guide links and controls. Increase Guide avatars to 76px, matching featured-channel cards elsewhere in the app.
+- Request browser fullscreen with navigation controls hidden. Restore the layout on fullscreen exit. Retain a labelled in-page fallback when fullscreen is unavailable.
+- Support horizontal trackpad scrolling, Shift+wheel, touch swipes and focused-grid arrow keys. Day moves by one hour, Week by one day and Month by one calendar month. Preserve vertical channel scrolling.
+- Move Previous/Next into full-height rails beside the listings. Keep Today beside the date, add short transitions and honour reduced-motion preferences.
+- Hide Minimise on the standalone Guide page while retaining the dashboard tile control.
 
 ### v3.0.11
 

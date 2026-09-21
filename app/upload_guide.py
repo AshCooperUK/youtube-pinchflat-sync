@@ -93,6 +93,7 @@ def duration_seconds(value):
 def init_guide_db(db):
     with db() as conn:
         conn.executescript('''
+        CREATE TABLE IF NOT EXISTS guide_channel_preferences (channel_id TEXT PRIMARY KEY, visible INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE IF NOT EXISTS guide_channels (
           channel_id TEXT PRIMARY KEY, title TEXT, description TEXT, thumbnail_url TEXT,
           uploads_playlist_id TEXT, channel_created_at TEXT, metadata_checked_at TEXT NOT NULL
@@ -153,7 +154,7 @@ class ForecastProvider:
             conn.execute('DELETE FROM guide_predictions')
             if not self.status()['enabled']:
                 return
-            channels = conn.execute("SELECT s.channel_id,g.oldest_covered_at,g.initialised FROM subscriptions s JOIN guide_sync g USING(channel_id) WHERE s.active=1 AND s.download_enabled=1").fetchall()
+            channels = conn.execute("SELECT s.channel_id,g.oldest_covered_at,g.initialised FROM subscriptions s JOIN guide_sync g USING(channel_id) WHERE s.active=1 AND s.channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0)").fetchall()
             for channel in channels:
                 if not channel['initialised']:
                     continue
@@ -206,7 +207,7 @@ class UploadGuide:
 
     def enabled_ids(self):
         with self.app.db() as conn:
-            return [row[0] for row in conn.execute('SELECT channel_id FROM subscriptions WHERE active=1 AND download_enabled=1 ORDER BY channel_id')]
+            return [row[0] for row in conn.execute('SELECT channel_id FROM subscriptions WHERE active=1 AND channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0) ORDER BY channel_id')]
 
     def request_refresh(self):
         ids = self.enabled_ids()
@@ -418,7 +419,7 @@ class UploadGuide:
             boundary = self.scheduled_boundary()
             if runtime['scheduled_at'] < boundary:
                 with self.app.db() as conn:
-                    conn.execute('UPDATE guide_sync SET refresh_requested=1,channel_refresh_requested=1 WHERE channel_id IN (SELECT channel_id FROM subscriptions WHERE active=1 AND download_enabled=1)')
+                    conn.execute('UPDATE guide_sync SET refresh_requested=1 WHERE channel_id IN (SELECT channel_id FROM subscriptions WHERE active=1 AND channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0))')
                     conn.execute('UPDATE guide_runtime SET scheduled_at=? WHERE id=1', (boundary,))
 
             creds = self.app.load_credentials()
@@ -443,13 +444,13 @@ class UploadGuide:
             # Renew historical data before expiry, plus actual scheduled/live states.
             with self.app.db() as conn:
                 stale_videos = [r[0] for r in conn.execute('''SELECT v.video_id FROM guide_videos v
-                   JOIN subscriptions s ON s.channel_id=v.channel_id WHERE s.active=1 AND s.download_enabled=1
+                   JOIN subscriptions s ON s.channel_id=v.channel_id WHERE s.active=1 AND s.channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0)
                    AND (v.metadata_checked_at<? OR (v.broadcast_state IN ('upcoming','live') AND v.metadata_checked_at<?))
                    ORDER BY v.metadata_checked_at LIMIT 50''', (stamp(now()-timedelta(days=25)), self.scheduled_boundary()))]
             self._videos(creds, stale_videos)
             with self.app.db() as conn:
                 channels = [dict(r) for r in conn.execute('''SELECT c.*,s.* FROM guide_channels c JOIN guide_sync s USING(channel_id)
-                   JOIN subscriptions sub USING(channel_id) WHERE sub.active=1 AND sub.download_enabled=1 AND c.uploads_playlist_id!=''
+                   JOIN subscriptions sub USING(channel_id) WHERE sub.active=1 AND sub.channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0) AND c.uploads_playlist_id!=''
                    ORDER BY COALESCE(s.recent_checked_at,''), c.channel_id''')]
             # Recent history gets a separate pass. Older pages resume fairly afterwards.
             for channel in channels:
@@ -460,7 +461,7 @@ class UploadGuide:
                     self._page(creds, channel, 'recent')
             with self.app.db() as conn:
                 backfill = [dict(r) for r in conn.execute('''SELECT c.*,s.* FROM guide_channels c JOIN guide_sync s USING(channel_id)
-                   JOIN subscriptions sub USING(channel_id) WHERE sub.active=1 AND sub.download_enabled=1
+                   JOIN subscriptions sub USING(channel_id) WHERE sub.active=1 AND sub.channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0)
                    AND s.initialised=1 AND s.history_complete=0 AND s.backfill_cursor IS NOT NULL
                    ORDER BY COALESCE(s.last_success_at,''), c.channel_id''')]
             history = self.app.get_setting('guide_history', 'all')
@@ -526,7 +527,7 @@ class UploadGuide:
                 c.metadata_checked_at AS channel_checked_at,g.initialised,g.history_complete,g.oldest_covered_at,
                 g.last_success_at,g.error AS guide_error,g.refresh_requested,g.recent_cursor
                 FROM subscriptions s LEFT JOIN guide_channels c USING(channel_id) LEFT JOIN guide_sync g USING(channel_id)
-                WHERE s.active=1 AND s.download_enabled=1''').fetchall()
+                WHERE s.active=1 AND s.channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0)''').fetchall()
             runtime = dict(conn.execute('SELECT * FROM guide_runtime WHERE id=1').fetchone())
             title_matches = {}
             if terms:
@@ -601,7 +602,7 @@ class UploadGuide:
                                  'item': self.event_item(dict(selected), channel, completed)}
         return {'ok': True, 'window': window, 'channels': channels, 'total_channels': total, 'enabled_channels': len(rows),
                 'selection': selection, 'next_offset': offset+limit if limit and offset+limit<total else None, 'revision': revision,
-                'forecasts': self.forecasts.status(), 'coverage': {'history': self.app.get_setting('guide_history', 'all'),
+                'show_thumbnails': self.app.setting_bool('guide_show_thumbnails', False), 'forecasts': self.forecasts.status(), 'coverage': {'history': self.app.get_setting('guide_history', 'all'),
                 'error': runtime['last_error'], 'retry_at': runtime['retry_at'], 'last_success_at': runtime['last_success_at'],
                 'running': runtime['lease_until']>stamp(), 'daily_calls': runtime['calls'], 'next_refresh_at': self.next_refresh()}, 'server_time': stamp()}
 
