@@ -2,7 +2,7 @@
 
 A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
 
-Version: **3.0.12** · [Latest changes](RELEASE-v3.0.12.md) · [Full changelog](CHANGELOG.md)
+Version: **3.0.13** · [Latest changes](RELEASE-v3.0.13.md) · [Full changelog](CHANGELOG.md)
 
 ## Install: set up your Cloudflare domain first
 
@@ -147,7 +147,7 @@ V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, r
 
 For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
 
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.12 ZIP targets v3.0.11. It contains the same updated files as the full-source ZIP.
+For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.13 ZIP targets v3.0.12. It contains the same updated files as the full-source ZIP.
 
 ## Development
 
@@ -171,6 +171,14 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 
 <details>
 <summary>V3: native downloader and current releases</summary>
+
+### v3.0.13
+
+- Keep Guide refreshing other channels when one uploads playlist is missing or inaccessible. Cache the affected channel's error and retry it after 24 hours, refreshing its playlist metadata first.
+- Recover invalid pagination tokens per channel with a ten-minute retry. Preserve account-wide quota and authentication backoffs.
+- Display persistent channel errors and retry times in Guide rows and Settings > Guide, with an affected-channel summary below the timeline.
+- Distinguish the actual retry time from the next daily scheduled refresh.
+- Automatically clear legacy global playlist-error pauses during the database upgrade. Cached uploads and download preferences are preserved.
 
 ### v3.0.12
 

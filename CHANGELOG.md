@@ -4,6 +4,14 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.13
+
+- Keep Guide refreshing other channels when one uploads playlist is missing or inaccessible. Cache the affected channel's error and retry it after 24 hours, refreshing its playlist metadata first.
+- Recover invalid pagination tokens per channel with a ten-minute retry. Preserve account-wide quota and authentication backoffs.
+- Display persistent channel errors and retry times in Guide rows and Settings > Guide, with an affected-channel summary below the timeline.
+- Distinguish the actual retry time from the next daily scheduled refresh.
+- Automatically clear legacy global playlist-error pauses during the database upgrade. Cached uploads and download preferences are preserved.
+
 ## v3.0.12
 
 - Show all active YouTube subscriptions in Guide, including channels without download monitoring, with favourites first.

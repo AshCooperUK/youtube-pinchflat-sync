@@ -129,6 +129,11 @@ def init_guide_db(db):
         ''')
         if 'channel_refresh_requested' not in {r[1] for r in conn.execute('PRAGMA table_info(guide_sync)')}:
             conn.execute('ALTER TABLE guide_sync ADD COLUMN channel_refresh_requested INTEGER NOT NULL DEFAULT 0')
+        if 'retry_at' not in {r[1] for r in conn.execute('PRAGMA table_info(guide_sync)')}:
+            conn.execute("ALTER TABLE guide_sync ADD COLUMN retry_at TEXT NOT NULL DEFAULT ''")
+            # Older releases incorrectly paused the entire guide for one playlist.
+            for code in ('playlistNotFound', 'playlistItemsNotAccessible', 'invalidPageToken'):
+                conn.execute("UPDATE guide_runtime SET last_error='',retry_at='' WHERE last_error LIKE ?", ('%(' + code + ')%',))
         for table, name, declaration in (
             ('guide_videos', 'view_count', 'INTEGER'), ('guide_videos', 'like_count', 'INTEGER'),
             ('guide_videos', 'comment_count', 'INTEGER'), ('guide_predictions', 'details', 'TEXT'),
@@ -352,6 +357,7 @@ class UploadGuide:
                 continuation = next_page if state['initialised'] and not set(ids).intersection(known) else None
                 conn.execute('''UPDATE guide_sync SET recent_cursor=?,recent_checked_at=?,refresh_requested=?,
                   last_success_at=?,error=NULL WHERE channel_id=?''', (continuation, stamp(), int(bool(continuation)), stamp(), cid))
+            conn.execute("UPDATE guide_sync SET retry_at='' WHERE channel_id=?", (cid,))
             conn.execute("UPDATE guide_runtime SET last_success_at=?,last_error='',retry_at='' WHERE id=1", (stamp(),))
 
     def _failure(self, exc, channel_id=None):
@@ -364,7 +370,20 @@ class UploadGuide:
             pass
         # Never include request headers, tokens or full exception URLs in activity.
         code = reason if re.fullmatch(r'[A-Za-z0-9_]{1,80}', str(reason)) else (f'HTTP {status}' if status else type(exc).__name__)
-        error = f'YouTube guide refresh paused ({code}). Cached uploads remain available.'
+        if channel_id and reason in ('playlistNotFound', 'playlistItemsNotAccessible', 'invalidPageToken'):
+            delay = timedelta(minutes=10) if reason == 'invalidPageToken' else timedelta(hours=24)
+            error = f'Uploads unavailable ({code}). Cached uploads remain available.'
+            with self.app.db() as conn:
+                old = conn.execute('SELECT error FROM guide_sync WHERE channel_id=?', (channel_id,)).fetchone()
+                title = conn.execute('SELECT title FROM subscriptions WHERE channel_id=?', (channel_id,)).fetchone()
+                conn.execute("""UPDATE guide_sync SET error=?,retry_at=?,refresh_requested=1,
+                    channel_refresh_requested=1,initialised=0,history_complete=0,
+                    backfill_cursor=NULL,recent_cursor=NULL WHERE channel_id=?""", (error, stamp(now()+delay), channel_id))
+            if not old or old[0] != error:
+                self.app.log_activity('guide', 'Channel guide refresh paused',
+                    f'{title[0] if title else channel_id}: {error} Other channels continue refreshing.', 'warning', channel_id)
+            return True
+        error = f'YouTube guide refresh paused ({code}). Cached uploads remain available.' 
         delay = timedelta(minutes=10)
         if reason in ('quotaExceeded', 'dailyLimitExceeded'):
             pacific = now().astimezone(ZoneInfo('America/Los_Angeles'))
@@ -381,6 +400,15 @@ class UploadGuide:
                     conn.execute('UPDATE guide_sync SET initialised=0,history_complete=0,backfill_cursor=NULL,recent_cursor=NULL WHERE channel_id=?', (channel_id,))
         if old != error:
             self.app.log_activity('guide', 'Upload guide refresh paused', error, 'warning', channel_id)
+
+    def _channel_page(self, creds, channel, mode):
+        try:
+            self._page(creds, channel, mode)
+        except GuidePaused:
+            raise
+        except Exception as exc:
+            if not self._failure(exc, channel['channel_id']):
+                raise GuidePaused('Guide refresh paused') from exc
 
     def scheduled_boundary(self):
         zone = ZoneInfo(self.timezone_name())
@@ -432,7 +460,8 @@ class UploadGuide:
                 conn.executemany('INSERT OR IGNORE INTO guide_sync(channel_id) VALUES(?)', [(cid,) for cid in ids])
                 existing = {row['channel_id']: dict(row) for row in conn.execute('SELECT * FROM guide_channels')}
                 requested = {r[0] for r in conn.execute('SELECT channel_id FROM guide_sync WHERE channel_refresh_requested=1')}
-            stale = [cid for cid in ids if cid in requested or cid not in existing or existing[cid]['metadata_checked_at'] < stamp(now()-timedelta(days=7))][:50]
+                blocked = {r[0] for r in conn.execute('SELECT channel_id FROM guide_sync WHERE retry_at>?', (stamp(),))}
+            stale = [cid for cid in ids if cid not in blocked and (cid in requested or cid not in existing or existing[cid]['metadata_checked_at'] < stamp(now()-timedelta(days=7)))][:50]
             if stale:
                 response = self._request(creds, 'channels', {'part': 'snippet,contentDetails', 'id': ','.join(stale), 'hl': 'en'})
                 self._save_channels(response.get('items') or [])
@@ -456,9 +485,11 @@ class UploadGuide:
             for channel in channels:
                 if self.budget_left < 2:
                     break
+                if channel['retry_at'] > stamp():
+                    continue
                 if channel['refresh_requested'] or not channel['initialised'] or (channel['recent_checked_at'] or '') < self.scheduled_boundary():
                     channel_id = channel['channel_id']
-                    self._page(creds, channel, 'recent')
+                    self._channel_page(creds, channel, 'recent')
             with self.app.db() as conn:
                 backfill = [dict(r) for r in conn.execute('''SELECT c.*,s.* FROM guide_channels c JOIN guide_sync s USING(channel_id)
                    JOIN subscriptions sub USING(channel_id) WHERE sub.active=1 AND sub.channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0)
@@ -468,10 +499,12 @@ class UploadGuide:
             for channel in backfill:
                 if self.budget_left < 2:
                     break
+                if channel['retry_at'] > stamp():
+                    continue
                 if history == 'year' and (channel['oldest_covered_at'] or stamp()) < stamp(now()-timedelta(days=366)):
                     continue
                 channel_id = channel['channel_id']
-                self._page(creds, channel, 'backfill')
+                self._channel_page(creds, channel, 'backfill')
             with self.app.db() as conn:
                 updated = dict(conn.execute('SELECT * FROM guide_runtime WHERE id=1').fetchone())
             revision = str(updated['last_success_at']) + ':' + boundary + ':' + str(self.forecasts.status()['enabled']) + ':' + self.timezone_name()
@@ -525,7 +558,7 @@ class UploadGuide:
         with self.app.db() as conn:
             rows = conn.execute('''SELECT s.*,c.description AS guide_description,c.thumbnail_url AS guide_thumbnail,
                 c.metadata_checked_at AS channel_checked_at,g.initialised,g.history_complete,g.oldest_covered_at,
-                g.last_success_at,g.error AS guide_error,g.refresh_requested,g.recent_cursor
+                g.last_success_at,g.retry_at AS guide_retry_at,g.error AS guide_error,g.refresh_requested,g.recent_cursor
                 FROM subscriptions s LEFT JOIN guide_channels c USING(channel_id) LEFT JOIN guide_sync g USING(channel_id)
                 WHERE s.active=1 AND s.channel_id NOT IN (SELECT channel_id FROM guide_channel_preferences WHERE visible=0)''').fetchall()
             runtime = dict(conn.execute('SELECT * FROM guide_runtime WHERE id=1').fetchone())
@@ -550,7 +583,7 @@ class UploadGuide:
                 'storage_bytes': self.app.channel_disk_usage(row['title'], storage, row['download_folder'] or self.app.safe_media_component(row['title'], 80)),
                 'coverage': {'initialised': bool(row['initialised']), 'complete': bool(row['history_complete']),
                   'oldest_at': row['oldest_covered_at'], 'last_success_at': row['last_success_at'],
-                  'pending': bool(row['refresh_requested'] or row['recent_cursor']), 'error': row['guide_error'],
+                  'pending': bool(row['refresh_requested'] or row['recent_cursor']), 'error': row['guide_error'], 'retry_at': row['guide_retry_at'],
                   'history_limited': self.app.get_setting('guide_history', 'all') == 'year' and bool(row['oldest_covered_at']) and row['oldest_covered_at'] < stamp(now()-timedelta(days=366))}, 'events': []}
             channel['profile_name'] = self.app.V3_MEDIA_PROFILE_MAP.get(channel['profile_id'], {}).get('name', channel['profile_id'])
             enabled_channels[channel['channel_id']] = channel
@@ -603,6 +636,7 @@ class UploadGuide:
         return {'ok': True, 'window': window, 'channels': channels, 'total_channels': total, 'enabled_channels': len(rows),
                 'selection': selection, 'next_offset': offset+limit if limit and offset+limit<total else None, 'revision': revision,
                 'show_thumbnails': self.app.setting_bool('guide_show_thumbnails', False), 'forecasts': self.forecasts.status(), 'coverage': {'history': self.app.get_setting('guide_history', 'all'),
+                'channel_errors': [{'channel_id': r['channel_id'], 'title': r['title'], 'error': r['guide_error'], 'retry_at': r['guide_retry_at']} for r in rows if r['guide_error']],
                 'error': runtime['last_error'], 'retry_at': runtime['retry_at'], 'last_success_at': runtime['last_success_at'],
                 'running': runtime['lease_until']>stamp(), 'daily_calls': runtime['calls'], 'next_refresh_at': self.next_refresh()}, 'server_time': stamp()}
 

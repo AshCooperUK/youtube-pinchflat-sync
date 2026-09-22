@@ -5037,7 +5037,7 @@
           <input type="search" id="guide-settings-search" placeholder="Search subscribed channels…" aria-label="Search Guide channels" oninput="filterGuideSettingsChannels(this.value)">
           <div class="actions"><button type="button" class="btn ghost smallbtn" onclick="setGuideChannelVisibility(true)">Show all</button><button type="button" class="btn ghost smallbtn" onclick="setGuideChannelVisibility(false)">Hide all</button></div>
           <div class="guide-channel-options">
-            {% for channel in guide_channel_choices %}<label class="source-toggle media-option guide-channel-option" data-guide-title="{{ channel.title }}"><input type="checkbox" name="guide_channel_ids" value="{{ channel.channel_id }}" {% if channel.visible %}checked{% endif %}><span class="toggle-track"></span><span>{{ channel.title }}</span></label>{% endfor %}
+            {% for channel in guide_channel_choices %}<label class="source-toggle media-option guide-channel-option" data-guide-title="{{ channel.title }}"><input type="checkbox" name="guide_channel_ids" value="{{ channel.channel_id }}" {% if channel.visible %}checked{% endif %}><span class="toggle-track"></span><span>{{ channel.title }}{% if channel.guide_error %}<small style="display:block;color:var(--muted)">{{ channel.guide_error }}{% if channel.guide_retry_at %} Retry: {{ channel.guide_retry_at }} (UTC).{% endif %}</small>{% endif %}</span></label>{% endfor %}
           </div>
           <p class="muted small">New subscriptions appear automatically. Hidden channels pause Guide indexing. These switches do not enable or disable downloads.</p>
         </div>

@@ -38,7 +38,7 @@ jobs:
           mkdir -p "$DATA_DIR" "$DOWNLOAD_ROOT"
           PYTHONPATH=app python - <<'PY'
           import app
-          assert app.VERSION == "3.0.12"
+          assert app.VERSION == "3.0.13"
           assert app.YOUTUBE_COOKIE_PATH.name == "youtube-cookies.txt"
           assert app.subscription_download_compatibility_profile() == "emby_tv"
           profile = app._v3_profile_ydl_options("1080p")
@@ -102,15 +102,15 @@ jobs:
         run: docker build -t youtube-subscription-downloader:v3-test ./app
 
 
-      - name: Package V3.0.12 source
+      - name: Package V3.0.13 source
         run: |
-          zip -qr youtube-subscription-downloader-v3.0.12.zip . \
+          zip -qr youtube-subscription-downloader-v3.0.13.zip . \
             -x ".git/*" "*/__pycache__/*" "*.pyc" \
-            -x "youtube-subscription-downloader-v3.0.12.zip"
+            -x "youtube-subscription-downloader-v3.0.13.zip"
 
-      - name: Upload V3.0.12 source package
+      - name: Upload V3.0.13 source package
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-subscription-downloader-v3.0.12
-          path: youtube-subscription-downloader-v3.0.12.zip
+          name: youtube-subscription-downloader-v3.0.13
+          path: youtube-subscription-downloader-v3.0.13.zip
           if-no-files-found: error

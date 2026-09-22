@@ -54,7 +54,7 @@ from zoneinfo import ZoneInfo
 from source_metadata import normalise_source_info, is_external_info, is_series_episode, metadata_json, media_details
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.12"
+VERSION = "3.0.13"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -20740,7 +20740,7 @@ def upload_guide_refresh():
 def guide_channel_choices():
     favourites = favourite_channel_ids()
     with db() as conn:
-        rows = [dict(row) for row in conn.execute("SELECT s.channel_id,s.title,COALESCE(p.visible,1) AS visible FROM subscriptions s LEFT JOIN guide_channel_preferences p USING(channel_id) WHERE s.active=1")]
+        rows = [dict(row) for row in conn.execute("SELECT s.channel_id,s.title,COALESCE(p.visible,1) AS visible,g.error AS guide_error,g.retry_at AS guide_retry_at FROM subscriptions s LEFT JOIN guide_channel_preferences p USING(channel_id) LEFT JOIN guide_sync g USING(channel_id) WHERE s.active=1")]
     return sorted(rows, key=lambda row: (row['channel_id'] not in favourites, (row['title'] or '').casefold()))
 
 
