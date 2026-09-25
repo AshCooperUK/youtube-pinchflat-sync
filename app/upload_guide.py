@@ -41,13 +41,18 @@ def channel_sort_key(channel, mode='title'):
     """Match subscription-sort.js, including direction and stable name/ID ties."""
     field, _, direction = str(mode or 'title').partition(':')
     defaults = {'title':'asc', 'enabled':'desc', 'range':'asc', 'media_profile':'asc',
-                'cutoff':'asc', 'storage':'desc', 'error':'asc', 'actions':'desc', 'status':'asc', 'newest':'desc'}
+                'cutoff':'asc', 'storage':'desc', 'error':'asc', 'actions':'desc', 'status':'asc', 'newest':'desc', 'latest_download':'desc'}
     if field not in defaults:
         field = 'title'
     if direction not in ('asc', 'desc'):
         direction = defaults[field]
     title = sort_text(channel.get('title'))
     key = (title,)
+    if field == 'latest_download':
+        value = channel.get('latest_download_at')
+        present = isinstance(value, (int, float))
+        key = ((value if direction == 'asc' else -value) if present else 0)
+        return (not channel.get('favourite'), not present, key, title, channel['channel_id'])
     if field == 'media_profile':
         profile = channel.get('profile_id') or ''
         key = (int(profile[:-1]) if re.fullmatch(r'\d+p', profile) else 9007199254740991,
@@ -567,6 +572,8 @@ class UploadGuide:
                 # The catalogue search is independent of the visible date window.
                 for r in conn.execute('SELECT channel_id,title FROM guide_videos WHERE metadata_checked_at>?', (minimum,)):
                     title_matches.setdefault(r['channel_id'], []).append(r['title'] or '')
+        inventory = self.app.completed_video_inventory()
+        latest_by_channel = self.app.latest_channel_downloads(inventory)
         channels = []
         enabled_channels = {}
         storage = self.app.storage_snapshot_cached()
@@ -576,6 +583,7 @@ class UploadGuide:
             channel = {'channel_id': row['channel_id'], 'title': row['title'],
                 'description': (row['guide_description'] if fresh else '') or 'No channel description',
                 'thumbnail_url': (row['guide_thumbnail'] if fresh else '') or row['thumbnail_url'] or '',
+                'latest_download_at': latest_by_channel.get(row['channel_id'], ''),
                 'favourite': row['channel_id'] in favourite_ids, 'profile_id': self.app.subscription_media_profile_id(dict(row)),
                 'status': sub.get('ui_status') or 'enabled', 'first_seen_at': row['first_seen_at'] or '',
                 'download_enabled': bool(sub['download_enabled']), 'range_mode': row['history_mode'] or 'default',
@@ -591,11 +599,11 @@ class UploadGuide:
             if all(term in haystack for term in terms):
                 channels.append(channel)
         channels.sort(key=lambda row: channel_sort_key(row, mode))
-        revision = hashlib.sha256(json.dumps([(c['channel_id'], c['favourite'], c['profile_id'], c['status'], c['storage_bytes']) for c in channels]).encode()).hexdigest()[:20]
+        revision = hashlib.sha256(json.dumps([(c['channel_id'], c['favourite'], c['profile_id'], c['status'], c['storage_bytes'], c['latest_download_at']) for c in channels]).encode()).hexdigest()[:20]
         total = len(channels)
         selected_channel = args.get('channel')
         channels = [c for c in channels if c['channel_id'] == selected_channel] if selected_channel else channels[offset:offset+limit if limit else None]
-        completed = {r['video_id']: r for r in self.app.completed_video_inventory().get('rows', []) if r.get('video_id')}
+        completed = {r['video_id']: r for r in inventory.get('rows', []) if r.get('video_id')}
         include_shorts = self.app.setting_bool('downloader_include_shorts', False)
         include_live = self.app.setting_bool('downloader_include_livestreams', True)
         event_offset = max(0, int(args.get('event_offset', 0))) if selected_channel else 0

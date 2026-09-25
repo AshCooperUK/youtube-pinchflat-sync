@@ -4,6 +4,21 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.15
+
+- Add a top-centre Subscribe/Subscribed control beside the existing channel-image actions across subscription rows, channel/player popups and shared channel widgets.
+- Add an explicit unsubscribe dialog with choices to keep files, delete subscription files, remove the YTSD channel record while retaining files, or remove the record and subscription media together. These choices override the automatic unsubscribe policy. Separate one-time downloads remain unchanged.
+- Add a plus button beside the Subscriptions tile minimise control. Accept YouTube channel URLs, @handles and channel IDs, with targeted API calls rather than a full subscription refresh.
+- Restore explicitly re-added channels even when an earlier local removal suppressed them. Cancel pending cleanup on re-subscribe and honour the new-channel download policy.
+- Keep the new controls administrator-only, require Google write access and CSRF protection, and retain foreground focus for nested popup choices.
+
+## v3.0.14
+
+- Add Latest download: newest first and oldest first to the subscription filter popup.
+- Sort channels using the latest successful video download still present on disk. Ignore queued, processing, failed and cancelled jobs, audio-only files, sidecars and missing files. Channels without dated downloads appear last within each favourites group.
+- Preserve the saved sort preference and favourites-first setting. Refresh channel ordering from the existing dashboard download-status poll.
+- Apply the same download-date sort in Upload Guide without additional YouTube API requests.
+
 ## v3.0.13
 
 - Keep Guide refreshing other channels when one uploads playlist is missing or inaccessible. Cache the affected channel's error and retry it after 24 hours, refreshing its playlist metadata first.

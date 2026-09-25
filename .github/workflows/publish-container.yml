@@ -42,8 +42,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/ashcooperuk/youtube-subscription-downloader:latest
-            ghcr.io/ashcooperuk/youtube-subscription-downloader:3.0.13
+            ghcr.io/ashcooperuk/youtube-subscription-downloader:3.0.15
           labels: |
             org.opencontainers.image.source=https://github.com/AshCooperUK/youtube-pinchflat-sync
             org.opencontainers.image.title=YouTube Subscription Downloader
-            org.opencontainers.image.version=3.0.13
+            org.opencontainers.image.version=3.0.15

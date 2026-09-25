@@ -2,7 +2,7 @@
 
 A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
 
-Version: **3.0.13** · [Latest changes](RELEASE-v3.0.13.md) · [Full changelog](CHANGELOG.md)
+Version: **3.0.15** · [Latest changes](RELEASE-v3.0.15.md) · [Full changelog](CHANGELOG.md)
 
 ## Install: set up your Cloudflare domain first
 
@@ -147,7 +147,7 @@ V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, r
 
 For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
 
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.13 ZIP targets v3.0.12. It contains the same updated files as the full-source ZIP.
+For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.15 ZIP targets v3.0.14. It contains the same updated files as the full-source ZIP.
 
 ## Development
 
@@ -171,6 +171,21 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 
 <details>
 <summary>V3: native downloader and current releases</summary>
+
+### v3.0.15
+
+- Add a top-centre Subscribe/Subscribed control beside the existing channel-image actions across subscription rows, channel/player popups and shared channel widgets.
+- Add an explicit unsubscribe dialog with choices to keep files, delete subscription files, remove the YTSD channel record while retaining files, or remove the record and subscription media together. These choices override the automatic unsubscribe policy. Separate one-time downloads remain unchanged.
+- Add a plus button beside the Subscriptions tile minimise control. Accept YouTube channel URLs, @handles and channel IDs, with targeted API calls rather than a full subscription refresh.
+- Restore explicitly re-added channels even when an earlier local removal suppressed them. Cancel pending cleanup on re-subscribe and honour the new-channel download policy.
+- Keep the new controls administrator-only, require Google write access and CSRF protection, and retain foreground focus for nested popup choices.
+
+### v3.0.14
+
+- Add Latest download: newest first and oldest first to the subscription filter popup.
+- Sort channels using the latest successful video download still present on disk. Ignore queued, processing, failed and cancelled jobs, audio-only files, sidecars and missing files. Channels without dated downloads appear last within each favourites group.
+- Preserve the saved sort preference and favourites-first setting. Refresh channel ordering from the existing dashboard download-status poll.
+- Apply the same download-date sort in Upload Guide without additional YouTube API requests.
 
 ### v3.0.13
 

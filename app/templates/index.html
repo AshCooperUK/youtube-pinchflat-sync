@@ -3001,6 +3001,13 @@
     .channel-image-control.channel-control-favourite { top:-3px; right:-5px; }
     .channel-image-control.channel-control-favourite.active { background:#b91c1c; color:#fff; }
     .channel-image-control.channel-control-enabled { top:-3px; left:-5px; }
+    .source-row .channel-image-control-wrap { margin-top:14px; }
+    .channel-image-control.channel-control-subscription { top:-20px; left:50%; margin-left:-15px; background:#334155; }
+    .channel-image-control.channel-control-subscription.active { background:#dc2626; }
+    .channel-image-control-wrap.compact .channel-image-control.channel-control-subscription { top:-23px; margin-left:-11px; }
+    .subscription-choice { display:flex; gap:12px; align-items:start; padding:12px; border:1px solid var(--line); border-radius:10px; margin:10px 0; cursor:pointer; }
+    .subscription-choice input { width:auto; flex:0 0 auto; margin-top:4px; }
+    .subscription-choice small { display:block; color:var(--muted); margin-top:4px; }
     .channel-image-control.channel-control-enabled.active { background:#15803d; color:#fff; }
     .channel-image-control.channel-control-scan { bottom:-3px; left:-5px; background:#31527f; }
     .channel-image-control.channel-control-delete { bottom:-3px; right:-5px; background:#7f1d1d; color:#fff; }
@@ -3731,6 +3738,8 @@
             </svg>
           </button>
 
+          {% if is_admin %}<button class="latest-window-btn" id="subscriptions-add" type="button" onclick="openAddChannelDialog()" title="Add YouTube channel" aria-label="Add YouTube channel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>{% endif %}
+
           <button
             class="latest-window-btn"
             type="button"
@@ -3781,6 +3790,7 @@
             data-range-mode="{{ sub['history_mode'] or 'default' }}"
             data-first-seen="{{ sub['first_seen_at'] }}"
             data-storage="{{ sub['disk_bytes'] }}"
+            data-latest-download="{{ sub['latest_download_at'] }}"
             data-favourite="{{ 1 if sub['is_favourite'] else 0 }}"
             data-form-id="{{ row_form_id }}"
             data-channel-id="{{ sub['channel_id']|e }}"
@@ -3831,6 +3841,7 @@
                     onclick="toggleChannelFavouriteFromButton(this)"
                   >{{ '♥' if sub['is_favourite'] else '♡' }}</button>
                   {% if is_admin %}
+                  <button type="button" class="channel-image-control channel-control-subscription {% if sub['active'] %}active{% endif %}" data-channel-subscription-control="1" data-channel-id="{{ sub['channel_id'] }}" data-channel-title="{{ sub['title']|e }}" onclick="toggleChannelSubscription(event,this)" title="Subscribe to channel" aria-label="Subscribe to channel">{{ '✓' if sub['active'] else '+' }}</button>
                   <button
                     type="button"
                     class="channel-image-control channel-control-enabled {% if sub['download_enabled'] %}active{% endif %}"
@@ -4194,9 +4205,12 @@
               <option value="actions:asc">Saved channels first</option>
               <option value="status">Status A → Z</option>
               <option value="status:desc">Status Z → A</option>
+              <option value="latest_download">Latest download: newest first</option>
+              <option value="latest_download:asc">Latest download: oldest first</option>
               <option value="newest">Newest subscription first</option>
               <option value="newest:asc">Oldest subscription first</option>
             </select>
+            <span class="muted small">Episode sorting uses each channel’s latest completed video download still on disk. Channels without a dated download appear last within each favourites group.</span>
           </label>
         </div>
       </div>
@@ -4303,6 +4317,7 @@
             <button id="subscription-channel-favourite-badge" class="channel-image-control channel-control-favourite" type="button" title="Add to favourites" aria-label="Toggle favourite">♡</button>
             <button id="subscription-channel-enabled-badge" class="channel-image-control channel-control-enabled" type="button" title="Enable downloads" aria-label="Toggle downloads">✓</button>
             {% if is_admin %}
+            <button id="subscription-channel-subscription" type="button" class="channel-image-control channel-control-subscription" data-channel-subscription-control="1" onclick="toggleChannelSubscription(event,this)" title="Subscribe to channel" aria-label="Subscribe to channel">+</button>
             <button id="subscription-channel-force-scan" class="channel-image-control channel-control-scan" type="button" onclick="forceScanFromChannelPopup()" title="Force Downloader to scan this channel" aria-label="Force Downloader scan">↻</button>
             <button id="subscription-channel-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(currentSubscriptionChannelId)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
             <button id="subscription-channel-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
@@ -4510,6 +4525,29 @@
 </div>
 {% endif %}
 
+{% if is_admin %}
+<dialog id="add-channel-dialog">
+ <div class="modal-head"><h2>Add YouTube channel</h2><button class="modal-close" type="button" onclick="document.getElementById('add-channel-dialog').close()" aria-label="Close">×</button></div>
+ <form class="modal-body" onsubmit="submitAddChannel(event)">
+  <label>Channel URL, @handle or channel ID<input id="add-channel-url" type="text" required autocomplete="off" placeholder="https://www.youtube.com/@channel"></label>
+  <p class="muted small">Subscribes your connected YouTube account and adds the channel to YTSD. Your new-channel download setting applies.</p>
+  <p id="add-channel-error" role="alert"></p><button class="btn" type="submit">Subscribe and add channel</button>
+ </form>
+</dialog>
+<dialog id="channel-subscription-dialog">
+ <div class="modal-head"><h2 id="channel-subscription-title">Unsubscribe</h2><button class="modal-close" type="button" onclick="document.getElementById('channel-subscription-dialog').close()" aria-label="Close">×</button></div>
+ <form class="modal-body" onsubmit="submitChannelSubscriptionChoice(event)">
+  <p>Choose what to keep after unsubscribing from YouTube.</p>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="keep" checked><span>Unsubscribe only<small>Keep the YTSD channel record and downloaded files. Stop subscription monitoring.</small></span></label>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="media"><span>Unsubscribe and delete current files<small>Keep the YTSD record. Permanently remove this channel’s subscription folder and its media.</small></span></label>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="channel"><span>Unsubscribe and delete channel from YTSD<small>Keep downloaded files.</small></span></label>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="everything"><span>Unsubscribe, delete channel and remove media<small>Permanently remove this channel’s subscription folder and YTSD record.</small></span></label>
+  <p class="muted small">Separate one-time downloads remain unchanged.</p>
+  <p id="channel-subscription-error" role="alert"></p><button class="btn danger" type="submit">Confirm selected action</button>
+ </form>
+</dialog>
+{% endif %}
+
 <dialog id="subscription-confirm-dialog">
   <div class="modal-head">
     <div><h2 style="margin:0">Confirm channel removal</h2></div>
@@ -4618,6 +4656,7 @@
               </button>
               <button id="latest-popup-channel-avatar-heart" class="channel-image-control channel-control-favourite" type="button" data-channel-favourite-control="1" title="Toggle favourite">♡</button>
               {% if is_admin %}
+              <button id="latest-popup-channel-subscription" type="button" class="channel-image-control channel-control-subscription" data-channel-subscription-control="1" onclick="toggleChannelSubscription(event,this)" title="Subscribe to channel" aria-label="Subscribe to channel">+</button>
               <button id="latest-popup-channel-avatar-enabled" class="channel-image-control channel-control-enabled" type="button" data-channel-enabled-control="1" title="Toggle downloads">✓</button>
               <button id="latest-popup-channel-avatar-scan" class="channel-image-control channel-control-scan" type="button" data-channel-scan-control="1" title="Force Downloader scan">↻</button>
               <button id="latest-popup-channel-avatar-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(latestPopupVideo?.channel_id || '')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
@@ -6900,6 +6939,7 @@ async function loadDownloaderDownloadOverview(force=false) {
       || "";
 
     pinchflatDownloadSnapshot = data;
+    updateSubscriptionDownloadDates(data.channel_latest_downloads);
 
     renderDownloaderActiveDownloads(data);
     renderDownloaderTasks(data);
@@ -7603,6 +7643,92 @@ async function apiPost(url, payload={}) {
   return data;
 }
 
+const channelSubscriptionStates = new Map();
+
+function renderSubscriptionButton(button, state) {
+  button.classList.toggle('active', state.subscribed);
+  button.textContent = state.subscribed ? '✓' : '+';
+  button.dataset.subscribed = state.subscribed ? '1' : '0';
+  button.disabled = !userIsAdmin || !googleWriteReady || !state.channelId;
+  button.setAttribute('aria-pressed', String(!!state.subscribed));
+  button.title = !googleWriteReady ? 'Reconnect Google with YouTube write access' : state.subscribed ? 'Subscribed. Choose unsubscribe options' : 'Subscribe to this channel';
+  button.setAttribute('aria-label', button.title);
+}
+function showChannelDialog(dialog) {
+  const fullscreen = document.fullscreenElement;
+  if (fullscreen && !fullscreen.contains(dialog)) fullscreen.appendChild(dialog);
+  if (!dialog.open) dialog.showModal();
+}
+function applyChannelSubscriptionResult(channelId, subscribed, data) {
+  channelSubscriptionStates.set(channelId, subscribed);
+  const row = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
+  if (data.deleted_from_app) row?.remove();
+  else if (row && data.subscription) updateSubscriptionRowFromData(row, data.subscription);
+  if (currentSubscriptionChannelId === channelId && currentSubscriptionChannelData) {
+    currentSubscriptionChannelData.subscribed = subscribed;
+    currentSubscriptionChannelData.subscription = data.deleted_from_app ? null : (data.subscription || currentSubscriptionChannelData.subscription);
+    const status = document.getElementById('subscription-channel-status');
+    if (status) status.textContent = subscribed ? 'Subscribed' : 'Unsubscribed';
+  }
+  syncDiscoverSubscriptionState(channelId, subscribed);
+  syncChannelAvatarControls(channelId, {subscribed, enabled:!!data.subscription?.download_enabled, sourceId:data.subscription?.pinchflat_source_id || ''});
+  updateSubscriptionDashboardCounts();
+  applyFilters({preserveScroll:true});
+}
+async function toggleChannelSubscription(event, button) {
+  event.preventDefault(); event.stopPropagation();
+  if (button.disabled) return;
+  const channelId = button.dataset.channelId;
+  if (!channelId) return;
+  const state = getChannelControlState(channelId, {channel_title:button.dataset.channelTitle, subscribed:button.dataset.subscribed === '1'});
+  if (state.subscribed) {
+    const dialog = document.getElementById('channel-subscription-dialog');
+    dialog.dataset.channelId = channelId;
+    dialog.querySelector('form').reset();
+    document.getElementById('channel-subscription-title').textContent = 'Unsubscribe from ' + state.title;
+    document.getElementById('channel-subscription-error').textContent = '';
+    showChannelDialog(dialog);
+    return;
+  }
+  button.disabled = true;
+  try {
+    const data = await apiPost('/api/youtube/subscribe', {channel_id:channelId});
+    applyChannelSubscriptionResult(channelId, true, data);
+    showAjaxToast('Subscribed to ' + state.title, 'success');
+  } catch (error) { showAjaxToast(error.message, 'error'); }
+  finally { renderSubscriptionButton(button,getChannelControlState(channelId)); }
+}
+function openAddChannelDialog() {
+  const dialog = document.getElementById('add-channel-dialog');
+  dialog.querySelector('form').reset();
+  document.getElementById('add-channel-error').textContent = '';
+  showChannelDialog(dialog); document.getElementById('add-channel-url').focus();
+}
+async function submitAddChannel(event) {
+  event.preventDefault();
+  const form = event.currentTarget, button = form.querySelector('[type="submit"]');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    await apiPost('/api/subscriptions/add', {url:document.getElementById('add-channel-url').value.trim()});
+    location.reload();
+  } catch (error) { document.getElementById('add-channel-error').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+async function submitChannelSubscriptionChoice(event) {
+  event.preventDefault();
+  const form = event.currentTarget, dialog = form.closest('dialog'), button = form.querySelector('[type="submit"]');
+  if (button.disabled) return;
+  const channelId = dialog.dataset.channelId, mode = form.querySelector('[name="subscription_choice"]:checked').value;
+  button.disabled = true;
+  try {
+    const data = await apiPost(`/api/subscriptions/${encodeURIComponent(channelId)}/subscription-choice`, {mode});
+    applyChannelSubscriptionResult(channelId, false, data);
+    dialog.close(); showAjaxToast(data.message, 'success');
+  } catch (error) { document.getElementById('channel-subscription-error').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+
 function getChannelControlState(channelId, fallback={}) {
   channelId = String(channelId || "").trim();
   const row = channelId
@@ -7637,6 +7763,7 @@ function getChannelControlState(channelId, fallback={}) {
       false
     )),
     subscribed: Boolean(pick(
+      channelSubscriptionStates.get(channelId),
       row ? row.dataset.active === "1" : undefined,
       popupSub?.active,
       fallback.subscribed,
@@ -7694,7 +7821,8 @@ function syncChannelAvatarControls(channelId, override={}) {
     button.title = "Delete or remove channel";
   });
 
-  document.dispatchEvent(new CustomEvent('ytsd:channel-state', {detail:{channelId,...state}}));
+  document.querySelectorAll(`[data-channel-subscription-control="1"][data-channel-id="${CSS.escape(channelId)}"]`).forEach(button => renderSubscriptionButton(button, state));
+  document.dispatchEvent(new CustomEvent('ytsd:channel-state' , {detail:{channelId,...state}}));
   return state;
 }
 
@@ -7751,6 +7879,15 @@ function makeChannelAvatarWidget(item, options={}) {
   wrap.appendChild(heart);
 
   if (userIsAdmin) {
+    const subscription = document.createElement('button');
+    subscription.type = 'button';
+    subscription.className = 'channel-image-control channel-control-subscription';
+    subscription.dataset.channelSubscriptionControl = '1';
+    subscription.dataset.channelId = channelId;
+    subscription.dataset.channelTitle = state.title;
+    renderSubscriptionButton(subscription, state);
+    subscription.addEventListener('click', event => toggleChannelSubscription(event, subscription));
+    wrap.appendChild(subscription);
     const enabled = document.createElement("button");
     enabled.type = "button";
     enabled.className = `channel-image-control channel-control-enabled${state.enabled ? " active" : ""}`;
@@ -8257,6 +8394,12 @@ function renderLatestVideoDetails(item) {
     channelBanner.style.backgroundImage = "";
   }
 
+  const playerSubscription = document.getElementById('latest-popup-channel-subscription');
+  if (playerSubscription) {
+    playerSubscription.dataset.channelId = item.is_external ? '' : (item.channel_id || '');
+    playerSubscription.dataset.channelTitle = item.channel_title || '';
+    playerSubscription.hidden = !!item.is_external || !item.channel_id;
+  }
   const playerHeart = document.getElementById("latest-popup-channel-avatar-heart");
   const playerEnabled = document.getElementById("latest-popup-channel-avatar-enabled");
   const playerScan = document.getElementById("latest-popup-channel-avatar-scan");
@@ -9713,6 +9856,8 @@ async function loadDiscover(mode, force=false) {
 }
 
 function syncDiscoverSubscriptionState(channelId, subscribed=true) {
+  channelSubscriptionStates.set(channelId, !!subscribed);
+  document.querySelectorAll(`[data-channel-subscription-control="1"][data-channel-id="${CSS.escape(channelId)}"]`).forEach(button => renderSubscriptionButton(button, {...getChannelControlState(channelId), subscribed:!!subscribed}));
   [
     discoverResults.downloaded,
     discoverResults.latest,
@@ -12093,6 +12238,8 @@ async function openChannelDetails(channelId) {
       forceScanButton.dataset.channelId = channelId;
     }
 
+    const subscriptionButton = document.getElementById('subscription-channel-subscription');
+    if (subscriptionButton) { subscriptionButton.dataset.channelId = channelId; subscriptionButton.dataset.channelTitle = titleText; }
     const deleteButton = document.getElementById("subscription-channel-delete");
     if (deleteButton) {
       deleteButton.dataset.channelId = channelId;
@@ -12102,7 +12249,7 @@ async function openChannelDetails(channelId) {
 
     syncChannelAvatarControls(channelId, {
       favourite: sub ? !!sub.favourite : !!data.favourite,
-      subscribed: !!sub?.active,
+      subscribed: data.subscribed !== undefined ? !!data.subscribed : !!sub?.active,
       enabled: !!sub?.download_enabled,
       sourceId: sub?.pinchflat_source_id || ""
     });
@@ -13292,6 +13439,21 @@ function scheduleSubscriptionFilter() {
   }, 450);
 }
 
+function updateSubscriptionDownloadDates(latest) {
+  if (!latest || typeof latest !== 'object') return;
+  let changed = false;
+  document.querySelectorAll('#subscription-body .source-row').forEach(row => {
+    const value = String(latest[row.dataset.channelId] ?? '');
+    if (row.dataset.latestDownload !== value) {
+      row.dataset.latestDownload = value;
+      changed = true;
+    }
+  });
+  if (changed && ytsdSortSpec(sortFilter?.value).field === 'latest_download') {
+    applyFilters({preserveScroll:true});
+  }
+}
+
 function applyFilters(options={}) {
   if (!search || !statusFilter || !sortFilter) return;
 
@@ -13342,6 +13504,7 @@ function applyFilters(options={}) {
     channel_id:row.dataset.channelId, title:row.dataset.title,
     status:row.dataset.status, first_seen_at:row.dataset.firstSeen,
     storage_bytes:Number(row.dataset.storage || 0),
+    latest_download_at:row.dataset.latestDownload || "",
     profile_id:row.querySelector('.source-profile select')?.value || row.querySelector('.source-profile')?.dataset.profileId || '',
     profile_name:rowValues.get(row).profile,
     download_enabled:row.querySelector('input[name="download_enabled"]')?.checked ?? row.dataset.downloadEnabled === '1',
@@ -13434,6 +13597,9 @@ function confirmBulkAction() {
 applyConfiguredPageOrder();
 
 function startDeferredDashboardWork() {
+  document.querySelectorAll('[data-channel-subscription-control="1"]').forEach(button => {
+    renderSubscriptionButton(button,getChannelControlState(button.dataset.channelId));
+  });
   initialisePageViewSettings();
   // This is a small local DB lookup. Load it early so one-time download icons
   // are greyed out before Discover or Channel video grids are opened.
