@@ -58,7 +58,8 @@
     copy.append(name);
     if(className==='yt-channel-link') {
       copy.append(element('span','yt-channel-small',channel.description || 'No channel description'));
-      if(!channel.coverage?.initialised) copy.append(element('span','yt-channel-coverage','Waiting for metadata'));
+      if(channel.coverage?.error) copy.append(element('span','yt-channel-coverage',channel.coverage.error + (channel.coverage.retry_at ? ` Retry: ${new Date(channel.coverage.retry_at).toLocaleString('en-GB',{timeZone:data.window.timezone})}.` : '')));
+      else if(!channel.coverage?.initialised) copy.append(element('span','yt-channel-coverage','Waiting for metadata'));
       else if(!channel.coverage.complete && !channel.coverage.history_limited) copy.append(element('span','yt-channel-coverage','Older history indexing'));
     }
     node.append(copy);return node;
@@ -227,8 +228,10 @@
     const incomplete=data.channels.some(c=>!c.coverage.complete && !c.coverage.history_limited);
     let message=data.coverage.error || (data.coverage.running?'Updating YouTube metadata…':data.channels.some(c=>c.coverage.pending)?'Metadata refresh pending…':incomplete?'Recent history appears first. Older uploads are indexing in background batches.':'Available upload history indexed.');
     if(data.coverage.history==='year')message+=' History setting: past year. Older pages are paused by this setting.';
-    if(state.filter==='expected') message=data.forecasts.reason;
-    if(data.coverage.next_refresh_at)message+=` Next refresh: ${new Date(data.coverage.next_refresh_at).toLocaleString('en-GB',{timeZone:data.window.timezone})} (${data.window.timezone}).`;
+    if(state.filter==='expected') message+=' '+data.forecasts.reason;
+    if(data.coverage.channel_errors?.length) message+=` ${data.coverage.channel_errors.length} channel(s) need attention: ${data.coverage.channel_errors.map(c=>c.title).join(', ')}. See each channel row for its error and retry time. Other channels continue refreshing.`;
+    if(data.coverage.error && data.coverage.retry_at) message+=` Retry: ${new Date(data.coverage.retry_at).toLocaleString('en-GB',{timeZone:data.window.timezone})} (${data.window.timezone}).`;
+    if(data.coverage.next_refresh_at)message+=` Next scheduled refresh: ${new Date(data.coverage.next_refresh_at).toLocaleString('en-GB',{timeZone:data.window.timezone})} (${data.window.timezone}).`;
     $('yt-guide-state').textContent=message;
     if(active && !hasDialog()) root.querySelector(`[data-focus-key="${CSS.escape(active)}"]`)?.focus({preventScroll:true});
     grid.scrollTop=scroll.top;grid.scrollLeft=scroll.left;window.scrollTo({top:scroll.y,behavior:'instant'});

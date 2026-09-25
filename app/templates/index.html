@@ -3001,6 +3001,13 @@
     .channel-image-control.channel-control-favourite { top:-3px; right:-5px; }
     .channel-image-control.channel-control-favourite.active { background:#b91c1c; color:#fff; }
     .channel-image-control.channel-control-enabled { top:-3px; left:-5px; }
+    .source-row .channel-image-control-wrap { margin-top:14px; }
+    .channel-image-control.channel-control-subscription { top:-20px; left:50%; margin-left:-15px; background:#334155; }
+    .channel-image-control.channel-control-subscription.active { background:#dc2626; }
+    .channel-image-control-wrap.compact .channel-image-control.channel-control-subscription { top:-23px; margin-left:-11px; }
+    .subscription-choice { display:flex; gap:12px; align-items:start; padding:12px; border:1px solid var(--line); border-radius:10px; margin:10px 0; cursor:pointer; }
+    .subscription-choice input { width:auto; flex:0 0 auto; margin-top:4px; }
+    .subscription-choice small { display:block; color:var(--muted); margin-top:4px; }
     .channel-image-control.channel-control-enabled.active { background:#15803d; color:#fff; }
     .channel-image-control.channel-control-scan { bottom:-3px; left:-5px; background:#31527f; }
     .channel-image-control.channel-control-delete { bottom:-3px; right:-5px; background:#7f1d1d; color:#fff; }
@@ -3544,15 +3551,7 @@
     </div>
     {% endif %}
 
-    {% if page_view.show_summary_errors %}
-    <div class="card" data-summary-tile="errors">
-      <div class="muted small">Errors</div>
-      <div class="metric {% if counts.errors or download_counts.failed %}bad{% else %}ok{% endif %}" id="dashboard-errors">{{ counts.errors + download_counts.failed }}</div>
-      <div class="muted small">
-        {% if last_run %}Last sync: {{ last_run["status"] }}{% else %}No sync yet{% endif %}
-      </div>
-    </div>
-    {% endif %}
+
   </div>
   {% endif %}
 
@@ -3731,6 +3730,8 @@
             </svg>
           </button>
 
+          {% if is_admin %}<button class="latest-window-btn" id="subscriptions-add" type="button" onclick="openAddChannelDialog()" title="Add YouTube channel" aria-label="Add YouTube channel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>{% endif %}
+
           <button
             class="latest-window-btn"
             type="button"
@@ -3776,11 +3777,13 @@
             data-title="{{ sub['title']|lower }}"
             data-status="{{ sub['ui_status'] }}"
             data-active="{{ 1 if sub['active'] else 0 }}"
+            data-youtube-subscribed="{{ 1 if sub['youtube_subscribed'] else 0 }}"
             data-error="{{ 1 if sub['last_error'] else 0 }}"
             data-download-enabled="{{ 1 if sub['download_enabled'] else 0 }}"
             data-range-mode="{{ sub['history_mode'] or 'default' }}"
             data-first-seen="{{ sub['first_seen_at'] }}"
             data-storage="{{ sub['disk_bytes'] }}"
+            data-latest-download="{{ sub['latest_download_at'] }}"
             data-favourite="{{ 1 if sub['is_favourite'] else 0 }}"
             data-form-id="{{ row_form_id }}"
             data-channel-id="{{ sub['channel_id']|e }}"
@@ -3831,6 +3834,7 @@
                     onclick="toggleChannelFavouriteFromButton(this)"
                   >{{ '♥' if sub['is_favourite'] else '♡' }}</button>
                   {% if is_admin %}
+                  <button type="button" class="channel-image-control channel-control-subscription {% if sub['youtube_subscribed'] %}active{% endif %}" data-channel-subscription-control="1" data-channel-id="{{ sub['channel_id'] }}" data-channel-title="{{ sub['title']|e }}" onclick="toggleChannelSubscription(event,this)" title="Subscribe to channel" aria-label="Subscribe to channel">{{ '✓' if sub['youtube_subscribed'] else '+' }}</button>
                   <button
                     type="button"
                     class="channel-image-control channel-control-enabled {% if sub['download_enabled'] %}active{% endif %}"
@@ -4194,9 +4198,12 @@
               <option value="actions:asc">Saved channels first</option>
               <option value="status">Status A → Z</option>
               <option value="status:desc">Status Z → A</option>
+              <option value="latest_download">Latest download: newest first</option>
+              <option value="latest_download:asc">Latest download: oldest first</option>
               <option value="newest">Newest subscription first</option>
               <option value="newest:asc">Oldest subscription first</option>
             </select>
+            <span class="muted small">Episode sorting uses each channel’s latest completed video download still on disk. Channels without a dated download appear last within each favourites group.</span>
           </label>
         </div>
       </div>
@@ -4303,6 +4310,7 @@
             <button id="subscription-channel-favourite-badge" class="channel-image-control channel-control-favourite" type="button" title="Add to favourites" aria-label="Toggle favourite">♡</button>
             <button id="subscription-channel-enabled-badge" class="channel-image-control channel-control-enabled" type="button" title="Enable downloads" aria-label="Toggle downloads">✓</button>
             {% if is_admin %}
+            <button id="subscription-channel-subscription" type="button" class="channel-image-control channel-control-subscription" data-channel-subscription-control="1" onclick="toggleChannelSubscription(event,this)" title="Subscribe to channel" aria-label="Subscribe to channel">+</button>
             <button id="subscription-channel-force-scan" class="channel-image-control channel-control-scan" type="button" onclick="forceScanFromChannelPopup()" title="Force Downloader to scan this channel" aria-label="Force Downloader scan">↻</button>
             <button id="subscription-channel-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(currentSubscriptionChannelId)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
             <button id="subscription-channel-delete" class="channel-image-control channel-control-delete" type="button" data-channel-delete-control="1" title="Delete or remove channel" aria-label="Delete or remove channel" onclick="openChannelDeleteMenu(event, this)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M9 7V4h6v3"></path><path d="m7 7 1 13h8l1-13"></path><path d="M10 11v5"></path><path d="M14 11v5"></path></svg></button>
@@ -4510,6 +4518,29 @@
 </div>
 {% endif %}
 
+{% if is_admin %}
+<dialog id="add-channel-dialog">
+ <div class="modal-head"><h2>Add YouTube channel</h2><button class="modal-close" type="button" onclick="document.getElementById('add-channel-dialog').close()" aria-label="Close">×</button></div>
+ <form class="modal-body" onsubmit="submitAddChannel(event)">
+  <label>Channel URL, @handle or channel ID<input id="add-channel-url" type="text" required autocomplete="off" placeholder="https://www.youtube.com/@channel"></label>
+  <p class="muted small">Adds the channel to YTSD without changing your YouTube subscriptions. New channels start with download monitoring enabled, using your default range and media profile.</p>
+  <p id="add-channel-error" role="alert"></p><button class="btn" type="submit">Add to YTSD</button>
+ </form>
+</dialog>
+<dialog id="channel-subscription-dialog">
+ <div class="modal-head"><h2 id="channel-subscription-title">Unsubscribe</h2><button class="modal-close" type="button" onclick="document.getElementById('channel-subscription-dialog').close()" aria-label="Close">×</button></div>
+ <form class="modal-body" onsubmit="submitChannelSubscriptionChoice(event)">
+  <p>Choose what to keep after unsubscribing from YouTube.</p>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="keep" checked><span>Unsubscribe only<small>Keep the YTSD channel record and downloaded files. Stop subscription monitoring.</small></span></label>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="media"><span>Unsubscribe and delete current files<small>Keep the YTSD record. Permanently remove this channel’s subscription folder and its media.</small></span></label>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="channel"><span>Unsubscribe and delete channel from YTSD<small>Keep downloaded files.</small></span></label>
+  <label class="subscription-choice"><input type="radio" name="subscription_choice" value="everything"><span>Unsubscribe, delete channel and remove media<small>Permanently remove this channel’s subscription folder and YTSD record.</small></span></label>
+  <p class="muted small">Separate one-time downloads remain unchanged.</p>
+  <p id="channel-subscription-error" role="alert"></p><button class="btn danger" type="submit">Confirm selected action</button>
+ </form>
+</dialog>
+{% endif %}
+
 <dialog id="subscription-confirm-dialog">
   <div class="modal-head">
     <div><h2 style="margin:0">Confirm channel removal</h2></div>
@@ -4618,6 +4649,7 @@
               </button>
               <button id="latest-popup-channel-avatar-heart" class="channel-image-control channel-control-favourite" type="button" data-channel-favourite-control="1" title="Toggle favourite">♡</button>
               {% if is_admin %}
+              <button id="latest-popup-channel-subscription" type="button" class="channel-image-control channel-control-subscription" data-channel-subscription-control="1" onclick="toggleChannelSubscription(event,this)" title="Subscribe to channel" aria-label="Subscribe to channel">+</button>
               <button id="latest-popup-channel-avatar-enabled" class="channel-image-control channel-control-enabled" type="button" data-channel-enabled-control="1" title="Toggle downloads">✓</button>
               <button id="latest-popup-channel-avatar-scan" class="channel-image-control channel-control-scan" type="button" data-channel-scan-control="1" title="Force Downloader scan">↻</button>
               <button id="latest-popup-channel-avatar-retention" class="channel-image-control channel-control-retention" type="button" data-channel-retention-control="1" title="Edit video retention for this channel" aria-label="Edit video retention" onclick="openRetentionSettingsForChannel(latestPopupVideo?.channel_id || '')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.7 2.8 8.1 7 10 4.2-1.9 7-5.3 7-10V6l-7-3Z"></path><path d="m9.2 12 1.8 1.8 3.8-4"></path></svg></button>
@@ -5037,7 +5069,7 @@
           <input type="search" id="guide-settings-search" placeholder="Search subscribed channels…" aria-label="Search Guide channels" oninput="filterGuideSettingsChannels(this.value)">
           <div class="actions"><button type="button" class="btn ghost smallbtn" onclick="setGuideChannelVisibility(true)">Show all</button><button type="button" class="btn ghost smallbtn" onclick="setGuideChannelVisibility(false)">Hide all</button></div>
           <div class="guide-channel-options">
-            {% for channel in guide_channel_choices %}<label class="source-toggle media-option guide-channel-option" data-guide-title="{{ channel.title }}"><input type="checkbox" name="guide_channel_ids" value="{{ channel.channel_id }}" {% if channel.visible %}checked{% endif %}><span class="toggle-track"></span><span>{{ channel.title }}</span></label>{% endfor %}
+            {% for channel in guide_channel_choices %}<label class="source-toggle media-option guide-channel-option" data-guide-title="{{ channel.title }}"><input type="checkbox" name="guide_channel_ids" value="{{ channel.channel_id }}" {% if channel.visible %}checked{% endif %}><span class="toggle-track"></span><span>{{ channel.title }}{% if channel.guide_error %}<small style="display:block;color:var(--muted)">{{ channel.guide_error }}{% if channel.guide_retry_at %} Retry: {{ channel.guide_retry_at }} (UTC).{% endif %}</small>{% endif %}</span></label>{% endfor %}
           </div>
           <p class="muted small">New subscriptions appear automatically. Hidden channels pause Guide indexing. These switches do not enable or disable downloads.</p>
         </div>
@@ -5110,13 +5142,13 @@
               {% for item in page_summary_order %}
               <div class="page-order-item" draggable="true" data-order-key="{{ item }}">
                 <span class="page-order-handle" aria-hidden="true">☰</span>
-                <span style="flex:1"><strong>{% if item == "google" %}Google{% elif item == "pinchflat" %}Downloader{% elif item == "latest_download" %}Latest download{% elif item == "subscriptions" %}Subscriptions{% elif item == "downloads" %}Downloads{% elif item == "errors" %}Errors{% endif %}</strong></span>
+                <span style="flex:1"><strong>{% if item == "google" %}Google{% elif item == "pinchflat" %}Downloader{% elif item == "latest_download" %}Latest download{% elif item == "subscriptions" %}Subscriptions{% elif item == "downloads" %}Downloads{% endif %}</strong></span>
                 {% if item == "google" %}<label><input type="checkbox" name="page_show_summary_google" value="1" {% if page_view.show_summary_google %}checked{% endif %}> Show</label>
                 {% elif item == "pinchflat" %}<label><input type="checkbox" name="page_show_summary_pinchflat" value="1" {% if page_view.show_summary_pinchflat %}checked{% endif %}> Show</label>
                 {% elif item == "latest_download" %}<label><input type="checkbox" name="page_show_summary_latest_download" value="1" {% if page_view.show_summary_latest_download %}checked{% endif %}> Show</label>
                 {% elif item == "subscriptions" %}<label><input type="checkbox" name="page_show_summary_subscriptions" value="1" {% if page_view.show_summary_subscriptions %}checked{% endif %}> Show</label>
                 {% elif item == "downloads" %}<label><input type="checkbox" name="page_show_summary_downloads" value="1" {% if page_view.show_summary_downloads %}checked{% endif %}> Show</label>
-                {% elif item == "errors" %}<label><input type="checkbox" name="page_show_summary_errors" value="1" {% if page_view.show_summary_errors %}checked{% endif %}> Show</label>{% endif %}
+                {% endif %}
               </div>
               {% endfor %}
             </div>
@@ -5805,8 +5837,14 @@
 
       <div class="setting-box" style="margin-top:14px">
         <div class="log-tile-head">
-          <div><h3>Activity</h3><p class="muted small">Download progress, completions and failures, with video thumbnails. Refreshes while this tab is open.</p></div>
+          <div><h3>Errors and activity</h3><p class="muted small">Current stored errors and recorded warnings/errors, with video and channel links. Use older entries to review history.</p></div>
           <button class="btn secondary smallbtn" type="button" id="activity-refresh" onclick="loadActivity(true)">Refresh activity</button>
+        </div>
+        <div class="actions" style="margin-bottom:12px">
+          <label>Show <select id="activity-filter" onchange="activityPage=0;loadActivity(true)"><option value="errors">Errors and warnings</option><option value="all">All activity</option></select></label>
+          <button type="button" class="btn ghost smallbtn" id="activity-newer" onclick="changeActivityPage(-1)" disabled>Newer</button>
+          <span id="activity-page" class="muted small" aria-live="polite"></span>
+          <button type="button" class="btn ghost smallbtn" id="activity-older" onclick="changeActivityPage(1)">Older</button>
         </div>
         <div id="activity-list" aria-label="Activity log">
           {% for item in activity_rows %}
@@ -6900,6 +6938,7 @@ async function loadDownloaderDownloadOverview(force=false) {
       || "";
 
     pinchflatDownloadSnapshot = data;
+    updateSubscriptionDownloadDates(data.channel_latest_downloads);
 
     renderDownloaderActiveDownloads(data);
     renderDownloaderTasks(data);
@@ -7603,6 +7642,92 @@ async function apiPost(url, payload={}) {
   return data;
 }
 
+const channelSubscriptionStates = new Map();
+
+function renderSubscriptionButton(button, state) {
+  button.classList.toggle('active', state.subscribed);
+  button.textContent = state.subscribed ? '✓' : '+';
+  button.dataset.subscribed = state.subscribed ? '1' : '0';
+  button.disabled = !userIsAdmin || !googleWriteReady || !state.channelId;
+  button.setAttribute('aria-pressed', String(!!state.subscribed));
+  button.title = !googleWriteReady ? 'Reconnect Google with YouTube write access' : state.subscribed ? 'Subscribed. Choose unsubscribe options' : 'Subscribe to this channel';
+  button.setAttribute('aria-label', button.title);
+}
+function showChannelDialog(dialog) {
+  const fullscreen = document.fullscreenElement;
+  if (fullscreen && !fullscreen.contains(dialog)) fullscreen.appendChild(dialog);
+  if (!dialog.open) dialog.showModal();
+}
+function applyChannelSubscriptionResult(channelId, subscribed, data) {
+  channelSubscriptionStates.set(channelId, subscribed);
+  const row = document.querySelector(`.source-row[data-channel-id="${CSS.escape(channelId)}"]`);
+  if (data.deleted_from_app) row?.remove();
+  else if (row && data.subscription) updateSubscriptionRowFromData(row, data.subscription);
+  if (currentSubscriptionChannelId === channelId && currentSubscriptionChannelData) {
+    currentSubscriptionChannelData.subscribed = subscribed;
+    currentSubscriptionChannelData.subscription = data.deleted_from_app ? null : (data.subscription || currentSubscriptionChannelData.subscription);
+    const status = document.getElementById('subscription-channel-status');
+    if (status) status.textContent = subscribed ? 'Subscribed' : 'Unsubscribed';
+  }
+  syncDiscoverSubscriptionState(channelId, subscribed);
+  syncChannelAvatarControls(channelId, {subscribed, enabled:!!data.subscription?.download_enabled, sourceId:data.subscription?.pinchflat_source_id || ''});
+  updateSubscriptionDashboardCounts();
+  applyFilters({preserveScroll:true});
+}
+async function toggleChannelSubscription(event, button) {
+  event.preventDefault(); event.stopPropagation();
+  if (button.disabled) return;
+  const channelId = button.dataset.channelId;
+  if (!channelId) return;
+  const state = getChannelControlState(channelId, {channel_title:button.dataset.channelTitle, subscribed:button.dataset.subscribed === '1'});
+  if (state.subscribed) {
+    const dialog = document.getElementById('channel-subscription-dialog');
+    dialog.dataset.channelId = channelId;
+    dialog.querySelector('form').reset();
+    document.getElementById('channel-subscription-title').textContent = 'Unsubscribe from ' + state.title;
+    document.getElementById('channel-subscription-error').textContent = '';
+    showChannelDialog(dialog);
+    return;
+  }
+  button.disabled = true;
+  try {
+    const data = await apiPost('/api/youtube/subscribe', {channel_id:channelId});
+    applyChannelSubscriptionResult(channelId, true, data);
+    showAjaxToast('Subscribed to ' + state.title, 'success');
+  } catch (error) { showAjaxToast(error.message, 'error'); }
+  finally { renderSubscriptionButton(button,getChannelControlState(channelId)); }
+}
+function openAddChannelDialog() {
+  const dialog = document.getElementById('add-channel-dialog');
+  dialog.querySelector('form').reset();
+  document.getElementById('add-channel-error').textContent = '';
+  showChannelDialog(dialog); document.getElementById('add-channel-url').focus();
+}
+async function submitAddChannel(event) {
+  event.preventDefault();
+  const form = event.currentTarget, button = form.querySelector('[type="submit"]');
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    await apiPost('/api/subscriptions/add', {url:document.getElementById('add-channel-url').value.trim()});
+    location.reload();
+  } catch (error) { document.getElementById('add-channel-error').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+async function submitChannelSubscriptionChoice(event) {
+  event.preventDefault();
+  const form = event.currentTarget, dialog = form.closest('dialog'), button = form.querySelector('[type="submit"]');
+  if (button.disabled) return;
+  const channelId = dialog.dataset.channelId, mode = form.querySelector('[name="subscription_choice"]:checked').value;
+  button.disabled = true;
+  try {
+    const data = await apiPost(`/api/subscriptions/${encodeURIComponent(channelId)}/subscription-choice`, {mode});
+    applyChannelSubscriptionResult(channelId, false, data);
+    dialog.close(); showAjaxToast(data.message, 'success');
+  } catch (error) { document.getElementById('channel-subscription-error').textContent = error.message; }
+  finally { button.disabled = false; }
+}
+
 function getChannelControlState(channelId, fallback={}) {
   channelId = String(channelId || "").trim();
   const row = channelId
@@ -7637,8 +7762,9 @@ function getChannelControlState(channelId, fallback={}) {
       false
     )),
     subscribed: Boolean(pick(
-      row ? row.dataset.active === "1" : undefined,
-      popupSub?.active,
+      channelSubscriptionStates.get(channelId),
+      row ? row.dataset.youtubeSubscribed === "1" : undefined,
+      popupSub?.youtube_subscribed,
       fallback.subscribed,
       fallback.is_subscribed,
       false
@@ -7678,9 +7804,9 @@ function syncChannelAvatarControls(channelId, override={}) {
   document.querySelectorAll(`[data-channel-enabled-control="1"][data-channel-id="${CSS.escape(channelId)}"]`).forEach(button => {
     button.classList.toggle("active", state.enabled);
     button.setAttribute("aria-pressed", state.enabled ? "true" : "false");
-    button.disabled = !state.subscribed;
-    button.title = !state.subscribed
-      ? "Subscribe to this channel before enabling downloads"
+    button.disabled = !state.inApp;
+    button.title = !state.inApp
+      ? "Add this channel to YTSD before enabling downloads"
       : (state.enabled ? "Disable subscription downloads" : "Enable subscription downloads");
   });
 
@@ -7694,7 +7820,8 @@ function syncChannelAvatarControls(channelId, override={}) {
     button.title = "Delete or remove channel";
   });
 
-  document.dispatchEvent(new CustomEvent('ytsd:channel-state', {detail:{channelId,...state}}));
+  document.querySelectorAll(`[data-channel-subscription-control="1"][data-channel-id="${CSS.escape(channelId)}"]`).forEach(button => renderSubscriptionButton(button, state));
+  document.dispatchEvent(new CustomEvent('ytsd:channel-state' , {detail:{channelId,...state}}));
   return state;
 }
 
@@ -7751,6 +7878,15 @@ function makeChannelAvatarWidget(item, options={}) {
   wrap.appendChild(heart);
 
   if (userIsAdmin) {
+    const subscription = document.createElement('button');
+    subscription.type = 'button';
+    subscription.className = 'channel-image-control channel-control-subscription';
+    subscription.dataset.channelSubscriptionControl = '1';
+    subscription.dataset.channelId = channelId;
+    subscription.dataset.channelTitle = state.title;
+    renderSubscriptionButton(subscription, state);
+    subscription.addEventListener('click', event => toggleChannelSubscription(event, subscription));
+    wrap.appendChild(subscription);
     const enabled = document.createElement("button");
     enabled.type = "button";
     enabled.className = `channel-image-control channel-control-enabled${state.enabled ? " active" : ""}`;
@@ -7758,8 +7894,8 @@ function makeChannelAvatarWidget(item, options={}) {
     enabled.dataset.channelId = channelId;
     enabled.textContent = "✓";
     enabled.setAttribute("aria-pressed", state.enabled ? "true" : "false");
-    enabled.disabled = !state.subscribed;
-    enabled.title = !state.subscribed ? "Subscribe to this channel before enabling downloads" : (state.enabled ? "Disable subscription downloads" : "Enable subscription downloads");
+    enabled.disabled = !state.inApp;
+    enabled.title = !state.inApp ? "Add this channel to YTSD before enabling downloads" : (state.enabled ? "Disable subscription downloads" : "Enable subscription downloads");
     enabled.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -7821,8 +7957,8 @@ async function toggleChannelDownloadFromControl(button) {
   const channelId = String(button?.dataset?.channelId || "").trim();
   if (!channelId) return;
   const state = getChannelControlState(channelId);
-  if (!state.subscribed) {
-    showAjaxToast("This channel is not currently in your YouTube subscriptions.", "error");
+  if (!state.inApp) {
+    showAjaxToast("Add this channel to YTSD before enabling downloads.", "error");
     return;
   }
 
@@ -7858,7 +7994,7 @@ async function toggleChannelDownloadFromControl(button) {
 
     const finalState = syncChannelAvatarControls(channelId, {
       enabled: updated ? !!updated.download_enabled : enable,
-      subscribed: updated ? !!updated.active : state.subscribed,
+      subscribed: updated ? !!updated.youtube_subscribed : state.subscribed,
       sourceId: updated?.pinchflat_source_id || ""
     });
 
@@ -8257,6 +8393,12 @@ function renderLatestVideoDetails(item) {
     channelBanner.style.backgroundImage = "";
   }
 
+  const playerSubscription = document.getElementById('latest-popup-channel-subscription');
+  if (playerSubscription) {
+    playerSubscription.dataset.channelId = item.is_external ? '' : (item.channel_id || '');
+    playerSubscription.dataset.channelTitle = item.channel_title || '';
+    playerSubscription.hidden = !!item.is_external || !item.channel_id;
+  }
   const playerHeart = document.getElementById("latest-popup-channel-avatar-heart");
   const playerEnabled = document.getElementById("latest-popup-channel-avatar-enabled");
   const playerScan = document.getElementById("latest-popup-channel-avatar-scan");
@@ -8355,7 +8497,7 @@ async function loadLatestPopupChannelDetails(channelId, expectedVideoId) {
     latestPopupVideo.channel_title = yt.title || latestPopupVideo.channel_title;
     latestPopupVideo.channel_thumbnail_url = yt.thumbnail_url || latestPopupVideo.channel_thumbnail_url;
     latestPopupVideo.is_favourite_channel = !!data.favourite;
-    latestPopupVideo.is_subscribed = !!localSub?.active;
+    latestPopupVideo.is_subscribed = !!localSub?.youtube_subscribed;
     latestPopupVideo.download_enabled = !!localSub?.download_enabled;
     latestPopupVideo.pinchflat_source_id = localSub?.pinchflat_source_id || "";
 
@@ -8396,7 +8538,7 @@ async function loadLatestPopupChannelDetails(channelId, expectedVideoId) {
 
     syncChannelAvatarControls(channelId, {
       favourite:!!data.favourite,
-      subscribed:!!localSub?.active,
+      subscribed:!!localSub?.youtube_subscribed,
       enabled:!!localSub?.download_enabled,
       sourceId:localSub?.pinchflat_source_id || ""
     });
@@ -9713,6 +9855,8 @@ async function loadDiscover(mode, force=false) {
 }
 
 function syncDiscoverSubscriptionState(channelId, subscribed=true) {
+  channelSubscriptionStates.set(channelId, !!subscribed);
+  document.querySelectorAll(`[data-channel-subscription-control="1"][data-channel-id="${CSS.escape(channelId)}"]`).forEach(button => renderSubscriptionButton(button, {...getChannelControlState(channelId), subscribed:!!subscribed}));
   [
     discoverResults.downloaded,
     discoverResults.latest,
@@ -10206,7 +10350,7 @@ async function loadShortsChannelDetails(channelId, expectedVideoId) {
       channel_handle:yt.handle || yt.custom_url || "",
       channel_avatar_url:yt.thumbnail_url || current.channel_avatar_url || "",
       is_favourite_channel:!!data.favourite,
-      is_subscribed:!!localSub?.active,
+      is_subscribed:!!localSub?.youtube_subscribed,
       download_enabled:!!localSub?.download_enabled,
       pinchflat_source_id:localSub?.pinchflat_source_id || ""
     });
@@ -10215,7 +10359,7 @@ async function loadShortsChannelDetails(channelId, expectedVideoId) {
     renderShortsActions(current);
     syncChannelAvatarControls(channelId, {
       favourite:!!data.favourite,
-      subscribed:!!localSub?.active,
+      subscribed:!!localSub?.youtube_subscribed,
       enabled:!!localSub?.download_enabled,
       sourceId:localSub?.pinchflat_source_id || ""
     });
@@ -10481,6 +10625,12 @@ document.getElementById('activity-list')?.addEventListener('click', event => {
   else openChannelDetails(link.dataset.activityChannel);
 });
 
+let activityPage = 0;
+function changeActivityPage(direction) {
+  if (activityLoading) return;
+  activityPage = Math.max(0, activityPage + direction);
+  loadActivity(true);
+}
 async function loadActivity(force=false) {
   const target = document.getElementById("activity-list");
   const button = document.getElementById("activity-refresh");
@@ -10489,10 +10639,13 @@ async function loadActivity(force=false) {
   activityLoading = true;
   if (button) button.disabled = true;
   try {
-    const response = await fetch("/api/activity", {headers:{"Accept":"application/json"}, cache:"no-store"});
+    const response = await fetch(`/api/activity?filter=${encodeURIComponent(document.getElementById("activity-filter")?.value || "errors")}&offset=${activityPage*50}`, {headers:{"Accept":"application/json"}, cache:"no-store"});
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.error || "Activity could not be loaded.");
     const rows = Array.isArray(data.activity) ? data.activity : [];
+    document.getElementById('activity-newer').disabled = activityPage === 0;
+    document.getElementById('activity-older').disabled = !data.has_more;
+    document.getElementById('activity-page').textContent = `${data.total || 0} entries · Page ${activityPage+1}`;
     const snapshot = JSON.stringify(rows);
     if (force || snapshot !== activitySnapshot) {
       const fragment = document.createDocumentFragment();
@@ -10566,7 +10719,7 @@ async function loadActivity(force=false) {
       if (!rows.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No activity has been recorded yet.";
+        empty.textContent = document.getElementById("activity-filter")?.value === "errors" ? "No stored errors or warnings." : "No activity has been recorded yet.";
         fragment.appendChild(empty);
       }
       target.replaceChildren(fragment);
@@ -10584,7 +10737,7 @@ async function loadActivity(force=false) {
 setInterval(() => {
   if (!document.hidden && document.getElementById("settings-dialog")?.open
       && document.querySelector('[data-panel="diagnostics"]')?.classList.contains("active")
-      && !latestVideoDialog?.open && !subscriptionChannelDialog?.open) loadActivity();
+      && !latestVideoDialog?.open && !subscriptionChannelDialog?.open && activityPage===0) loadActivity();
 }, 10000);
 
 async function loadDownloaderLogs(force=false) {
@@ -11431,7 +11584,7 @@ function openSubscriptionChannelActions(button) {
   const subtitle = document.getElementById("subscription-actions-menu-subtitle");
   if (titleNode) titleNode.textContent = title;
   if (subtitle) {
-    subtitle.textContent = `${row.dataset.active === "1" ? "Subscribed" : "Unsubscribed"} · ${row.dataset.downloadEnabled === "1" ? "Downloads enabled" : "Downloads disabled"}`;
+    subtitle.textContent = `${row.dataset.youtubeSubscribed === "1" ? "Subscribed" : "Not subscribed on YouTube"} · ${row.dataset.downloadEnabled === "1" ? "Downloads enabled" : "Downloads disabled"}`;
   }
 
   subscriptionActionsMenu.querySelectorAll("[data-action-source-action]").forEach(actionButton => {
@@ -11568,7 +11721,7 @@ async function openChannelDeleteMenu(event, button) {
       thumbnail_url: data.youtube?.thumbnail_url || sub?.thumbnail_url || state.thumbnail,
       favourite: !!data.favourite,
       in_app: !!sub,
-      subscribed: data.subscribed !== undefined ? !!data.subscribed : !!sub?.active,
+      subscribed: data.subscribed !== undefined ? !!data.subscribed : !!sub?.youtube_subscribed,
       download_enabled: !!sub?.download_enabled,
       pinchflat_source_id: sub?.pinchflat_source_id || ""
     });
@@ -12093,6 +12246,8 @@ async function openChannelDetails(channelId) {
       forceScanButton.dataset.channelId = channelId;
     }
 
+    const subscriptionButton = document.getElementById('subscription-channel-subscription');
+    if (subscriptionButton) { subscriptionButton.dataset.channelId = channelId; subscriptionButton.dataset.channelTitle = titleText; }
     const deleteButton = document.getElementById("subscription-channel-delete");
     if (deleteButton) {
       deleteButton.dataset.channelId = channelId;
@@ -12102,7 +12257,7 @@ async function openChannelDetails(channelId) {
 
     syncChannelAvatarControls(channelId, {
       favourite: sub ? !!sub.favourite : !!data.favourite,
-      subscribed: !!sub?.active,
+      subscribed: data.subscribed !== undefined ? !!data.subscribed : !!sub?.youtube_subscribed,
       enabled: !!sub?.download_enabled,
       sourceId: sub?.pinchflat_source_id || ""
     });
@@ -12567,9 +12722,7 @@ function updateSubscriptionDashboardCounts() {
   const downloadStatus = document.getElementById(
     "dashboard-downloads-status"
   );
-  const errorMetric = document.getElementById(
-    "dashboard-errors"
-  );
+
 
   if (activeMetric) {
     activeMetric.textContent = String(active);
@@ -12588,26 +12741,7 @@ function updateSubscriptionDashboardCounts() {
       `${disabled} disabled · ${pending} pending`;
   }
 
-  if (errorMetric) {
-    const localDownloadFailures = Number(
-      "{{ download_counts.failed }}"
-      || 0
-    );
 
-    errorMetric.textContent = String(
-      errors + localDownloadFailures
-    );
-
-    errorMetric.classList.toggle(
-      "bad",
-      errors + localDownloadFailures > 0
-    );
-
-    errorMetric.classList.toggle(
-      "ok",
-      errors + localDownloadFailures === 0
-    );
-  }
 }
 
 function updateSubscriptionRowFromData(row, item) {
@@ -12615,6 +12749,7 @@ function updateSubscriptionRowFromData(row, item) {
 
   row.dataset.status = item.ui_status || "";
   row.dataset.active = item.active ? "1" : "0";
+  row.dataset.youtubeSubscribed = item.youtube_subscribed ? "1" : "0";
   row.dataset.error = item.last_error ? "1" : "0";
   row.dataset.downloadEnabled = item.download_enabled ? "1" : "0";
   row.dataset.rangeMode = item.history_mode || "default";
@@ -12664,7 +12799,7 @@ function updateSubscriptionRowFromData(row, item) {
 
   syncChannelAvatarControls(item.channel_id || row.dataset.channelId || "", {
     favourite: typeof item.is_favourite !== "undefined" ? !!item.is_favourite : undefined,
-    subscribed: !!item.active,
+    subscribed: !!item.youtube_subscribed,
     enabled: !!item.download_enabled,
     sourceId: item.pinchflat_source_id || ""
   });
@@ -13124,7 +13259,7 @@ async function sourceToggleChanged(input) {
     // state is committed here.
     syncChannelAvatarControls(channelId, {
       enabled: finalEnabled,
-      subscribed: updated ? !!updated.active : row.dataset.active === "1",
+      subscribed: updated ? !!updated.youtube_subscribed : row.dataset.youtubeSubscribed === "1",
       sourceId: updated?.pinchflat_source_id || row.dataset.sourceId || ""
     });
 
@@ -13134,7 +13269,7 @@ async function sourceToggleChanged(input) {
         currentSubscriptionChannelData.subscription.pinchflat_source_id = updated.pinchflat_source_id || "";
         currentSubscriptionChannelData.subscription.pinchflat_added = !!updated.pinchflat_added;
       }
-      document.getElementById("subscription-channel-status").textContent = `${updated?.active ?? (row.dataset.active === "1") ? "Subscribed" : "Unsubscribed"} · ${finalEnabled ? "Enabled" : "Disabled"}`;
+      document.getElementById("subscription-channel-status").textContent = `${updated?.youtube_subscribed ?? (row.dataset.youtubeSubscribed === "1") ? "Subscribed" : "Unsubscribed"} · ${finalEnabled ? "Enabled" : "Disabled"}`;
       document.getElementById("subscription-channel-source").textContent = (updated?.pinchflat_source_id || row.dataset.sourceId) ? `#${updated?.pinchflat_source_id || row.dataset.sourceId}` : "Not in Downloader";
     }
 
@@ -13292,6 +13427,21 @@ function scheduleSubscriptionFilter() {
   }, 450);
 }
 
+function updateSubscriptionDownloadDates(latest) {
+  if (!latest || typeof latest !== 'object') return;
+  let changed = false;
+  document.querySelectorAll('#subscription-body .source-row').forEach(row => {
+    const value = String(latest[row.dataset.channelId] ?? '');
+    if (row.dataset.latestDownload !== value) {
+      row.dataset.latestDownload = value;
+      changed = true;
+    }
+  });
+  if (changed && ytsdSortSpec(sortFilter?.value).field === 'latest_download') {
+    applyFilters({preserveScroll:true});
+  }
+}
+
 function applyFilters(options={}) {
   if (!search || !statusFilter || !sortFilter) return;
 
@@ -13342,6 +13492,7 @@ function applyFilters(options={}) {
     channel_id:row.dataset.channelId, title:row.dataset.title,
     status:row.dataset.status, first_seen_at:row.dataset.firstSeen,
     storage_bytes:Number(row.dataset.storage || 0),
+    latest_download_at:row.dataset.latestDownload || "",
     profile_id:row.querySelector('.source-profile select')?.value || row.querySelector('.source-profile')?.dataset.profileId || '',
     profile_name:rowValues.get(row).profile,
     download_enabled:row.querySelector('input[name="download_enabled"]')?.checked ?? row.dataset.downloadEnabled === '1',
@@ -13434,6 +13585,9 @@ function confirmBulkAction() {
 applyConfiguredPageOrder();
 
 function startDeferredDashboardWork() {
+  document.querySelectorAll('[data-channel-subscription-control="1"]').forEach(button => {
+    renderSubscriptionButton(button,getChannelControlState(button.dataset.channelId));
+  });
   initialisePageViewSettings();
   // This is a small local DB lookup. Load it early so one-time download icons
   // are greyed out before Discover or Channel video grids are opened.

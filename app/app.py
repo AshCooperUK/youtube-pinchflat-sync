@@ -54,7 +54,7 @@ from zoneinfo import ZoneInfo
 from source_metadata import normalise_source_info, is_external_info, is_series_episode, metadata_json, media_details
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.12"
+VERSION = "3.0.16"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -934,7 +934,6 @@ def init_db():
             "page_show_summary_pinchflat_tasks": "1",
             "page_show_summary_subscriptions": "1",
             "page_show_summary_downloads": "1",
-            "page_show_summary_errors": "1",
             "page_show_summary_latest_download": "1",
 
             "page_button_sync": "1",
@@ -954,7 +953,7 @@ def init_db():
             "page_channel_control_retention": "1",
 
             "page_section_order": "summary,pinchflat,guide,latest,subscriptions",
-            "page_summary_order": "google,pinchflat,pinchflat_tasks,latest_download,subscriptions,downloads,errors",
+            "page_summary_order": "google,pinchflat,pinchflat_tasks,latest_download,subscriptions,downloads",
         }
         for key, value in defaults.items():
             if value:
@@ -1007,6 +1006,10 @@ def init_v3_db():
         ensure_column(conn, "downloads", "metadata_json", "TEXT")
         conn.execute("CREATE TABLE IF NOT EXISTS download_video_types (video_id TEXT PRIMARY KEY, channel_id TEXT, media_type TEXT, checked_at TEXT)")
         ensure_column(conn, "subscriptions", "download_folder", "TEXT")
+        ensure_column(conn, "subscriptions", "local_only", "INTEGER NOT NULL DEFAULT 0")
+        conn.execute("DELETE FROM settings WHERE key='page_show_summary_errors'")
+        conn.execute("UPDATE settings SET value=REPLACE(REPLACE(',' || value || ',', ',errors,', ','), ',,', ',') WHERE key='page_summary_order'")
+        conn.execute("UPDATE settings SET value=TRIM(value, ',') WHERE key='page_summary_order'")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS subscription_scan_jobs (
@@ -2371,9 +2374,40 @@ def recent_activity(limit=60):
     return activity_view_rows(rows)
 
 
+def diagnostic_error_page(offset=0, limit=50):
+    # Include persistent failures even when no corresponding activity was logged.
+    query = """
+        SELECT 'activity-' || id AS id,created_at,event_type,title,message,severity,channel_id,video_id,video_title,job_id FROM activity WHERE severity IN ('error','warning')
+        UNION ALL SELECT 'channel-' || channel_id,first_seen_at,'channel','Current channel error',last_error,'error',channel_id,NULL,NULL,NULL FROM subscriptions WHERE COALESCE(last_error,'')!=''
+        UNION ALL SELECT 'download-' || id,COALESCE(finished_at,created_at),'download','Failed download',COALESCE(error,phase,'Download failed'),'error',channel_id,video_id,title,job_id FROM downloads WHERE status='failed'
+        UNION ALL SELECT 'scan-' || id,COALESCE(finished_at,created_at),'scan','Failed channel scan',COALESCE(error,'Scan failed'),'error',channel_id,NULL,NULL,NULL FROM subscription_scan_jobs WHERE status='failed' OR COALESCE(error,'')!=''
+        UNION ALL SELECT 'guide-' || channel_id,COALESCE(last_success_at,''),'guide','Current channel guide error',error,'error',channel_id,NULL,NULL,NULL FROM guide_sync WHERE COALESCE(error,'')!=''
+        UNION ALL SELECT 'guide-global',COALESCE(last_success_at,''),'guide','Current guide error',last_error,'error',NULL,NULL,NULL,NULL FROM guide_runtime WHERE last_error!=''
+        UNION ALL SELECT 'sync-' || id,COALESCE(finished_at,started_at),'sync','Sync errors',COALESCE(message,'Sync failed'),'error',NULL,NULL,NULL,NULL FROM runs WHERE errors>0 OR status IN ('error','failed')
+        UNION ALL SELECT 'retention-' || id,COALESCE(finished_at,started_at),'retention','Retention errors',COALESCE(message,'Retention failed'),'error',NULL,NULL,NULL,NULL FROM retention_runs WHERE errors>0 OR status IN ('error','failed')
+        UNION ALL SELECT 'cleanup-' || id,COALESCE(finished_at,created_at),'cleanup','Channel cleanup error',last_error,'error',channel_id,NULL,NULL,NULL FROM cleanup_jobs WHERE COALESCE(last_error,'')!=''
+    """
+    with db() as conn:
+        total = conn.execute('SELECT COUNT(*) FROM ('+query+')').fetchone()[0]
+        rows = conn.execute('SELECT * FROM ('+query+') ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?', (limit,offset)).fetchall()
+    return activity_view_rows(rows), total
+
+
 @app.get("/api/activity")
 def activity_api():
-    return jsonify({"ok": True, "activity": recent_activity()})
+    try:
+        offset = max(0,int(request.args.get('offset',0)))
+    except ValueError:
+        return jsonify(ok=False,error='Invalid activity offset.'),400
+    limit = 50
+    if request.args.get('filter') == 'errors':
+        rows,total = diagnostic_error_page(offset,limit)
+    else:
+        with db() as conn:
+            total = conn.execute('SELECT COUNT(*) FROM activity').fetchone()[0]
+            records = conn.execute('SELECT * FROM activity ORDER BY id DESC LIMIT ? OFFSET ?', (limit,offset)).fetchall()
+        rows = activity_view_rows(records)
+    return jsonify(ok=True,activity=rows,total=total,offset=offset,has_more=offset+limit<total)
 
 
 def record_api_usage(method, units, success=True):
@@ -3517,7 +3551,7 @@ def youtube_video_metadata(video_id, force=False):
         with db() as conn:
             subscription = conn.execute(
                 """
-                SELECT channel_url, thumbnail_url, active
+                SELECT channel_url, thumbnail_url, active, local_only
                 FROM subscriptions
                 WHERE channel_id = ?
                 LIMIT 1
@@ -3535,7 +3569,7 @@ def youtube_video_metadata(video_id, force=False):
                 or ""
             )
             is_subscribed = bool(
-                subscription["active"]
+                subscription["active"] and not subscription["local_only"]
             )
 
     if channel_id and not channel_thumbnail_url:
@@ -4049,8 +4083,6 @@ def youtube_latest_subscription_videos(limit=36, force=False):
 
     videos = annotate_favourites(videos[:limit])
     shorts = annotate_favourites(shorts[:8])
-    for item in videos + shorts:
-        item["is_subscribed"] = True
 
     retrieved_at = now_iso()
     LATEST_SUBSCRIPTIONS_CACHE.update(
@@ -4254,7 +4286,7 @@ def youtube_discovery_results(kind="videos", limit=24):
         subscribed_ids = {
             row["channel_id"]
             for row in conn.execute(
-                "SELECT channel_id FROM subscriptions WHERE active = 1"
+                "SELECT channel_id FROM subscriptions WHERE active = 1 AND local_only = 0"
             ).fetchall()
         }
 
@@ -6750,9 +6782,14 @@ def _v3_download_with_auth_retry(job, ydl_opts):
 
 
 def run_download_job(job_id):
-    job = download_job_row(job_id)
-    if not job or str(job.get("status") or "") != "queued":
-        return
+    # Serialize claiming a job with channel removal, before creating any files.
+    with channel_files_lock:
+        job = download_job_row(job_id)
+        if not job or str(job.get("status") or "") != "queued":
+            return
+        with db() as conn:
+            if not conn.execute("UPDATE downloads SET status='downloading' WHERE job_id=? AND status='queued'", (job_id,)).rowcount:
+                return
 
     source_type = str(job.get("source_type") or "")
     subscription_job = source_type.startswith("subscription")
@@ -7421,7 +7458,7 @@ def annotate_favourites(items, user_id=None):
         subscribed_ids = {
             row["channel_id"]
             for row in conn.execute(
-                "SELECT channel_id FROM subscriptions WHERE active = 1"
+                "SELECT channel_id FROM subscriptions WHERE active = 1 AND local_only = 0"
             ).fetchall()
         }
     annotated = []
@@ -8033,6 +8070,19 @@ def completed_video_inventory(force=False):
     with video_inventory_lock:
         video_inventory_cache.update(at=time.monotonic(), data=result)
     return result
+
+
+def latest_channel_downloads(inventory=None):
+    """Latest successful video still on disk per channel, in UTC milliseconds."""
+    inventory = completed_video_inventory() if inventory is None else inventory
+    latest = {}
+    for row in inventory['rows']:
+        channel_id = row.get('channel_id')
+        finished = _retention_datetime(row.get('finished_at'))
+        if channel_id and finished:
+            timestamp = int(finished.timestamp() * 1000)
+            latest[channel_id] = max(latest.get(channel_id, timestamp), timestamp)
+    return latest
 
 
 def native_recent_downloaded_videos(limit=100):
@@ -8829,10 +8879,11 @@ def refresh_subscriptions():
         removed_rows = [
             dict(row)
             for row in existing_active
-            if row["channel_id"] not in current_ids
+            if row["channel_id"] not in current_ids and not row_value(row, "local_only", 0)
         ]
 
         for sub in subs:
+            conn.execute("UPDATE subscriptions SET local_only=0 WHERE channel_id=?", (sub['channel_id'],))
             deleted_marker = manual_deleted.get(
                 sub["channel_id"]
             )
@@ -10867,8 +10918,7 @@ def pinchflat_download_overview(queue_limit=100):
                 "inserted_at",
                 "updated_at",
                 "queue",
-                "errors",
-                "tags",
+                    "tags",
             )
             if name in job_columns
         ]
@@ -13754,7 +13804,7 @@ def youtube_channel_featured_channels(creds, channel_id, branding_channel=None, 
                 str(row["channel_id"]): dict(row)
                 for row in conn.execute(
                     f"""
-                    SELECT channel_id, active, download_enabled, pinchflat_added, pinchflat_source_id
+                    SELECT channel_id, active, local_only, download_enabled, pinchflat_added, pinchflat_source_id
                     FROM subscriptions
                     WHERE channel_id IN ({placeholders})
                     """,
@@ -13788,7 +13838,7 @@ def youtube_channel_featured_channels(creds, channel_id, branding_channel=None, 
                 "subscriber_count": int(statistics.get("subscriberCount") or 0),
                 "hidden_subscriber_count": bool(statistics.get("hiddenSubscriberCount")),
                 "channel_url": f"https://www.youtube.com/channel/{featured_id}",
-                "subscribed": bool(subscription_states.get(featured_id, {}).get("active")),
+                "subscribed": bool(subscription_states.get(featured_id, {}).get("active") and not subscription_states.get(featured_id, {}).get("local_only")),
                 "favourite": featured_id in favourite_ids,
                 "download_enabled": bool(subscription_states.get(featured_id, {}).get("download_enabled")),
                 "pinchflat_source_id": str(subscription_states.get(featured_id, {}).get("pinchflat_source_id") or ""),
@@ -14470,6 +14520,7 @@ def sync_once():
 
 def subscription_view(row):
     item = dict(row)
+    item["youtube_subscribed"] = bool(item.get("active") and not item.get("local_only"))
     mode = item.get("history_mode") or "default"
     custom_date = item.get("history_custom_date") or ""
 
@@ -14539,6 +14590,8 @@ def subscription_ajax_payload(channel_id):
         "channel_id": item.get("channel_id"),
         "title": item.get("title") or "",
         "active": bool(item.get("active")),
+            "youtube_subscribed": bool(item.get("active") and not item.get("local_only")),
+            "local_only": bool(item.get("local_only")),
         "download_enabled": bool(
             item.get("download_enabled")
         ),
@@ -15777,6 +15830,7 @@ def pinchflat_download_overview(queue_limit=100):
         },
         "last_downloaded": item(last) if last else None,
         "latest_download": item(last) if last else None,
+        "channel_latest_downloads": latest_channel_downloads(inventory),
     }
 
 
@@ -16745,10 +16799,6 @@ def index():
             "page_show_summary_downloads",
             True,
         ),
-        "show_summary_errors": setting_bool(
-            "page_show_summary_errors",
-            True,
-        ),
         "show_summary_latest_download": setting_bool(
             "page_show_summary_latest_download",
             True,
@@ -16831,7 +16881,6 @@ def index():
             "latest_download",
             "subscriptions",
             "downloads",
-            "errors",
         ),
         (
             "google",
@@ -16839,7 +16888,6 @@ def index():
             "latest_download",
             "subscriptions",
             "downloads",
-            "errors",
         ),
     )
 
@@ -16952,6 +17000,9 @@ def index():
         sub["disk_usage"] = format_bytes(sub["disk_bytes"])
 
     video_inventory = completed_video_inventory()
+    latest_by_channel = latest_channel_downloads(video_inventory)
+    for sub in subs:
+        sub["latest_download_at"] = latest_by_channel.get(sub["channel_id"], "")
     download_counts = {
         "queued": int(download_counts_row["queued"] or 0),
         "running": int(download_counts_row["running"] or 0),
@@ -17816,7 +17867,6 @@ def save_page_view_settings():
         "page_show_summary_pinchflat_tasks",
         "page_show_summary_subscriptions",
         "page_show_summary_downloads",
-        "page_show_summary_errors",
         "page_show_summary_latest_download",
 
         "page_button_sync",
@@ -17875,7 +17925,6 @@ def save_page_view_settings():
             "latest_download",
             "subscriptions",
             "downloads",
-            "errors",
         }
     ]
 
@@ -17904,7 +17953,6 @@ def save_page_view_settings():
         "latest_download",
         "subscriptions",
         "downloads",
-        "errors",
     ]
     summary_order = [
         item
@@ -19057,7 +19105,7 @@ def channel_details_api(channel_id):
             (channel_id,),
         ).fetchone()
 
-    youtube_subscribed = bool(row is not None and row_value(row, "active", 0))
+    youtube_subscribed = bool(row is not None and row_value(row, "active", 0) and not row_value(row, "local_only", 0))
     if row is None and deleted_marker is not None:
         youtube_subscribed = not bool(row_value(deleted_marker, "absence_confirmed", 0))
 
@@ -19074,6 +19122,8 @@ def channel_details_api(channel_id):
             "channel_url": item.get("channel_url") or "",
             "thumbnail_url": item.get("thumbnail_url") or "",
             "active": bool(item.get("active")),
+            "youtube_subscribed": bool(item.get("active") and not item.get("local_only")),
+            "local_only": bool(item.get("local_only")),
             "favourite": item.get("channel_id") in favourite_channel_ids(),
             "download_enabled": bool(item.get("download_enabled")),
             "pinchflat_added": bool(item.get("pinchflat_added")),
@@ -19212,7 +19262,7 @@ def subscription_source_action_api(channel_id):
         ), 400
 
 
-def unsubscribe_subscription(channel_id):
+def unsubscribe_subscription(channel_id, policy_override=None):
     with db() as conn:
         row = conn.execute(
             "SELECT * FROM subscriptions WHERE channel_id = ? LIMIT 1",
@@ -19239,7 +19289,8 @@ def unsubscribe_subscription(channel_id):
         }
 
     row_dict = dict(row)
-    youtube_unsubscribe(channel_id, row_value(row, "youtube_subscription_id", None))
+    if not row_value(row, "local_only", 0):
+        youtube_unsubscribe(channel_id, row_value(row, "youtube_subscription_id", None))
 
     with db() as conn:
         conn.execute(
@@ -19255,7 +19306,7 @@ def unsubscribe_subscription(channel_id):
             (now_iso(), channel_id),
         )
 
-    policy = unsubscribe_policy()
+    policy = policy_override or unsubscribe_policy()
     source_id = resolve_pinchflat_source_id(row_dict)
     if policy == "disable" and source_id:
         update_pinchflat_source_settings(
@@ -19335,7 +19386,7 @@ def delete_and_unsubscribe_subscription(channel_id, delete_media=False):
     source_gone = True
     deleted_folder = None
 
-    if item.get("active"):
+    if item.get("active") and not item.get("local_only"):
         youtube_unsubscribe(channel_id, row_value(row, "youtube_subscription_id", None))
         youtube_unsubscribed = True
 
@@ -19826,7 +19877,7 @@ def get_favourites():
                 SELECT fc.*,
                        CASE WHEN s.channel_id IS NOT NULL THEN 1 ELSE 0 END AS in_app,
                        CASE
-                         WHEN s.channel_id IS NOT NULL THEN COALESCE(s.active, 0)
+                         WHEN s.channel_id IS NOT NULL THEN CASE WHEN s.local_only=0 THEN COALESCE(s.active, 0) ELSE 0 END
                          WHEN md.channel_id IS NOT NULL AND COALESCE(md.absence_confirmed, 0) = 0 THEN 1
                          ELSE 0
                        END AS subscribed,
@@ -19849,7 +19900,7 @@ def get_favourites():
                 SELECT sv.*,
                        CASE WHEN EXISTS (
                            SELECT 1 FROM subscriptions s
-                           WHERE s.channel_id = sv.channel_id AND s.active = 1
+                           WHERE s.channel_id = sv.channel_id AND s.active = 1 AND s.local_only = 0
                        ) THEN 1 ELSE 0 END AS is_subscribed
                 FROM saved_videos sv
                 WHERE sv.user_id = ? AND sv.favourite = 1
@@ -20123,24 +20174,132 @@ def download_favourite_list():
     return jsonify({"ok": True, "queued": queued, "skipped": skipped})
 
 
+def resolve_subscription_channel(value, require_write=True):
+    value = str(value or '').strip()
+    if re.fullmatch(r'UC[A-Za-z0-9_-]{22}', value):
+        value = 'https://www.youtube.com/channel/' + value
+    elif value.startswith('@'):
+        value = 'https://www.youtube.com/' + value
+    elif value.startswith(('youtube.com/', 'www.youtube.com/', 'm.youtube.com/')):
+        value = 'https://' + value
+    parsed = urlparse(value)
+    if parsed.scheme not in ('https', 'http') or parsed.hostname not in ('youtube.com', 'www.youtube.com', 'm.youtube.com') or parsed.username or parsed.password or parsed.port:
+        raise ValueError('Enter a YouTube channel URL, @handle or channel ID.')
+    creds = load_credentials()
+    if not creds:
+        raise ValueError('Connect Google to look up the channel.')
+    if require_write and not google_write_scope_ready(creds):
+        raise ValueError('Reconnect Google with YouTube write access to subscribe.')
+    result = youtube_channel_details_from_url(creds, value)
+    if not result.get('channel_id'):
+        raise ValueError('Channel not found. Use its @handle or /channel/ URL.')
+    return creds, result
+
+
+@app.post('/api/subscriptions/add')
+def add_local_channel():
+    payload = request.get_json(silent=True) or {}
+    try:
+        _, channel = resolve_subscription_channel(payload.get('url'), require_write=False)
+        cid = channel['channel_id']
+        with db() as conn:
+            old = conn.execute('SELECT * FROM subscriptions WHERE channel_id=?', (cid,)).fetchone()
+            conn.execute("""INSERT INTO subscriptions(channel_id,title,channel_url,first_seen_at,active,local_only,
+                download_enabled,source_authorised,thumbnail_url) VALUES(?,?,?,?,1,1,1,1,?)
+                ON CONFLICT(channel_id) DO UPDATE SET title=excluded.title,thumbnail_url=excluded.thumbnail_url,
+                active=1,removed_at=NULL,last_error=NULL,
+                local_only=CASE WHEN subscriptions.active=1 THEN subscriptions.local_only ELSE 1 END""",
+                (cid,channel['channel_title_api'],'https://www.youtube.com/channel/'+cid,now_iso(),channel['channel_avatar_url']))
+            if old and not old['active']:
+                conn.execute('UPDATE subscriptions SET download_enabled=1,source_authorised=1 WHERE channel_id=?',(cid,))
+            conn.execute('DELETE FROM manually_deleted_channels WHERE channel_id=?',(cid,))
+            conn.execute("UPDATE cleanup_jobs SET status='cancelled' WHERE channel_id=? AND status='pending'",(cid,))
+        sub = subscription_ajax_payload(cid)
+        if sub.get('download_enabled'):
+            apply_subscription_source_authority(sub)
+        log_activity('subscriptions','Channel added to YTSD',channel['channel_title_api'],'success',cid)
+        return jsonify(ok=True,channel_id=cid,subscription=subscription_ajax_payload(cid),message='Channel added to YTSD. YouTube subscriptions unchanged.')
+    except Exception as exc:
+        log_activity('subscriptions','Add channel failed',str(exc),'error')
+        return jsonify(ok=False,error=str(exc)),400
+
+
 @app.post("/api/youtube/subscribe")
 def subscribe_to_youtube_channel():
     payload = request.get_json(silent=True) or {}
-    channel_id = str(payload.get("channel_id") or "").strip()
-    if not channel_id:
-        return jsonify({"ok": False, "error": "Channel ID is missing."}), 400
+    try:
+        creds, channel = resolve_subscription_channel(payload.get('url') or payload.get('channel_id'))
+        cid = channel['channel_id']
+        # Query this one channel, including previously hidden local records.
+        matches = youtube_api_request(creds, 'GET', 'subscriptions', 'subscriptions.list', 1,
+            params={'part':'id,snippet','mine':'true','forChannelId':cid,'maxResults':1}).json().get('items', [])
+        subscription = matches[0] if matches else youtube_subscribe(cid)
+        with db() as conn:
+            old = conn.execute('SELECT * FROM subscriptions WHERE channel_id=?', (cid,)).fetchone()
+            enabled = int(bool(old['download_enabled'])) if old and old['active'] else int(new_subscription_policy() == 'auto_enable')
+            conn.execute("""INSERT INTO subscriptions(channel_id,title,channel_url,first_seen_at,subscribed_at,
+                active,download_enabled,source_authorised,youtube_subscription_id,thumbnail_url)
+                VALUES(?,?,?,?,?,1,?,?,?,?) ON CONFLICT(channel_id) DO UPDATE SET
+                title=excluded.title,channel_url=excluded.channel_url,active=1,local_only=0,removed_at=NULL,
+                download_enabled=excluded.download_enabled,source_authorised=excluded.source_authorised,
+                youtube_subscription_id=excluded.youtube_subscription_id,thumbnail_url=excluded.thumbnail_url,last_error=NULL""",
+                (cid,channel['channel_title_api'],'https://www.youtube.com/channel/'+cid,now_iso(),
+                 (subscription.get('snippet') or {}).get('publishedAt') or now_iso(),enabled,enabled,
+                 subscription.get('id'),channel['channel_avatar_url']))
+            conn.execute('DELETE FROM manually_deleted_channels WHERE channel_id=?', (cid,))
+            conn.execute("UPDATE cleanup_jobs SET status='cancelled' WHERE channel_id=? AND status='pending'", (cid,))
+        if enabled:
+            apply_subscription_source_authority(subscription_ajax_payload(cid))
+        log_activity('youtube','Channel subscribed',channel['channel_title_api'], 'success', cid)
+        return jsonify(ok=True,channel_id=cid,already_subscribed=bool(matches),subscription=subscription_ajax_payload(cid))
+    except Exception as exc:
+        return jsonify(ok=False,error=str(exc)), 400
+
+
+@app.post('/api/subscriptions/<channel_id>/subscription-choice')
+def channel_subscription_choice(channel_id):
+    with channel_files_lock:
+        return perform_channel_subscription_choice(channel_id)
+
+
+def perform_channel_subscription_choice(channel_id):
+    mode = (request.get_json(silent=True) or {}).get('mode')
+    if mode not in ('keep', 'media', 'channel', 'everything'):
+        return jsonify(ok=False,error='Choose a removal option.'), 400
     try:
         with db() as conn:
-            existing = conn.execute(
-                "SELECT active FROM subscriptions WHERE channel_id = ?",
-                (channel_id,),
-            ).fetchone()
-        if not existing or not bool(existing["active"]):
-            youtube_subscribe(channel_id)
-        refresh_subscriptions()
-        return jsonify({"ok": True, "already_subscribed": bool(existing and existing["active"])})
+            row = conn.execute('SELECT * FROM subscriptions WHERE channel_id=?', (channel_id,)).fetchone()
+            busy = conn.execute("SELECT 1 FROM downloads WHERE channel_id=? AND status IN ('downloading','processing') LIMIT 1", (channel_id,)).fetchone()
+        remove_media = mode in ('media', 'everything')
+        if remove_media and busy:
+            return jsonify(ok=False,error='Wait for this channel’s current download to finish before removing its files.'), 409
+        # Resolve the recorded channel folder, never an arbitrary client path.
+        directory = subscription_output_directory(dict(row), create=False) if row and remove_media else None
+        result = unsubscribe_subscription(channel_id, policy_override='remove')
+        with db() as conn:
+            conn.execute("UPDATE downloads SET status='cancelled',phase='Cancelled',finished_at=? WHERE channel_id=? AND status='queued' AND source_type LIKE 'subscription%'", (now_iso(),channel_id))
+            conn.execute("UPDATE subscription_scan_jobs SET status='cancelled',finished_at=? WHERE channel_id=? AND status='queued'", (now_iso(),channel_id))
+        if directory and directory.exists():
+            root = (DOWNLOAD_ROOT / 'shows').resolve()
+            if directory.is_symlink() or directory.resolve().parent != root:
+                raise RuntimeError('Channel folder is outside the subscription media directory.')
+            shutil.rmtree(directory)
+            invalidate_video_inventory()
+            storage_snapshot(force=True)
+        if mode in ('channel','everything') and row:
+            result = delete_subscription_from_pinchflat_sync(channel_id, remove_pinchflat=True)
+            with db() as conn:
+                conn.execute('UPDATE manually_deleted_channels SET absence_confirmed=1 WHERE channel_id=?', (channel_id,))
+        result.update(youtube_unsubscribed=True, media_delete_requested=remove_media,
+            message={'keep':'Unsubscribed. Channel record and files kept.',
+                     'media':'Unsubscribed. Subscription media removed. Channel record kept.',
+                     'channel':'Unsubscribed and removed from YTSD. Files kept.',
+                     'everything':'Unsubscribed and removed from YTSD. Subscription media removed.'}[mode])
+        log_activity('subscriptions','Subscription removal completed',result['message'],'success',channel_id)
+        return jsonify(result)
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        log_activity('subscriptions','Subscription removal failed',str(exc),'error',channel_id)
+        return jsonify(ok=False,error=str(exc),subscription=subscription_ajax_payload(channel_id)),400
 
 
 @app.get("/api/latest-subscriptions")
@@ -20740,7 +20899,7 @@ def upload_guide_refresh():
 def guide_channel_choices():
     favourites = favourite_channel_ids()
     with db() as conn:
-        rows = [dict(row) for row in conn.execute("SELECT s.channel_id,s.title,COALESCE(p.visible,1) AS visible FROM subscriptions s LEFT JOIN guide_channel_preferences p USING(channel_id) WHERE s.active=1")]
+        rows = [dict(row) for row in conn.execute("SELECT s.channel_id,s.title,COALESCE(p.visible,1) AS visible,g.error AS guide_error,g.retry_at AS guide_retry_at FROM subscriptions s LEFT JOIN guide_channel_preferences p USING(channel_id) LEFT JOIN guide_sync g USING(channel_id) WHERE s.active=1")]
     return sorted(rows, key=lambda row: (row['channel_id'] not in favourites, (row['title'] or '').casefold()))
 
 

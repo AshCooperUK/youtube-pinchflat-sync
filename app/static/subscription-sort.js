@@ -10,7 +10,7 @@ window.ytsdCompareText = (a, b) => {
 };
 window.ytsdSortSpec = mode => {
   const [key, requested] = String(mode || 'title').split(':');
-  const defaults = {title:'asc', enabled:'desc', range:'asc', media_profile:'asc', cutoff:'asc', storage:'desc', error:'asc', actions:'desc', status:'asc', newest:'desc'};
+  const defaults = {title:'asc', enabled:'desc', range:'asc', media_profile:'asc', cutoff:'asc', storage:'desc', error:'asc', actions:'desc', status:'asc', newest:'desc', latest_download:'desc'};
   const field = Object.hasOwn(defaults, key) ? key : 'title';
   return {field, direction:['asc','desc'].includes(requested) ? requested : defaults[field]};
 };
@@ -20,7 +20,13 @@ window.ytsdCompareChannels = (a, b, mode) => {
   const text = (left,right) => ytsdCompareText(ytsdSortText(left),ytsdSortText(right));
   const {field, direction} = ytsdSortSpec(mode);
   let result = 0;
-  if (field === 'media_profile') {
+  if (field === 'latest_download') {
+    const present = row => row.latest_download_at !== null && row.latest_download_at !== undefined && row.latest_download_at !== '' && Number.isFinite(Number(row.latest_download_at));
+    const hasA = present(a), hasB = present(b);
+    // Unknown dates always follow dated channels, regardless of direction.
+    if (hasA !== hasB) return hasA ? -1 : 1;
+    result = hasA ? Number(a.latest_download_at) - Number(b.latest_download_at) : 0;
+  } else if (field === 'media_profile') {
     const rank = profile => /^\d+p$/.test(profile) ? parseInt(profile,10) : Number.MAX_SAFE_INTEGER;
     result = rank(a.profile_id) - rank(b.profile_id) || text(a.profile_name,b.profile_name);
   } else if (field === 'enabled') result = Number(!!a.download_enabled) - Number(!!b.download_enabled);

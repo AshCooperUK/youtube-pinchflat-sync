@@ -4,6 +4,37 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.16
+
+- Remove the dashboard Errors tile and its display/order settings, including saved settings from earlier versions.
+- Move error review to Settings > Diagnostics. Errors and warnings includes retained Activity history and failures stored against downloads, channels, scans, guide refreshes, sync, retention and cleanup jobs.
+- Add paging for older errors and activity. Preserve video thumbnails and channel/player popup links where identifiers are available.
+- Change + Add YouTube channel to Add to YTSD. Adding a channel enables download monitoring without subscribing the connected YouTube account. Existing active channels retain their download preference.
+- Keep local channels through YouTube subscription refreshes. The separate Subscribe control still changes the YouTube account explicitly.
+
+## v3.0.15
+
+- Add a top-centre Subscribe/Subscribed control beside the existing channel-image actions across subscription rows, channel/player popups and shared channel widgets.
+- Add an explicit unsubscribe dialog with choices to keep files, delete subscription files, remove the YTSD channel record while retaining files, or remove the record and subscription media together. These choices override the automatic unsubscribe policy. Separate one-time downloads remain unchanged.
+- Add a plus button beside the Subscriptions tile minimise control. Accept YouTube channel URLs, @handles and channel IDs, with targeted API calls rather than a full subscription refresh.
+- Restore explicitly re-added channels even when an earlier local removal suppressed them. Cancel pending cleanup on re-subscribe and honour the new-channel download policy.
+- Keep the new controls administrator-only, require Google write access and CSRF protection, and retain foreground focus for nested popup choices.
+
+## v3.0.14
+
+- Add Latest download: newest first and oldest first to the subscription filter popup.
+- Sort channels using the latest successful video download still present on disk. Ignore queued, processing, failed and cancelled jobs, audio-only files, sidecars and missing files. Channels without dated downloads appear last within each favourites group.
+- Preserve the saved sort preference and favourites-first setting. Refresh channel ordering from the existing dashboard download-status poll.
+- Apply the same download-date sort in Upload Guide without additional YouTube API requests.
+
+## v3.0.13
+
+- Keep Guide refreshing other channels when one uploads playlist is missing or inaccessible. Cache the affected channel's error and retry it after 24 hours, refreshing its playlist metadata first.
+- Recover invalid pagination tokens per channel with a ten-minute retry. Preserve account-wide quota and authentication backoffs.
+- Display persistent channel errors and retry times in Guide rows and Settings > Guide, with an affected-channel summary below the timeline.
+- Distinguish the actual retry time from the next daily scheduled refresh.
+- Automatically clear legacy global playlist-error pauses during the database upgrade. Cached uploads and download preferences are preserved.
+
 ## v3.0.12
 
 - Show all active YouTube subscriptions in Guide, including channels without download monitoring, with favourites first.
