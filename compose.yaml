@@ -2,7 +2,7 @@ name: youtube-subscription-downloader
 
 services:
   youtube-subscription-downloader:
-    image: ghcr.io/ashcooperuk/youtube-subscription-downloader:latest
+    image: ghcr.io/ashcooperuk/youtube-subscription-downloader:3.0.17-beta.1
     container_name: youtube-subscription-downloader
     restart: unless-stopped
     deploy:
@@ -95,10 +95,10 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  version: "3.0.16"
+  version: "3.0.17-beta.1"
   update_at: "2026-09-20"
   release_notes:
-    en_US: v3.0.16 fixes guide Day cards, inline Discover favourites, provider metadata and Emby refresh, and force scans with Shorts exclusions.
+    en_US: v3.0.17-beta.1 adds experimental YouTube watched-status tests and optional post-download requests.
   website: https://github.com/AshCooperUK/youtube-pinchflat-sync
   repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
   support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
