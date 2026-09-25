@@ -55,7 +55,7 @@ from zoneinfo import ZoneInfo
 from source_metadata import normalise_source_info, is_external_info, is_series_episode, metadata_json, media_details
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.17"
+VERSION = "3.0.18"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}

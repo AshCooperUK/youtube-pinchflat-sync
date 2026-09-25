@@ -2,7 +2,7 @@
 
 A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
 
-Version: **3.0.17** · [Latest changes](RELEASE-v3.0.17.md) · [Full changelog](CHANGELOG.md)
+Version: **3.0.18** · [Latest changes](RELEASE-v3.0.18.md) · [Full changelog](CHANGELOG.md)
 
 Watched controls are under **Settings > Downloader > Watched**. See the [release and setup guide](RELEASE-v3.0.17.md) for cookie checks, bulk marking and Emby played matching.
 
@@ -149,7 +149,7 @@ V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, r
 
 For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
 
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.17 ZIP targets v3.0.17-beta.1. It contains the same updated files as the full-source ZIP.
+For v3.0.18 ZIP upgrades, follow [the upgrade instructions](RELEASE-v3.0.18.md). Replace the app and tests source folders to remove deferred TV/webOS files. Preserve your deployment settings, data, media and .git folder. Commit and push, then wait for the container workflow before updating ZimaOS.
 
 ## Development
 
@@ -173,6 +173,12 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 
 <details>
 <summary>V3: native downloader and current releases</summary>
+
+### v3.0.18
+
+- Remove deferred Android TV and webOS integrations and their tests.
+- Retain cookie-checked watched marking and Emby played matching.
+- Publish latest and 3.0.18 container tags.
 
 ### v3.0.17
 

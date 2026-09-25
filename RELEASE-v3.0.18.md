@@ -1,28 +1,23 @@
-# YTSD 3.0.18
+# v3.0.18
 
-Adds read-only LG webOS TV support and reconciles the two earlier 3.0.17 builds.
+- Remove the deferred Android TV and LG webOS server integrations, pairing page and associated tests from the release.
+- Keep Settings > Downloader > Watched, active cookie checks, automatic post-download marking, one-time bulk marking and Emby played matching.
+- Publish Docker tags latest and 3.0.18.
 
-The v3.0.17 upload replaced the watched-status implementation from 3.0.17-beta.1
-while leaving its regression tests. This release restores the matching main
-application code, background queue and dashboard controls from commit 62753b0.
-The experimental automatic watched request remains opt-in and separate from TV
-playback. Existing download completion remains authoritative.
+## Upgrade from a mixed TV/webOS checkout
 
-The webOS app uses browser-approved TV codes through `/tv-link`. The existing
-website login and two-factor flow authorise read-only TV credentials. The new
-`/api/webos` namespace accepts TV bearer credentials, with per-file signed URLs
-for native media playback, artwork and subtitles. Access checks include account
-status, session version, device expiry and explicit revocation. Native seeking
-uses the existing conditional file-serving behaviour. SRT sidecars convert to
-WebVTT for the TV's native subtitle player.
+This is a complete source release. ZIP extraction over existing files does not remove obsolete files.
 
-New pairing/device tables are created automatically in the existing database.
-Existing web, phone and Android TV routes retain their authentication behaviour.
-No TV watch history sync is added. Playback progress stays on each client.
+In your GitHub Desktop repository folder, replace the app and tests folders with the folders from this ZIP. These are source folders, not your Docker /data or /downloads volumes. Preserve any deployment data if you placed it inside your source checkout. Copy the remaining release files, including .github/workflows. Keep your existing .git folder and deployment-specific environment values and volume paths.
 
-Preserve your current environment, Compose files and volume mounts. Rebuild the
-image with the complete application directory. The changed-files package leaves
-deployment configuration out. The full source package provides generic examples.
+Remove the obsolete TV-only files README.txt, CHANGELOG.txt and TV-TEST-RESULTS.txt if present. This release replaces RELEASE-v3.0.18.md with these notes. No PowerShell helper is required.
 
-Validation: 136 server tests passed, including all watched-status and TV tests.
-Physical LG installation, decoding and remote controls need hardware testing.
+Review the changes in GitHub Desktop, commit and push. Wait for Validate V3 and Build and publish Docker image to succeed. Then update the existing ZimaOS app using ghcr.io/ashcooperuk/youtube-subscription-downloader:3.0.18 and the same data and media mounts.
+
+No database reset or media deletion is required. The package contains no APK, IPK, TV API modules or TV pairing page. Existing installed client apps are not uninstalled by a server upgrade.
+
+For watched controls and Emby matching instructions, see RELEASE-v3.0.17.md.
+
+## Validation
+
+All 127 core regression tests passed locally. TV/webOS tests are removed with their deferred features. No live account mutations were performed. Docker publication and deployment happen after you push this release.

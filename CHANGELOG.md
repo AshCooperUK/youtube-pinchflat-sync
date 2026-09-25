@@ -4,6 +4,12 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.18
+
+- Remove the deferred Android TV and LG webOS server integrations, pairing page and associated tests from the release.
+- Keep Settings > Downloader > Watched, active cookie checks, automatic post-download marking, one-time bulk marking and Emby played matching.
+- Publish Docker tags latest and 3.0.18.
+
 ## v3.0.17
 
 - Move watched controls from Diagnostics to Settings > Downloader > Watched. Keep request history and errors in Diagnostics Activity.
