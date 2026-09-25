@@ -20190,6 +20190,7 @@ def resolve_subscription_channel(value, require_write=True):
         raise ValueError('Connect Google to look up the channel.')
     if require_write and not google_write_scope_ready(creds):
         raise ValueError('Reconnect Google with YouTube write access to subscribe.')
+        raise ValueError('Reconnect Google with YouTube write access to subscribe.')
     result = youtube_channel_details_from_url(creds, value)
     if not result.get('channel_id'):
         raise ValueError('Channel not found. Use its @handle or /channel/ URL.')
@@ -20222,8 +20223,6 @@ def add_local_channel():
     except Exception as exc:
         log_activity('subscriptions','Add channel failed',str(exc),'error')
         return jsonify(ok=False,error=str(exc)),400
-
-
 @app.post("/api/youtube/subscribe")
 def subscribe_to_youtube_channel():
     payload = request.get_json(silent=True) or {}

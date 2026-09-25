@@ -11,7 +11,6 @@ The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes we
 - Add paging for older errors and activity. Preserve video thumbnails and channel/player popup links where identifiers are available.
 - Change + Add YouTube channel to Add to YTSD. Adding a channel enables download monitoring without subscribing the connected YouTube account. Existing active channels retain their download preference.
 - Keep local channels through YouTube subscription refreshes. The separate Subscribe control still changes the YouTube account explicitly.
-
 ## v3.0.15
 
 - Add a top-centre Subscribe/Subscribed control beside the existing channel-image actions across subscription rows, channel/player popups and shared channel widgets.
