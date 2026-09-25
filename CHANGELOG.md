@@ -4,6 +4,15 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.17-beta.1
+
+- Add an administrator-only YouTube watched-status test under Settings > Diagnostics, using an existing completed YouTube download and the saved cookie account.
+- Add an automatic post-download option, switched off by default. Queue requests only after successful media processing. Imports and non-YouTube downloads do not trigger requests.
+- Persist requests separately from downloads, with duplicate suppression, a 90-second timeout and no automatic retries. Disabling automation cancels waiting automatic requests. Interrupted requests remain unverified after restart.
+- Report sent, failed or unverified request results without claiming YouTube stored 100% watched progress. Preserve download success when watched requests fail.
+- Use a private temporary cookie copy and keep raw extractor output out of Activity. Retain video/channel links in Activity.
+- Publish only the 3.0.17-beta.1 container tag. The beta workflow does not replace latest. Supplied deployment YAML selects the beta tag.
+
 ## v3.0.16
 
 - Remove the dashboard Errors tile and its display/order settings, including saved settings from earlier versions.
@@ -11,6 +20,7 @@ The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes we
 - Add paging for older errors and activity. Preserve video thumbnails and channel/player popup links where identifiers are available.
 - Change + Add YouTube channel to Add to YTSD. Adding a channel enables download monitoring without subscribing the connected YouTube account. Existing active channels retain their download preference.
 - Keep local channels through YouTube subscription refreshes. The separate Subscribe control still changes the YouTube account explicitly.
+
 ## v3.0.15
 
 - Add a top-centre Subscribe/Subscribed control beside the existing channel-image actions across subscription rows, channel/player popups and shared channel widgets.
