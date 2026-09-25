@@ -1,17 +1,19 @@
-name: ytsd-dev
+name: youtube-subscription-downloader-dev
+
 services:
-  ytsd:
-    image: ytsd:3.0.17
+  youtube-subscription-downloader:
     build:
       context: ./app
+    container_name: youtube-subscription-downloader-dev
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      TZ: Europe/London
       DATA_DIR: /data
       DOWNLOAD_ROOT: /downloads
-      APP_URL: ""
+      YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube
     ports:
       - "8787:8787"
     volumes:
-      - ./data:/data
-      - ./downloads:/downloads
+      - /media/NVME-Storage/AppData/youtube-pinchflat-sync/data:/data
+      - /media/Storage/Media/YouTube:/downloads

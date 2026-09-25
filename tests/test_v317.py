@@ -8,7 +8,14 @@ from watched_status import send_watched_request
 app=fixtures.app
 
 class WatchedTests(unittest.TestCase):
-    setUp=fixtures.DownloadTests.setUp
+    def setUp(self):
+        fixtures.DownloadTests.setUp(self)
+        for target,attribute,result in [(app,'cookie_session_file_status',('unchecked','Cookie file present')),
+            (app,'check_cookie_session',('active','Signed in'))]:
+            patcher=patch.object(target,attribute,return_value=result)
+            patcher.start();self.addCleanup(patcher.stop)
+        patcher=patch('watched_status.check_cookie_session',return_value=('active','Signed in'))
+        patcher.start();self.addCleanup(patcher.stop)
     job=fixtures.DownloadTests.job
 
     def post(self,path,payload):

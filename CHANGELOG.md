@@ -4,6 +4,16 @@ This history restores the release notes from the repository's older READMEs, dep
 
 The earliest archived release is **v1.1.0**. No separate v1.0.0 release notes were available, so no features or release dates have been invented for that version. Versions documented inside another release's README are retained even where no separate Git tag exists.
 
+## v3.0.17
+
+- Move watched controls from Diagnostics to Settings > Downloader > Watched. Keep request history and errors in Diagnostics Activity.
+- Verify a signed-in YouTube session before enabling automatic marking and before each watched request. Detect expired cookies locally, display session warnings and pause waiting requests when authentication cannot be confirmed.
+- Add a Check cookie session button. New cookie files clear stale session results. A valid file alone does not establish an active session.
+- Add a confirmed one-time batch to mark all eligible downloaded YouTube videos as watched. Skip duplicate video IDs, missing files, non-YouTube downloads and requests already queued or sent.
+- Add an Emby user selector and actions to match one selected video or all Emby-played downloads. Match by YouTube provider ID or the ID in the filename, never by title. Do not change Emby played flags or remove YouTube watch history.
+- Add cancellation for waiting bulk and Emby requests. Preserve completed downloads when watched requests fail.
+- Restore stable Docker publication to latest and 3.0.17.
+
 ## v3.0.17-beta.1
 
 - Add an administrator-only YouTube watched-status test under Settings > Diagnostics, using an existing completed YouTube download and the saved cookie account.

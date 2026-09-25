@@ -27,14 +27,14 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 import qrcode
 import requests
 import yt_dlp
-from watched_status import send_watched_request
+from watched_status import send_watched_request, cookie_session_file_status, check_cookie_session
 from PIL import Image, ImageOps
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from apscheduler.schedulers.background import BackgroundScheduler
 from bs4 import BeautifulSoup
 from dateutil.relativedelta import relativedelta
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for, send_file, g
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for, send_file
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -55,9 +55,7 @@ from zoneinfo import ZoneInfo
 from source_metadata import normalise_source_info, is_external_info, is_series_episode, metadata_json, media_details
 from upload_guide import UploadGuide, init_guide_db
 
-from webos_api import WEBOS_API_ENDPOINTS, install_webos_routes
-
-VERSION = "3.0.18"
+VERSION = "3.0.17"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -2102,7 +2100,7 @@ def get_user_by_username(username):
 
 
 def current_user_record():
-    return getattr(g, "webos_user", None) or get_user_by_id(session.get("auth_user_id"))
+    return get_user_by_id(session.get("auth_user_id"))
 
 
 def current_user_is_admin():
@@ -14668,7 +14666,6 @@ VIEWER_POST_ENDPOINTS = {
     "two_factor_disable",
     "regenerate_recovery_codes",
     "logout_all_sessions",
-    "webos_link",
     "toggle_favourite_channel",
     "toggle_favourite_video",
     "create_favourite_list",
@@ -14682,6 +14679,7 @@ ADMIN_ONLY_GET_ENDPOINTS = {
     "pinchflat_logs_api",
     "activity_api",
     "watched_test_status",
+    "watched_emby_users",
 }
 
 
@@ -14693,7 +14691,7 @@ def redirect_to_canonical_app_url():
     if request.method not in {"GET", "HEAD"}:
         return None
 
-    if request.endpoint in {"health", "static"} or request.endpoint in WEBOS_API_ENDPOINTS:
+    if request.endpoint in {"health", "static"}:
         return None
 
     canonical = urlparse(ENV_APP_URL)
@@ -14718,9 +14716,6 @@ def redirect_to_canonical_app_url():
 @app.before_request
 def require_authentication():
     endpoint = request.endpoint
-    # Dedicated webOS endpoints perform bearer/grant authentication and ignore cookies.
-    if endpoint in WEBOS_API_ENDPOINTS:
-        return None
     if endpoint is None:
         return None
 
@@ -16259,6 +16254,10 @@ def enqueue_watched_request(job_id, origin='manual'):
         raise ValueError('Choose a completed YouTube download with a video file still on disk.')
     if not _v3_cookie_status().get('valid'):
         raise ValueError('Upload valid signed-in YouTube cookies in Settings > Downloader first.')
+    state,message = cookie_session_file_status(YOUTUBE_COOKIE_PATH)
+    if state != 'unchecked':
+        record_watched_session(state,message)
+        raise ValueError(message)
     with db() as conn:
         conn.execute('BEGIN IMMEDIATE')
         existing = conn.execute("SELECT id FROM youtube_watched_requests WHERE job_id=? AND (status IN ('queued','running') OR (?='automatic' AND origin='automatic')) ORDER BY id DESC LIMIT 1", (job_id,origin)).fetchone()
@@ -16269,11 +16268,13 @@ def enqueue_watched_request(job_id, origin='manual'):
             raise ValueError('Watched request queue is full. Wait for the existing requests to finish.')
         cursor = conn.execute("INSERT INTO youtube_watched_requests(job_id,video_id,origin,created_at) VALUES(?,?,?,?)", (job_id,job['video_id'],origin,now_iso()))
         request_id = cursor.lastrowid
-    log_activity('youtube_watched','YouTube watched request queued','Experimental request queued. YouTube completion is unverified.','info',job_id=job_id)
+    log_activity('youtube_watched','YouTube watched request queued','Watched request queued. The signed-in cookie session will be checked before sending.','info',job_id=job_id)
     return request_id
 
 
 def process_watched_request():
+    if watched_session_status().get('state') in {'auth_required','auth_expired','auth_unverified'}:
+        return
     with db() as conn:
         conn.execute('BEGIN IMMEDIATE')
         row = conn.execute("SELECT * FROM youtube_watched_requests WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
@@ -16290,6 +16291,10 @@ def process_watched_request():
             status,message = send_watched_request(row['video_id'],YOUTUBE_COOKIE_PATH)
     except Exception:
         status,message = 'failed','Watched request failed. YouTube completion is unverified. No automatic retry.'
+    if status.startswith('auth_'):
+        record_watched_session(status,message)
+    elif status == 'sent':
+        record_watched_session('active','YouTube confirmed an active signed-in session before the last watched request.')
     with db() as conn:
         conn.execute('UPDATE youtube_watched_requests SET status=?,message=?,finished_at=? WHERE id=?', (status,message,now_iso(),row['id']))
     log_activity('youtube_watched','YouTube watched request: '+status,message,'info' if status=='sent' else 'warning',job_id=row['job_id'])
@@ -16304,9 +16309,163 @@ def automatic_watched_request(job_id):
         enqueue_watched_request(job_id,'automatic')
     except Exception:
         try:
-            log_activity('youtube_watched','YouTube watched request not queued','Check signed-in cookies and the watched request queue in Diagnostics. The download remains completed.','warning',job_id=job_id)
+            log_activity('youtube_watched','YouTube watched request not queued','Check signed-in cookies and Settings > Downloader > Watched. The download remains completed.','warning',job_id=job_id)
         except Exception:
             app.logger.exception('Could not record watched queue failure')
+
+
+def watched_cookie_signature():
+    try:
+        return hashlib.sha256(YOUTUBE_COOKIE_PATH.read_bytes()).hexdigest()
+    except OSError:
+        return ''
+
+
+def record_watched_session(state,message):
+    set_setting('youtube_watched_session',json.dumps({'state':state,'message':message,
+        'checked_at':now_iso(),'signature':watched_cookie_signature()}))
+
+
+def watched_session_status():
+    state,message = cookie_session_file_status(YOUTUBE_COOKIE_PATH)
+    if state != 'unchecked':
+        return {'state':state,'message':message,'checked_at':''}
+    try:
+        saved = json.loads(get_setting('youtube_watched_session','{}'))
+    except (ValueError,TypeError):
+        saved = {}
+    if saved.get('signature') == watched_cookie_signature():
+        return {k:saved.get(k,'') for k in ('state','message','checked_at')}
+    return {'state':state,'message':message,'checked_at':''}
+
+
+def watched_bulk_candidates():
+    with db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM downloads WHERE status='completed' ORDER BY finished_at DESC")]
+        seen = {r['video_id'] for r in conn.execute("SELECT DISTINCT video_id FROM youtube_watched_requests WHERE status IN ('queued','running','sent')")}
+    candidates = []
+    for row in rows:
+        if row['video_id'] not in seen and watched_eligible_job(row):
+            candidates.append(row)
+            seen.add(row['video_id'])
+    return candidates
+
+
+@app.post('/api/youtube/watched-all')
+def watched_bulk_submit():
+    if (request.get_json(silent=True) or {}).get('confirm') is not True:
+        return jsonify(ok=False,error='Confirm marking your downloaded YouTube videos as watched.'),400
+    state,message = check_cookie_session(YOUTUBE_COOKIE_PATH)
+    record_watched_session(state,message)
+    if state != 'active':
+        log_activity('youtube_watched','Bulk watched request blocked',message,'warning')
+        return jsonify(ok=False,error=message),400
+    candidates = watched_bulk_candidates()
+    count = 0
+    with db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        for job in candidates:
+            existing = conn.execute("SELECT 1 FROM youtube_watched_requests WHERE video_id=? AND status IN ('queued','running','sent')",(job['video_id'],)).fetchone()
+            if existing:
+                continue
+            conn.execute("INSERT INTO youtube_watched_requests(job_id,video_id,origin,created_at) VALUES(?,?,'bulk',?)",(job['job_id'],job['video_id'],now_iso()))
+            count += 1
+    log_activity('youtube_watched','Bulk watched requests queued',f'{count} downloaded YouTube video(s) queued. Cookie sessions are checked before every request.','info')
+    return jsonify(ok=True,message=f'{count} video(s) queued. Leave YTSD running. This is a one-time batch, not an automatic setting.')
+
+
+@app.get('/api/youtube/watched-emby-users')
+def watched_emby_users():
+    try:
+        users = emby_api_request('GET','Users',timeout=15).json()
+        return jsonify(ok=True,users=[{'id':str(u['Id']),'name':u.get('Name') or 'Emby user'} for u in users])
+    except Exception:
+        return jsonify(ok=False,error='Unable to load Emby users. Check the server URL and API key in Settings > Emby.'),400
+
+
+def emby_played_youtube_ids(user_id):
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',user_id):
+        raise ValueError('Choose an Emby user first.')
+    played = set()
+    started = time.monotonic()
+    offset = 0
+    while True:
+        if time.monotonic()-started > 60:
+            raise ValueError('Emby lookup timed out. No watched requests were queued. Try again.')
+        data = emby_api_request('GET',f'Users/{user_id}/Items',params={
+            'Recursive':'true','IsPlayed':'true','IsFolder':'false','MediaTypes':'Video',
+            'Fields':'Path,ProviderIds','EnableUserData':'true','EnableImages':'false',
+            'StartIndex':offset,'Limit':500,'SortBy':'SortName','SortOrder':'Ascending'},timeout=15).json()
+        items = data.get('Items') or []
+        for item in items:
+            if (item.get('UserData') or {}).get('Played') is not True:
+                continue
+            for key,value in (item.get('ProviderIds') or {}).items():
+                if key.casefold() == 'youtube' and re.fullmatch(r'[A-Za-z0-9_-]{11}',str(value)):
+                    played.add(str(value))
+            # Default YTSD filenames carry a stable YouTube ID. Never match by title.
+            match = re.search(r'\[([A-Za-z0-9_-]{11})\](?:\.[^.]+)?$',_path_basename(item.get('Path')))
+            if match:
+                played.add(match.group(1))
+        offset += len(items)
+        if not items or offset >= int(data.get('TotalRecordCount',offset)):
+            return played
+
+
+def queue_emby_watched_candidates(candidates):
+    count=0
+    with db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        for job in candidates:
+            if conn.execute("SELECT 1 FROM youtube_watched_requests WHERE video_id=? AND status IN ('queued','running','sent')",(job['video_id'],)).fetchone():
+                continue
+            conn.execute("INSERT INTO youtube_watched_requests(job_id,video_id,origin,created_at) VALUES(?,?,'emby',?)",(job['job_id'],job['video_id'],now_iso()))
+            count+=1
+    return count
+
+
+@app.post('/api/youtube/watched-emby')
+def watched_emby_match():
+    payload=request.get_json(silent=True) or {}
+    try:
+        played=emby_played_youtube_ids(str(payload.get('user_id') or ''))
+        job_id=str(payload.get('job_id') or '')
+        available=watched_bulk_candidates()
+        candidates=[j for j in available if j['video_id'] in played]
+        if job_id:
+            selected=watched_download_job(job_id)
+            candidates=[selected] if watched_eligible_job(selected) and selected['video_id'] in played and selected['video_id'] in {j['video_id'] for j in available} else []
+        if payload.get('confirm') is not True:
+            return jsonify(ok=True,count=len(candidates),message=f'{len(candidates)} downloaded video(s) match this Emby user’s played status and have not already been queued or sent.')
+        state,message=check_cookie_session(YOUTUBE_COOKIE_PATH)
+        record_watched_session(state,message)
+        if state!='active':
+            log_activity('youtube_watched','Emby watched matching blocked',message,'warning')
+            return jsonify(ok=False,error=message),400
+        count=queue_emby_watched_candidates(candidates)
+        log_activity('youtube_watched','Emby played videos queued',f'{count} downloaded video(s) queued from the selected Emby user’s played status.','info')
+        return jsonify(ok=True,message=f'{count} Emby-played video(s) queued for YouTube. Unplayed videos remain unchanged.')
+    except Exception:
+        message='Unable to match Emby played videos. Check the Emby connection and selected user. No new watched requests were queued.'
+        log_activity('youtube_watched','Emby watched matching failed',message,'warning')
+        return jsonify(ok=False,error=message),400
+
+
+@app.post('/api/youtube/watched-all/cancel')
+def watched_bulk_cancel():
+    with db() as conn:
+        count=conn.execute("UPDATE youtube_watched_requests SET status='cancelled',message='Bulk request cancelled.',finished_at=? WHERE origin IN ('bulk','emby') AND status='queued'",(now_iso(),)).rowcount
+    log_activity('youtube_watched','Bulk watched requests cancelled',f'{count} waiting request(s) cancelled. A running request will finish.','info')
+    return jsonify(ok=True,message=f'{count} waiting bulk request(s) cancelled. A running request will finish.')
+
+
+@app.post('/api/youtube/watched-session')
+def watched_session_check():
+    state,message = check_cookie_session(YOUTUBE_COOKIE_PATH)
+    record_watched_session(state,message)
+    if state != 'active':
+        log_activity('youtube_watched','YouTube cookie session needs attention',message,'warning')
+    return jsonify(ok=True,session=watched_session_status())
 
 
 @app.get('/api/youtube/watched-test')
@@ -16314,8 +16473,11 @@ def watched_test_status():
     with db() as conn:
         jobs = [dict(row) for row in conn.execute("SELECT * FROM downloads WHERE status='completed' ORDER BY finished_at DESC LIMIT 500")]
         requests_list = [dict(row) for row in conn.execute("SELECT r.*,d.title FROM youtube_watched_requests r LEFT JOIN downloads d ON d.job_id=r.job_id ORDER BY r.id DESC LIMIT 20")]
-    return jsonify(ok=True,enabled=setting_bool('youtube_mark_watched_after_download',False),
-        cookies_ready=bool(_v3_cookie_status().get('valid')),
+    with db() as conn:
+        counts = {r['status']:r['total'] for r in conn.execute('SELECT status,COUNT(*) AS total FROM youtube_watched_requests GROUP BY status')}
+    return jsonify(ok=True,counts=counts,bulk_count=len(watched_bulk_candidates()),enabled=setting_bool('youtube_mark_watched_after_download',False),
+        cookies_ready=cookie_session_file_status(YOUTUBE_COOKIE_PATH)[0]=='unchecked',
+        session=watched_session_status(),
         videos=[{'job_id':j['job_id'],'title':j['title'],'channel_title':j.get('channel_title') or ''} for j in jobs if watched_eligible_job(j)],requests=requests_list)
 
 
@@ -16337,6 +16499,12 @@ def watched_test_setting():
     enabled = payload['enabled']
     if enabled and not _v3_cookie_status().get('valid'):
         return jsonify(ok=False,error='Upload signed-in YouTube cookies before enabling this option.'),400
+    if enabled:
+        state,message = check_cookie_session(YOUTUBE_COOKIE_PATH)
+        record_watched_session(state,message)
+        if state != 'active':
+            log_activity('youtube_watched','YouTube cookie session needs attention',message,'warning')
+            return jsonify(ok=False,error=message),400
     set_setting('youtube_mark_watched_after_download','1' if enabled else '0')
     if not enabled:
         with db() as conn:
@@ -21068,10 +21236,6 @@ def repair_one_time_metadata():
     flash('One-time metadata repair started. Saved source details and Emby refresh results appear in Diagnostics > Activity.', 'success')
     return redirect(url_for('index'))
 
-
-from tv_api import install_tv_routes
-install_tv_routes(app, globals())
-install_webos_routes(app, globals())
 
 init_db()
 init_v3_db()
