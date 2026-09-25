@@ -26,7 +26,7 @@ jobs:
         run: pip install -r app/requirements.txt
 
       - name: Compile Python
-        run: python -m py_compile app/app.py app/downloader_auth.py app/downloader_media.py app/publication_metadata.py app/source_metadata.py app/upload_guide.py app/guide_forecasts.py app/manage_user.py app/tv_api.py
+        run: python -m py_compile app/app.py app/downloader_auth.py app/downloader_media.py app/publication_metadata.py app/source_metadata.py app/upload_guide.py app/guide_forecasts.py app/manage_user.py app/tv_api.py app/webos_api.py app/watched_status.py
 
       - name: Import application with temporary V3 storage
         env:
@@ -38,7 +38,7 @@ jobs:
           mkdir -p "$DATA_DIR" "$DOWNLOAD_ROOT"
           PYTHONPATH=app python - <<'PY'
           import app
-          assert app.VERSION == "3.0.17"
+          assert app.VERSION == "3.0.18"
           assert app.YOUTUBE_COOKIE_PATH.name == "youtube-cookies.txt"
           assert app.subscription_download_compatibility_profile() == "emby_tv"
           profile = app._v3_profile_ydl_options("1080p")
@@ -46,6 +46,8 @@ jobs:
           assert "mp4a" in profile["format"]
           assert profile["merge_output_format"] == "mp4"
           assert callable(app.ensure_download_emby_compatibility)
+          assert callable(app.automatic_watched_request)
+          assert "webos_session" in app.app.view_functions
           print("Application import OK", app.VERSION)
           PY
 
@@ -102,15 +104,15 @@ jobs:
         run: docker build -t youtube-subscription-downloader:v3-test ./app
 
 
-      - name: Package V3.0.17 source
+      - name: Package V3.0.18 source
         run: |
-          zip -qr youtube-subscription-downloader-v3.0.17.zip . \
+          zip -qr youtube-subscription-downloader-v3.0.18.zip . \
             -x ".git/*" "*/__pycache__/*" "*.pyc" \
-            -x "youtube-subscription-downloader-v3.0.17.zip"
+            -x "youtube-subscription-downloader-v3.0.18.zip"
 
-      - name: Upload V3.0.17 source package
+      - name: Upload V3.0.18 source package
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-subscription-downloader-v3.0.17
-          path: youtube-subscription-downloader-v3.0.17.zip
+          name: youtube-subscription-downloader-v3.0.18
+          path: youtube-subscription-downloader-v3.0.18.zip
           if-no-files-found: error

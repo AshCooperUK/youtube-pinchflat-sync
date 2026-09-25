@@ -1,0 +1,83 @@
+YTSD TV for LG webOS 0.1.0 beta
+YTSD server 3.0.18
+25 September 2026
+
+Server checks
+
+136 tests passed through the same unittest discovery command used by the
+repository's GitHub validation workflow. All nine new webOS API tests passed.
+The recovered watched-status implementation passes all four test_v317 tests,
+including the three failures reported in the supplied GitHub screenshot.
+
+Checks cover browser-authenticated and CSRF-protected pairing, one-time polling
+secrets, pairing expiry and rate limits, hashed device credentials, separation
+from website cookies, prevention of token access to existing admin routes,
+account-scoped favourites, completed-file filtering, local-origin CORS,
+per-file signed grants, range/HEAD/416 responses, SRT-to-WebVTT conversion,
+local artwork and access revocation after sign-out/account changes.
+
+All Python modules and Jinja templates parse. The restored dashboard contains
+no duplicate literal HTML IDs. The v3.0.18 workflow checks the restored watched
+function and webOS route during import.
+
+Client checks
+
+Six core tests passed: origin validation, media URL isolation, account/server
+history separation, watched/resume handling, authenticated PIN encryption,
+wrong-PIN/tamper rejection, and date/duration labels.
+
+Both packaged JavaScript files pass an ECMAScript 5 syntax check. The manifest
+uses the required three-part package version and includes 80px and 130px icons.
+The official @webos-tools/cli 3.2.6 creates and validates the installable IPK.
+
+Eleven integration checks passed in desktop Chromium against a real temporary
+YTSD server. The app ran directly from its packaged file-scheme index.html.
+
+1. Explicit local HTTP consent.
+2. Browser-approved pairing and encrypted remembered sign-in.
+3. Directional navigation, all six sections and pagination through 65 videos.
+4. Channel episode navigation and Back restoring channel selection.
+5. Favourites and empty Continue Watching.
+6. Native HTML video playback, seeking, subtitle selection, resume and selection
+   restoration after opening the subtitle/audio controls.
+7. Wrong-PIN rejection and encrypted connection restoration after page relaunch.
+8. Remote-friendly unavailable-server screen and Retry.
+9. Expired sessions returning to pairing.
+10. Sign-out removing the saved connection and server access.
+11. No uncaught browser JavaScript errors.
+
+Integration playback used a generated 90-second WebM VP8/Vorbis file. The headless
+Chromium build could not decode the H.264/AAC fixture. Its unsupported-file error
+screen worked, but H.264/AAC decoding is not verified by these desktop checks.
+Subtitle selection used a WebVTT sidecar. The audio dialogue opened correctly,
+but this engine exposed no alternate audio tracks to validate switching.
+The Home, pairing, Settings and player-error layouts received visual inspection
+at 1920x1080. No real account credentials or production media entered the tests.
+
+Physical LG checks still needed
+
+Developer Mode installation, app launcher appearance and the Windows installer
+against a real television. The PowerShell launcher was prepared but could not
+run on Windows in this Linux build environment.
+
+LG remote/CEC keys, Magic Remote pointer, the native on-screen keyboard, Back,
+app exit, sleep/wake and app lifecycle behaviour.
+
+Hardware H.264/AAC, HEVC, VP9, 4K/HDR and surround sound through the user's actual
+equipment. Embedded subtitle exposure and alternate audio switching vary by TV.
+ASS/SSA sidecar rendering is outside this beta's supported formats.
+
+Local NAS and remote HTTPS playback, trusted certificates on older webOS versions,
+long-duration streams, seeking near the end, disconnections and PIN storage.
+
+No physical LG TV or production NAS was accessed. No GitHub push, image publish
+or deployment took place. No real YouTube watched request was sent.
+
+Compatibility and limits
+
+The code targets webOS TV 4.0 and later. The exact LG model has not yet been
+provided. ES5 syntax and supported platform APIs guide compatibility, but are
+not equivalent to an installation/decoding test on every LG generation.
+Progress remains local to the television. No transcoding or media downloads
+occur on the TV. Developer Mode session expiry removes sideloaded apps after
+a subsequent restart. Renew the session through LG's EXTEND control.

@@ -19,7 +19,7 @@ class TvApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json['api_version'], 1)
         self.assertEqual(response.json['user_id'], '1')
-        self.assertEqual(response.json['server_version'], '3.0.17')
+        self.assertEqual(response.json['server_version'], app.VERSION)
         self.assertEqual(response.json['csrf_token'], 'test-token')
         self.assertEqual(response.headers['Cache-Control'], 'private, no-store')
         self.assertEqual(self.client.get('/api/tv/library').status_code, 200)

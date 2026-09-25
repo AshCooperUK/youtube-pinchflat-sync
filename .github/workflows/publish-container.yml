@@ -46,8 +46,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ steps.image.outputs.name }}:latest
-            ${{ steps.image.outputs.name }}:3.0.17
+            ${{ steps.image.outputs.name }}:3.0.18
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.title=YouTube Subscription Downloader
-            org.opencontainers.image.version=3.0.17
+            org.opencontainers.image.version=3.0.18
