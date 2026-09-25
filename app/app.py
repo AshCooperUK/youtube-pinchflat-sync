@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 import qrcode
 import requests
 import yt_dlp
+from watched_status import send_watched_request
 from PIL import Image, ImageOps
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -54,7 +55,7 @@ from zoneinfo import ZoneInfo
 from source_metadata import normalise_source_info, is_external_info, is_series_episode, metadata_json, media_details
 from upload_guide import UploadGuide, init_guide_db
 
-VERSION = "3.0.16"
+VERSION = "3.0.17-beta.1"
 
 channel_files_lock = threading.RLock()
 channel_metadata_locks = {}
@@ -996,6 +997,10 @@ def init_db():
 def init_v3_db():
     """Upgrade the existing V2 database in place for the native V3 downloader."""
     with db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS youtube_watched_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, video_id TEXT NOT NULL,
+            origin TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', message TEXT,
+            created_at TEXT NOT NULL, finished_at TEXT)""")
         ensure_column(conn, "downloads", "channel_id", "TEXT")
         ensure_column(conn, "downloads", "published_at", "TEXT")
         ensure_column(conn, "downloads", "profile_id", "TEXT")
@@ -7061,6 +7066,8 @@ def run_download_job(job_id):
                 resolved_channel_id or None,
                 job_id=job_id,
             )
+
+        automatic_watched_request(job_id)
 
         # Do not let a slow filesystem inventory delay the Emby notification.
         invalidate_video_inventory()
@@ -14671,6 +14678,7 @@ ADMIN_ONLY_GET_ENDPOINTS = {
     "google_callback",
     "pinchflat_logs_api",
     "activity_api",
+    "watched_test_status",
 }
 
 
@@ -16221,6 +16229,114 @@ def downloader_library_import():
     except Exception as exc:
         flash(f"Library import failed: {exc}", "error")
     return redirect(url_for("index") + "#pinchflat")
+
+
+def watched_download_job(job_id):
+    with db() as conn:
+        row = conn.execute('SELECT * FROM downloads WHERE job_id=?',(job_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def watched_eligible_job(job):
+    if not job or job.get('status') != 'completed':
+        return False
+    video_id = str(job.get('video_id') or '')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id):
+        return False
+    host = (urlparse(job.get('youtube_url') or '').hostname or '').lower()
+    return host in ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'music.youtube.com') and bool(job.get('output_path')) and is_finished_media_file(Path(job['output_path']))
+
+
+def enqueue_watched_request(job_id, origin='manual'):
+    job = watched_download_job(job_id)
+    if not watched_eligible_job(job):
+        raise ValueError('Choose a completed YouTube download with a video file still on disk.')
+    if not _v3_cookie_status().get('valid'):
+        raise ValueError('Upload valid signed-in YouTube cookies in Settings > Downloader first.')
+    with db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        existing = conn.execute("SELECT id FROM youtube_watched_requests WHERE job_id=? AND (status IN ('queued','running') OR (?='automatic' AND origin='automatic')) ORDER BY id DESC LIMIT 1", (job_id,origin)).fetchone()
+        if existing:
+            return existing['id']
+        count = conn.execute("SELECT COUNT(*) FROM youtube_watched_requests WHERE status IN ('queued','running')").fetchone()[0]
+        if count >= 100:
+            raise ValueError('Watched request queue is full. Wait for the existing requests to finish.')
+        cursor = conn.execute("INSERT INTO youtube_watched_requests(job_id,video_id,origin,created_at) VALUES(?,?,?,?)", (job_id,job['video_id'],origin,now_iso()))
+        request_id = cursor.lastrowid
+    log_activity('youtube_watched','YouTube watched request queued','Experimental request queued. YouTube completion is unverified.','info',job_id=job_id)
+    return request_id
+
+
+def process_watched_request():
+    with db() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute("SELECT * FROM youtube_watched_requests WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+        if not row:
+            return
+        row = dict(row)
+        conn.execute("UPDATE youtube_watched_requests SET status='running',message='Sending request. Completion is unverified.' WHERE id=?", (row['id'],))
+    try:
+        if not watched_eligible_job(watched_download_job(row['job_id'])):
+            status,message = 'failed','The completed YouTube video is no longer available on disk.'
+        elif not _v3_cookie_status().get('valid'):
+            status,message = 'failed','Signed-in YouTube cookies are missing or invalid.'
+        else:
+            status,message = send_watched_request(row['video_id'],YOUTUBE_COOKIE_PATH)
+    except Exception:
+        status,message = 'failed','Watched request failed. YouTube completion is unverified. No automatic retry.'
+    with db() as conn:
+        conn.execute('UPDATE youtube_watched_requests SET status=?,message=?,finished_at=? WHERE id=?', (status,message,now_iso(),row['id']))
+    log_activity('youtube_watched','YouTube watched request: '+status,message,'info' if status=='sent' else 'warning',job_id=row['job_id'])
+
+
+def automatic_watched_request(job_id):
+    try:
+        if not setting_bool('youtube_mark_watched_after_download',False):
+            return
+        if not watched_eligible_job(watched_download_job(job_id)):
+            return
+        enqueue_watched_request(job_id,'automatic')
+    except Exception:
+        try:
+            log_activity('youtube_watched','YouTube watched request not queued','Check signed-in cookies and the watched request queue in Diagnostics. The download remains completed.','warning',job_id=job_id)
+        except Exception:
+            app.logger.exception('Could not record watched queue failure')
+
+
+@app.get('/api/youtube/watched-test')
+def watched_test_status():
+    with db() as conn:
+        jobs = [dict(row) for row in conn.execute("SELECT * FROM downloads WHERE status='completed' ORDER BY finished_at DESC LIMIT 500")]
+        requests_list = [dict(row) for row in conn.execute("SELECT r.*,d.title FROM youtube_watched_requests r LEFT JOIN downloads d ON d.job_id=r.job_id ORDER BY r.id DESC LIMIT 20")]
+    return jsonify(ok=True,enabled=setting_bool('youtube_mark_watched_after_download',False),
+        cookies_ready=bool(_v3_cookie_status().get('valid')),
+        videos=[{'job_id':j['job_id'],'title':j['title'],'channel_title':j.get('channel_title') or ''} for j in jobs if watched_eligible_job(j)],requests=requests_list)
+
+
+@app.post('/api/youtube/watched-test')
+def watched_test_submit():
+    payload = request.get_json(silent=True) or {}
+    try:
+        request_id = enqueue_watched_request(str(payload.get('job_id') or ''))
+        return jsonify(ok=True,request_id=request_id,message='Queued. Check the result below, then check YouTube using the account from your saved cookies.')
+    except ValueError as exc:
+        return jsonify(ok=False,error=str(exc)),400
+
+
+@app.post('/api/youtube/watched-setting')
+def watched_test_setting():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload.get('enabled'),bool):
+        return jsonify(ok=False,error='Enabled must be true or false.'),400
+    enabled = payload['enabled']
+    if enabled and not _v3_cookie_status().get('valid'):
+        return jsonify(ok=False,error='Upload signed-in YouTube cookies before enabling this option.'),400
+    set_setting('youtube_mark_watched_after_download','1' if enabled else '0')
+    if not enabled:
+        with db() as conn:
+            conn.execute("UPDATE youtube_watched_requests SET status='cancelled',message='Automatic option switched off.',finished_at=? WHERE origin='automatic' AND status='queued'",(now_iso(),))
+    log_activity('settings','YouTube watched automation','Enabled for future completed downloads.' if enabled else 'Disabled. Pending automatic requests cancelled. A running request will finish.','info')
+    return jsonify(ok=True,enabled=enabled)
 
 
 @app.post("/settings/downloader/auth/upload")
@@ -21023,4 +21139,8 @@ scheduler.add_job(
 scheduler.add_job(guide.tick, "interval", seconds=30, id="upload-guide-metadata",
                   max_instances=1, coalesce=True)
 threading.Thread(target=guide.tick, name="upload-guide-startup", daemon=True).start()
+# Never replay an interrupted external account mutation after a restart.
+with db() as conn:
+    conn.execute("UPDATE youtube_watched_requests SET status='unverified',message='Interrupted by restart. Check YouTube before retrying.',finished_at=? WHERE status='running'",(now_iso(),))
+scheduler.add_job(process_watched_request, 'interval', seconds=5, id='youtube-watched-requests', max_instances=1, coalesce=True)
 scheduler.start()
