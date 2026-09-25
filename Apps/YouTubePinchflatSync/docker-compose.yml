@@ -1,105 +1,17 @@
-name: youtube-subscription-downloader
-
+name: ytsd
 services:
-  youtube-subscription-downloader:
-    image: ghcr.io/ashcooperuk/youtube-subscription-downloader:3.0.17-beta.1
-    container_name: youtube-subscription-downloader
+  ytsd:
+    image: ytsd:3.0.17
+    build:
+      context: ../../app
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 4GB
-          cpus: "4.00"
-        reservations:
-          memory: 256MB
-          cpus: "0.00"
     environment:
       TZ: Europe/London
       DATA_DIR: /data
       DOWNLOAD_ROOT: /downloads
-      APP_URL: "https://youtube.ashjohn.uk"
-      GOOGLE_CLIENT_ID: ""
-      GOOGLE_CLIENT_SECRET: ""
-      GOOGLE_REDIRECT_URI: ""
-      CANONICAL_REDIRECT: "true"
-      YOUTUBE_SCOPE: https://www.googleapis.com/auth/youtube
-      SYNC_INTERVAL_MINUTES: "60"
-      INITIAL_IMPORT_CUTOFF: today
-      INITIAL_IMPORT_YEARS: "1"
-      INITIAL_IMPORT_CUSTOM_DATE: ""
-      MAX_NEW_SOURCES_PER_RUN: "0"
-      ADD_DELAY_SECONDS: "2"
-      DRY_RUN: "false"
+      APP_URL: ""
     ports:
-      - target: 8787
-        published: "8787"
-        protocol: tcp
+      - "8787:8787"
     volumes:
-      # Keep the existing V2 data directory so upgrades retain OAuth, users,
-      # favourites, settings and the local SQLite database.
-      - type: bind
-        source: /media/NVME-Storage/AppData/youtube-pinchflat-sync/data
-        target: /data
-      - type: bind
-        source: /media/Storage/Media/YouTube
-        target: /downloads
-    labels:
-      icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
-    x-casaos:
-      ports:
-        - container: "8787"
-          description:
-            en_US: YouTube Subscription Downloader web interface
-      volumes:
-        - container: /data
-          description:
-            en_US: Application database, OAuth token, users, settings and optional YouTube cookies
-        - container: /downloads
-          description:
-            en_US: Shared YouTube media library
-      envs:
-        - container: APP_URL
-          description:
-            en_US: Canonical public URL used for Google OAuth and browser access
-        - container: CANONICAL_REDIRECT
-          description:
-            en_US: Redirect the local ZimaOS tile URL to APP_URL when true
-        - container: TZ
-          description:
-            en_US: Time zone
-        - container: SYNC_INTERVAL_MINUTES
-          description:
-            en_US: Default YouTube subscription refresh and native downloader scan interval
-        - container: DRY_RUN
-          description:
-            en_US: Set true to preview subscription changes without applying downloads
-
-x-casaos:
-  # Keep the original ID/store ID for an in-place upgrade from V2.
-  id: uk.ashjohn.youtube-pinchflat-sync
-  store_app_id: youtube-pinchflat-sync
-  main: youtube-subscription-downloader
-  index: /
-  port_map: "8787"
-  scheme: http
-  icon: https://cdn.jsdelivr.net/gh/AshCooperUK/youtube-pinchflat-sync@main/Apps/YouTubePinchflatSync/icon.svg
-  title:
-    en_US: YouTube Subscription Downloader
-  tagline:
-    en_US: Download your YouTube subscriptions directly with yt-dlp.
-  description:
-    en_US: Manages YouTube subscriptions, native yt-dlp downloads, authentication, Emby integration, favourites, Discover and retention without Pinchflat.
-  author: AshCooperUK
-  developer: AshCooperUK
-  category: Media
-  architectures:
-    - amd64
-    - arm64
-  version: "3.0.17-beta.1"
-  update_at: "2026-09-20"
-  release_notes:
-    en_US: v3.0.17-beta.1 adds experimental YouTube watched-status tests and optional post-download requests.
-  website: https://github.com/AshCooperUK/youtube-pinchflat-sync
-  repo: https://github.com/AshCooperUK/youtube-pinchflat-sync
-  support: https://github.com/AshCooperUK/youtube-pinchflat-sync/issues
-  docs: https://github.com/AshCooperUK/youtube-pinchflat-sync#readme
+      - ./data:/data
+      - ./downloads:/downloads

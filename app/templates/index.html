@@ -5263,7 +5263,7 @@
           <form method="post" action="/settings/apis">
             <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
             <label>Emby Server URL
-              <input type="url" name="emby_server_url" value="{{ emby_server_url }}" placeholder="http://butane.grovefarm:8096" autocomplete="off">
+              <input type="url" name="emby_server_url" value="{{ emby_server_url }}" placeholder="http://media-server:8096" autocomplete="off">
             </label>
             <label>Emby API key
               <input type="password" name="emby_api_key" value="" placeholder="{{ 'Saved. Leave blank to keep current key' if emby_api_key_saved else 'Paste an Emby API key' }}" autocomplete="new-password">
@@ -5833,22 +5833,6 @@
             <div class="activity-item"><strong>{{ run["status"] }}</strong><div>{{ run["message"] }}</div><div class="activity-time">{{ run["started_at"] }}</div></div>
           {% else %}<div class="muted small">No sync runs recorded yet.</div>{% endfor %}
         </div>
-      </div>
-
-      <div class="setting-box" style="margin-top:14px" id="watched-test-panel">
-        <h3>YouTube watched status <span class="muted small">Experimental beta</span></h3>
-        <p class="muted small">Send a watched request for one completed download. This changes the YouTube account in your saved cookies, which might differ from your connected Google account. Check YouTube afterwards. A sent request does not confirm 100% watched progress.</p>
-        <label class="source-toggle"><input type="checkbox" role="switch" id="watched-auto" onchange="saveWatchedSetting()"><span class="toggle-track"></span><span class="source-toggle-text">Mark as watched on YouTube after successful download</span></label>
-        <p class="muted small">Off by default. Applies to future completed YouTube downloads, after media processing. No automatic retries. Turning off cancels waiting automatic requests. A running request will finish.</p>
-        <p id="watched-cookie-status" class="muted small"></p>
-        <label for="watched-video">Completed YouTube video (from the latest 500 completed downloads)</label>
-        <select id="watched-video" style="width:100%"><option value="">Choose a downloaded video</option></select>
-        <div class="actions" style="margin-top:12px">
-          <button class="btn secondary" id="watched-send" type="button" onclick="submitWatchedTest()">Send test request</button>
-          <button class="btn ghost" type="button" onclick="loadWatchedTest()">Refresh results</button>
-        </div>
-        <p id="watched-result" role="status" aria-live="polite" class="muted small"></p>
-        <div id="watched-requests" aria-live="polite"></div>
       </div>
 
       <div class="setting-box" style="margin-top:14px">
@@ -10647,59 +10631,6 @@ function changeActivityPage(direction) {
   activityPage = Math.max(0, activityPage + direction);
   loadActivity(true);
 }
-let watchedLoading = false;
-async function watchedApi(path, payload) {
-  const response = await fetch(path, {method:payload === undefined ? 'GET' : 'POST',
-    headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name="csrf-token"]').content},
-    body:payload === undefined ? undefined : JSON.stringify(payload),cache:'no-store'});
-  if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Sign in again to use this administrator tool.');
-  const data = await response.json();
-  if (!response.ok || !data.ok) throw new Error(data.error || 'Request failed.');
-  return data;
-}
-async function loadWatchedTest() {
-  if (watchedLoading) return;
-  watchedLoading = true;
-  try {
-    const data = await watchedApi('/api/youtube/watched-test');
-    const select = document.getElementById('watched-video'),selected = select.value;
-    select.replaceChildren(new Option('Choose a downloaded video',''));
-    for (const video of data.videos) select.add(new Option(`${video.channel_title} · ${video.title}`,video.job_id));
-    select.value = selected;
-    if (!document.getElementById('watched-auto').disabled) document.getElementById('watched-auto').checked = data.enabled;
-    document.getElementById('watched-cookie-status').textContent = data.cookies_ready ? 'Saved cookie file available. Use cookies from the account whose history you want to update.' : 'Upload signed-in YouTube cookies in Settings > Downloader before testing.';
-    document.getElementById('watched-send').disabled = !data.cookies_ready || !data.videos.length;
-    const list = document.getElementById('watched-requests');list.replaceChildren();
-    for (const item of data.requests) {
-      const row=document.createElement('div');row.className='activity-item';
-      const title=document.createElement('strong');title.textContent=`${item.title || item.video_id} · ${item.status === 'sent' ? 'Request sent, completion unverified' : item.status}`;
-      const detail=document.createElement('div');detail.textContent=item.message || 'Waiting to send.';
-      const time=document.createElement('div');time.className='muted small';time.textContent=`${item.origin} · ${item.finished_at || item.created_at}`;
-      row.append(title,detail,time);list.append(row);
-    }
-  } catch(error) {document.getElementById('watched-result').textContent=error.message;}
-  finally {watchedLoading=false;}
-}
-async function submitWatchedTest() {
-  const button=document.getElementById('watched-send');button.disabled=true;
-  try {
-    const data=await watchedApi('/api/youtube/watched-test',{job_id:document.getElementById('watched-video').value});
-    document.getElementById('watched-result').textContent=data.message;
-  } catch(error) {document.getElementById('watched-result').textContent=error.message;}
-  finally {button.disabled=false;await loadWatchedTest();}
-}
-async function saveWatchedSetting() {
-  const toggle=document.getElementById('watched-auto');toggle.disabled=true;
-  try {
-    await watchedApi('/api/youtube/watched-setting',{enabled:toggle.checked});
-    document.getElementById('watched-result').textContent=toggle.checked ? 'Enabled for future successful YouTube downloads.' : 'Disabled. Waiting automatic requests cancelled. A running request will finish.';
-  } catch(error) {toggle.checked=!toggle.checked;document.getElementById('watched-result').textContent=error.message;}
-  finally {toggle.disabled=false;}
-}
-setInterval(()=>{
-  if (document.querySelector('[data-panel="diagnostics"]')?.classList.contains('active') && document.getElementById('settings-dialog')?.open) loadWatchedTest();
-},5000);
-
 async function loadActivity(force=false) {
   const target = document.getElementById("activity-list");
   const button = document.getElementById("activity-refresh");
@@ -11393,7 +11324,6 @@ function showTab(name) {
     loadRetentionRunStatus();
   }
   if (name === "diagnostics") {
-    loadWatchedTest();
     loadDownloaderLogs();
     loadActivity();
   }
