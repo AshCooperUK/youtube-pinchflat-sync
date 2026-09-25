@@ -2,7 +2,9 @@
 
 A self-hosted Docker app for managing YouTube subscriptions, downloading with yt-dlp and organising a media library for Emby.
 
-Version: **3.0.16** · [Latest changes](RELEASE-v3.0.16.md) · [Full changelog](CHANGELOG.md)
+Version: **3.0.17-beta.1** · [Latest changes](RELEASE-v3.0.17-beta.1.md) · [Full changelog](CHANGELOG.md)
+
+For this beta, follow [the beta installation and test guide](RELEASE-v3.0.17-beta.1.md). The Docker image uses the `3.0.17-beta.1` tag, not `latest`.
 
 ## Install: set up your Cloudflare domain first
 
@@ -147,7 +149,7 @@ V3 performs scanning, queueing, yt-dlp downloads, FFmpeg processing, metadata, r
 
 For a V2 upgrade, preserve the existing host directory mounted at `/data` and the existing media mount. Remove the obsolete Pinchflat configuration and Docker-socket mounts. Back up the application data and media before a major upgrade. Rescan existing media to populate native download history without downloading those videos again.
 
-For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.16 ZIP targets v3.0.15. It contains the same updated files as the full-source ZIP.
+For ZIP upgrades, overlay the release files onto the repository, retain your deployment-specific YAML values, upload to GitHub and wait for its container workflow. Then pull and recreate the app container. The changed-files v3.0.17-beta.1 ZIP targets v3.0.16. It contains the same updated files as the full-source ZIP.
 
 ## Development
 
@@ -172,6 +174,15 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 <details>
 <summary>V3: native downloader and current releases</summary>
 
+### v3.0.17-beta.1
+
+- Add an administrator-only YouTube watched-status test under Settings > Diagnostics, using an existing completed YouTube download and the saved cookie account.
+- Add an automatic post-download option, switched off by default. Queue requests only after successful media processing. Imports and non-YouTube downloads do not trigger requests.
+- Persist requests separately from downloads, with duplicate suppression, a 90-second timeout and no automatic retries. Disabling automation cancels waiting automatic requests. Interrupted requests remain unverified after restart.
+- Report sent, failed or unverified request results without claiming YouTube stored 100% watched progress. Preserve download success when watched requests fail.
+- Use a private temporary cookie copy and keep raw extractor output out of Activity. Retain video/channel links in Activity.
+- Publish only the 3.0.17-beta.1 container tag. The beta workflow does not replace latest. Supplied deployment YAML selects the beta tag.
+
 ### v3.0.16
 
 - Remove the dashboard Errors tile and its display/order settings, including saved settings from earlier versions.
@@ -179,6 +190,7 @@ The full documented history is below and in [CHANGELOG.md](CHANGELOG.md). Older 
 - Add paging for older errors and activity. Preserve video thumbnails and channel/player popup links where identifiers are available.
 - Change + Add YouTube channel to Add to YTSD. Adding a channel enables download monitoring without subscribing the connected YouTube account. Existing active channels retain their download preference.
 - Keep local channels through YouTube subscription refreshes. The separate Subscribe control still changes the YouTube account explicitly.
+
 ### v3.0.15
 
 - Add a top-centre Subscribe/Subscribed control beside the existing channel-image actions across subscription rows, channel/player popups and shared channel widgets.
